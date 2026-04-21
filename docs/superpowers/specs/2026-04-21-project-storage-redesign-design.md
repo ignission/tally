@@ -15,7 +15,7 @@
 ## 目標
 
 1. プロジェクトをリポジトリから独立した第一級の存在として扱う
-2. 複数のコードベースを 1 プロジェクトから参照できる
+2. 0 件以上のコードベースを 1 プロジェクトから参照できる（未紐付けのアイデアから多リポジトリ横断プロジェクトまでを同一モデルで扱う）
 3. 保存先をユーザーが任意に選べる（デフォルトは `~/.local/share/tally/projects/`）
 4. 発見ロジックを明示レジストリに統一し、暗黙スキャンを廃止する
 5. フォルダ選択ダイアログ（バックエンド駆動）でプロジェクト作成・インポートを行う
@@ -29,7 +29,7 @@
 **5 本の柱**:
 
 1. プロジェクト = ディレクトリ（`.tally/` 命名なし）
-2. 場所は自由（デフォルト `~/.local/share/tally/projects/<id>/`）
+2. 場所は自由（デフォルト `~/.local/share/tally/projects/<slug>/` を提案、ユーザーが最終決定）
 3. レジストリで管理（`~/.local/share/tally/registry.yaml`）
 4. 複数コードベース（`codebases[]`、code ノードは `codebaseId` 参照）
 5. フォルダピッカー必須（バックエンド駆動ブラウザ）
@@ -43,7 +43,7 @@ interface Project {
   id: string;                  // nanoid (proj_xxxxx)
   name: string;
   description?: string;
-  codebases: Codebase[];       // 最低 1 件必須、空配列不可
+  codebases: Codebase[];       // 0 件以上（初期検討用に空配列を許容）
   createdAt: string;
   updatedAt: string;
 }
@@ -56,10 +56,16 @@ interface Codebase {
 ```
 
 設計判断:
-- `codebasePath: string` は完全削除。単一ケースも `codebases: [{...}]` で表現
+- `codebasePath: string` / `additionalCodebasePaths: string[]` は完全削除し、`codebases[]` に一元化
+- `codebases` は空配列を許容する。これにより「まだリポジトリを決めていないアイデア段階」のプロジェクトを自然に扱える
+- code ノードが存在するときは最低 1 件の codebase が必要（整合性制約）。code ノードが無ければ codebases は 0 件でよい
 - `primary` フラグは持たない。必要なら配列順で表現（先頭が主）
 - `Codebase.id` は code ノードからの参照キー。人間可読必須
 - パスは絶対パス必須（マシン間持ち回りは別スコープ）
+
+codebases 0 件時の UI 挙動:
+- code ノード追加系 UI（コード参照ボタン、AI の「関連コード探索」等）はすべて無効化し、ツールチップで「コードベースを追加してください」と表示
+- プロジェクト設定から後からいつでも codebase を追加できる
 
 ### CodeNode 型
 
@@ -78,10 +84,11 @@ interface CodeNode {
 
 ### バリデーション規約
 
-- `codebases` が空 → プロジェクト作成拒否
-- `codebases[].id` に重複 → 作成拒否
+- `codebases` は空配列可（`code` ノードが存在する場合のみ最低 1 件必要）
+- `codebases[].id` に重複 → プロジェクト更新拒否
 - `codebases[].id` は `/^[a-z][a-z0-9-]{0,31}$/` に制限（ファイルシステム安全な short ID）
-- code ノード保存時、`codebaseId` がプロジェクト内に存在するか検証
+- code ノード保存時、`codebaseId` がプロジェクト内に存在するか検証（失敗時はエラー、code ノードは作成しない）
+- 既存 code ノードを持つプロジェクトから codebase を削除しようとした場合、その codebase を参照する code ノードがあるなら削除拒否（あるいは明示確認）
 
 ### project.yaml 例
 
@@ -120,12 +127,12 @@ title: 招待ハンドラ
 $XDG_DATA_HOME/tally/              (省略時 ~/.local/share/tally/)
 ├── registry.yaml                  # 既知プロジェクト一覧
 └── projects/                      # デフォルト作成先（固定ではない）
-    ├── proj_abc123/
-    │   ├── project.yaml
+    ├── taskflow-invite/           # ディレクトリ名はユーザーが決める（slug 提案）
+    │   ├── project.yaml           # id は中身で管理（例: proj_abc123）
     │   ├── nodes/
     │   ├── edges/
     │   └── chats/
-    └── proj_xyz789/ ...
+    └── personal-thoughts/ ...
 ```
 
 `projects/` 配下はデフォルトの置き場。ユーザーが別パスを選べばそちらに作られ、`projects/` には作られない。
@@ -136,12 +143,14 @@ $XDG_DATA_HOME/tally/              (省略時 ~/.local/share/tally/)
 version: 1
 projects:
   - id: proj_abc123
-    path: /Users/you/.local/share/tally/projects/proj_abc123
+    path: /Users/you/.local/share/tally/projects/taskflow-invite
     lastOpenedAt: 2026-04-21T10:00:00Z
   - id: proj_xyz789
-    path: /Users/you/dev/shared-specs/taskflow-invite
+    path: /Users/you/dev/shared-specs/auth-migration
     lastOpenedAt: 2026-04-20T15:00:00Z
 ```
+
+ディレクトリ名とプロジェクト id は独立していることに注意（ユーザーは dir 名を自由に決められる）。
 
 - `id` は project.yaml の id と必ず一致
 - `path` は絶対パス（プロジェクトディレクトリそのもの、`project.yaml` の親）
@@ -224,6 +233,12 @@ interface FsEntry {
 - `~` / 環境変数展開はサーバ側で行わない（クライアントが絶対パスを明示）
 - エラーは HTTP 400/403/404 を使い分け（権限・不在・不正パス）
 
+バリデーション（path パラメータ）:
+- 絶対パスであること（`path.isAbsolute()` チェック）。相対パスは 400
+- `path.resolve()` 後に再度絶対パス性と正規化（`..` 解決後のパス）を検証
+- 正規化後パスと受信パスが乖離する（= `..` 経由で上位に抜けようとした）場合、受信パスをそのまま受理した結果ではなく正規化後のパスで処理する（path traversal 対策）
+- 明示的にアクセス拒否するディレクトリは設けない（ローカル dev tool 前提のため）が、`/proc` `/sys` など読み取り困難な領域は 200 で空 entries に丸める
+
 セキュリティ:
 - Tally は localhost 限定 dev tool 前提。API は任意 `path` を読むため `127.0.0.1` バインド・CORS 無効を維持
 - symlink は辿る（ユーザー期待値）。`/proc`, `/sys` などシステムパスは深入りしない（200 で空 entries）
@@ -235,7 +250,9 @@ POST /api/fs/mkdir
 
 - `path/name` で安全に mkdir
 - 既存時は 409
-- `name` は path separator・`.`/`..` を拒否
+- `name` は path separator・`.`/`..` を拒否、空文字列も拒否
+- `path` は `GET /api/fs/ls` と同じバリデーション（絶対パス + `path.resolve` 後再検証）
+- `path.join(path, name)` 後、正規化したパスが元の `path` の配下にあることを再確認（path traversal 二重防御）
 
 ### `FolderBrowserDialog` コンポーネント
 
@@ -251,10 +268,11 @@ interface FolderBrowserDialogProps {
 }
 ```
 
-- `purpose` は表示テキスト・確定ボタンラベル・確定条件を切り替える
-  - create-project: 選択 dir をそのままプロジェクト親として確定（project dir は呼び出し側で作る）
-  - import-project: 選択 dir に `project.yaml` 必須（無ければ disabled）
+- `purpose` は表示テキスト・確定ボタンラベル・確定条件を切り替える。**全ケースで返り値は「確定した絶対パス 1 本」** という一貫した契約を持つ
+  - create-project: 選択 dir を**プロジェクトルートそのもの**として確定（空 dir 推奨、非空でも拒否しない）。呼び出し側はこのパスに直接 `project.yaml` / `nodes/` / `edges/` を書き込む
+  - import-project: 選択 dir に `project.yaml` 必須（無ければ disabled）。そのままプロジェクトルートとして登録
   - add-codebase: 選択 dir をそのまま codebase path に
+- **ディレクトリ名とプロジェクト id は独立**。id は内部識別子、ディレクトリ名は人間が好きに決める（例：`acme-taskflow-invite/`）。レジストリが両者を紐付ける
 - UI ロジックは共通
 
 ### UI レイアウト（概略）
@@ -287,12 +305,18 @@ interface FolderBrowserDialogProps {
 フィールド:
 - プロジェクト名（必須）
 - 説明（任意）
-- 保存先（既定 `<TALLY_HOME>/projects/<新規 id>/`、「フォルダを変更」で FolderBrowserDialog）
-- codebases[]（最低 1 件、「+ 追加」で FolderBrowserDialog → short id / label 入力）
+- プロジェクトルート（既定 `<TALLY_HOME>/projects/<プロジェクト名をslug化した候補>/`、「フォルダを変更」で FolderBrowserDialog）
+- codebases[]（任意、0 件可。「+ 追加」で FolderBrowserDialog → short id / label 入力）
+
+プロジェクトルートの決定ルール:
+- 作成時点で id を先行生成するのではなく、**ユーザーが確定したディレクトリそのもの** をルートとする。id はレジストリ登録時に nanoid で生成し、project.yaml に記録するだけ
+- デフォルト候補パスは名前入力に応じてリアルタイムで更新される（例：名前「TaskFlow 招待機能」→ `<TALLY_HOME>/projects/taskflow-invite/`）。slug 衝突時はサフィックスを付与
+- デフォルト候補 dir が既に存在する場合、ユーザーに警告を表示し、「別名にする」or「フォルダを変更」を促す
+- 「フォルダを変更」でユーザーが指定したパスは、**指定 dir そのものがプロジェクトルートになる**（その中にサブディレクトリを勝手に作らない）
 
 バリデーション:
 - 名前必須
-- codebases 0 件なら作成不可
+- プロジェクトルートが空ディレクトリ or 存在しない親ディレクトリのみ許可（既に project.yaml を含む場合は import を案内）
 - `codebases[].id` 重複不可
 
 ### ProjectImportDialog（新規）
@@ -314,12 +338,17 @@ interface FolderBrowserDialogProps {
 
 | パス | 理由 |
 |---|---|
-| `packages/storage/src/project-resolver.ts` | ghq/workspace scan 廃止 |
+| `packages/storage/src/project-resolver.ts` | ghq/workspace scan 廃止、registry に置換 |
 | `packages/storage/src/project-resolver.test.ts` | 上記に伴い |
+| `packages/storage/src/index.ts` の `discoverProjects` / `listWorkspaceCandidates` / `resolveProjectById` / `loadProjectById` / `ProjectHandle` / `WorkspaceCandidate` export | 旧発見モデル廃止 |
+| `packages/storage/src/index.ts` の `resolveTallyPaths` / `TallyPaths` export | `.tally/` 規約廃止（`project-dir.ts` に置換） |
+| `packages/frontend/src/app/api/workspace-candidates/route.ts` | candidates API 廃止 |
+| `packages/frontend/src/components/dialog/project-settings-dialog.tsx` + `.test.tsx` | 旧 `codebasePath` / `additionalCodebasePaths` UI。`codebases[]` ベースに刷新し新規作成 |
 | `packages/frontend/src/lib/api.ts` の `fetchWorkspaceCandidates`, `WorkspaceCandidate` | candidates モデル廃止 |
 | `NewProjectDialog` の candidates UI 一式 | 刷新 |
 | 環境変数 `TALLY_WORKSPACE` 参照箇所すべて | 廃止 |
-| `.tally/` 規約（コード・ドキュメント・examples） | プロジェクト dir 名の規約を外す |
+| `.tally/` 規約（コード・ドキュメント・examples・テストフィクスチャ） | プロジェクト dir 名の規約を外す |
+| `Project` / `ProjectMeta` の `codebasePath` / `additionalCodebasePaths` フィールド（`packages/core/src/schema.ts`）とその依存テスト | `codebases[]` に統合 |
 
 ### 新規
 
@@ -340,18 +369,24 @@ interface FolderBrowserDialogProps {
 
 | パス | 変更 |
 |---|---|
-| `packages/core` の Project / Codebase / CodeNode 型 | 刷新 |
+| `packages/core/src/schema.ts` | Project / ProjectMeta / Codebase / CodeNode 型刷新（`codebasePath`・`additionalCodebasePaths` 削除、`codebases: Codebase[]` 追加、code ノードに `codebaseId` 追加） |
+| `packages/core/src/schema.test.ts` | 上記に追従 |
 | `packages/storage/src/paths.ts` | registry 対応、`.tally/` サブディレクトリ廃止 |
-| `packages/storage/src/init-project.ts` | registry 登録追加、codebases 必須化 |
+| `packages/storage/src/init-project.ts` | registry 登録追加、codebases 0 件可 |
 | `packages/storage/src/project-store.ts` | workspaceRoot → projectDir rename、codebases 対応 |
 | `packages/frontend/src/components/dialog/new-project-dialog.tsx` | 全面刷新 |
-| `packages/frontend/src/lib/api.ts` | registry 系クライアント追加、candidates 系削除 |
+| `packages/frontend/src/lib/api.ts` | registry 系クライアント追加、candidates 系削除、project meta CRUD を codebases[] 対応 |
+| `packages/frontend/src/lib/store.ts` | `patchProjectMeta` 等を codebases[] 対応に刷新 |
+| `packages/frontend/src/app/api/projects/[id]/route.ts` | codebases[] の読み書き、旧フィールド削除 |
+| `packages/frontend/src/components/ai-actions/*` (codebase-agent-button, find-related-code-button, analyze-impact, extract-questions, graph-agent-button 等) | code 参照系 UI を codebases[] 前提に調整、codebases 0 件時は disabled |
+| AI Engine (`agent-runner.ts`, `agents/codebase-anchor.ts`, `agents/find-related-code.ts`, `agents/analyze-impact.ts` ほか) | 単一 `codebasePath` 前提を捨て、対象 codebase を引数に取るよう改修（0 件時は呼び出し側が制御） |
 | トップページ（projects 一覧） | registry 駆動 |
-| AI Engine（code 探索） | 複数 codebases 対応（詳細は別スコープ） |
-| `examples/sample-project/` | `.tally/` 廃止に伴い構造変更 |
+| `examples/sample-project/` | `.tally/` 廃止に伴い構造変更、旧フィクスチャ（taskflow-backend 参照など）を新 codebases[] モデルに書き換え |
 | CLAUDE.md | `.tally/` 言及の除去、registry ベースに更新 |
 | README.md | 起動方法・利用フロー更新 |
 | `docs/adr/0003-git-managed-yaml.md` | ステータスを Superseded に更新、新 ADR へリンク |
+
+**波及範囲の注記**: 旧 `codebasePath` / `additionalCodebasePaths` を参照するテスト・ロジックは core / storage / frontend / ai-engine 横断で 27 ファイル以上に渡る。実装時は `packages/core` の型変更を起点にコンパイルエラーを潰す方式が安全。
 
 ## テスト戦略
 
@@ -365,7 +400,7 @@ interface FolderBrowserDialogProps {
 ### packages/frontend
 
 - `folder-browser-dialog.test.tsx`: 潜る / 戻る / 新規作成 / 確定のユーザーフロー（Testing Library）
-- `new-project-dialog.test.tsx`: 名前・保存先・codebases 最低 1 件のバリデーション
+- `new-project-dialog.test.tsx`: 名前必須・プロジェクトルート空 dir 判定・codebases 0 件でも作成可のバリデーション
 - `project-import-dialog.test.tsx`: project.yaml 有無で確定ボタン活性制御
 - API ルート（fs/ls, fs/mkdir）の単体テスト: symlink, 権限エラー, 存在しないパス, path traversal 防止
 
