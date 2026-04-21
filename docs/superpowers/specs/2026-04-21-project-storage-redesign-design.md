@@ -269,7 +269,7 @@ interface FolderBrowserDialogProps {
 ```
 
 - `purpose` は表示テキスト・確定ボタンラベル・確定条件を切り替える。**全ケースで返り値は「確定した絶対パス 1 本」** という一貫した契約を持つ
-  - create-project: 選択 dir を**プロジェクトルートそのもの**として確定（空 dir 推奨、非空でも拒否しない）。呼び出し側はこのパスに直接 `project.yaml` / `nodes/` / `edges/` を書き込む
+  - create-project: 選択 dir を**プロジェクトルートそのもの**として確定。ダイアログ自身は dir の中身を制約せず返り値としてパスを返すだけ（空・非空の判定は呼び出し側 = NewProjectDialog 側で行う。後述のバリデーション参照）。呼び出し側はこのパスに直接 `project.yaml` / `nodes/` / `edges/` を書き込む
   - import-project: 選択 dir に `project.yaml` 必須（無ければ disabled）。そのままプロジェクトルートとして登録
   - add-codebase: 選択 dir をそのまま codebase path に
 - **ディレクトリ名とプロジェクト id は独立**。id は内部識別子、ディレクトリ名は人間が好きに決める（例：`acme-taskflow-invite/`）。レジストリが両者を紐付ける
@@ -314,9 +314,13 @@ interface FolderBrowserDialogProps {
 - デフォルト候補 dir が既に存在する場合、ユーザーに警告を表示し、「別名にする」or「フォルダを変更」を促す
 - 「フォルダを変更」でユーザーが指定したパスは、**指定 dir そのものがプロジェクトルートになる**（その中にサブディレクトリを勝手に作らない）
 
-バリデーション:
+バリデーション（NewProjectDialog 側で実施、FolderBrowserDialog 確定後に呼び出し側がチェック）:
 - 名前必須
-- プロジェクトルートが空ディレクトリ or 存在しない親ディレクトリのみ許可（既に project.yaml を含む場合は import を案内）
+- プロジェクトルートは以下のいずれか（これ以外は作成ボタン disabled、メッセージで誘導）:
+  - 存在しないパス（親ディレクトリが存在する必要あり）→ 作成時に mkdir
+  - 既存の**空**ディレクトリ → そのまま使う
+- 既に `project.yaml` を含む dir が選ばれた場合は「これは既存プロジェクト。インポートする？」と ProjectImportDialog への誘導を表示
+- 非空だが `project.yaml` を含まない dir が選ばれた場合は「このディレクトリは空ではありません」と警告し disabled
 - `codebases[].id` 重複不可
 
 ### ProjectImportDialog（新規）
@@ -343,7 +347,6 @@ interface FolderBrowserDialogProps {
 | `packages/storage/src/index.ts` の `discoverProjects` / `listWorkspaceCandidates` / `resolveProjectById` / `loadProjectById` / `ProjectHandle` / `WorkspaceCandidate` export | 旧発見モデル廃止 |
 | `packages/storage/src/index.ts` の `resolveTallyPaths` / `TallyPaths` export | `.tally/` 規約廃止（`project-dir.ts` に置換） |
 | `packages/frontend/src/app/api/workspace-candidates/route.ts` | candidates API 廃止 |
-| `packages/frontend/src/components/dialog/project-settings-dialog.tsx` + `.test.tsx` | 旧 `codebasePath` / `additionalCodebasePaths` UI。`codebases[]` ベースに刷新し新規作成 |
 | `packages/frontend/src/lib/api.ts` の `fetchWorkspaceCandidates`, `WorkspaceCandidate` | candidates モデル廃止 |
 | `NewProjectDialog` の candidates UI 一式 | 刷新 |
 | 環境変数 `TALLY_WORKSPACE` 参照箇所すべて | 廃止 |
@@ -375,6 +378,7 @@ interface FolderBrowserDialogProps {
 | `packages/storage/src/init-project.ts` | registry 登録追加、codebases 0 件可 |
 | `packages/storage/src/project-store.ts` | workspaceRoot → projectDir rename、codebases 対応 |
 | `packages/frontend/src/components/dialog/new-project-dialog.tsx` | 全面刷新 |
+| `packages/frontend/src/components/dialog/project-settings-dialog.tsx` + `.test.tsx`（新規作成） | 削除した旧版に代わり、`codebases[]` の追加・削除・並び替え・ラベル編集を提供。0 件運用（初期アイデア）から後付けで codebase を足せる受け皿。FolderBrowserDialog（purpose: 'add-codebase'）を利用 |
 | `packages/frontend/src/lib/api.ts` | registry 系クライアント追加、candidates 系削除、project meta CRUD を codebases[] 対応 |
 | `packages/frontend/src/lib/store.ts` | `patchProjectMeta` 等を codebases[] 対応に刷新 |
 | `packages/frontend/src/app/api/projects/[id]/route.ts` | codebases[] の読み書き、旧フィールド削除 |
@@ -394,7 +398,7 @@ interface FolderBrowserDialogProps {
 
 - `registry.test.ts`: load/save ラウンドトリップ、重複 id、touch 順序、壊れた YAML のリカバリ
 - `project-dir.test.ts`: projectDir から paths 生成の境界
-- `init-project.test.ts`: registry 登録と project dir 作成の原子性、codebases 0 件で拒否、id 衝突再生成
+- `init-project.test.ts`: registry 登録と project dir 作成の原子性、codebases 0 件でも成功すること、project dir が非空かつ project.yaml 無しで拒否、id 衝突時の再生成
 - tmp dir fixture で XDG_DATA_HOME を差し替え、マシン環境に依存しない
 
 ### packages/frontend
@@ -432,9 +436,25 @@ interface FolderBrowserDialogProps {
    - 決定: `codebases[]`、code ノードは `codebaseId` 参照
    - 影響: AI エージェントの探索対象を「codebase を選択 / すべて」に拡張する後続作業
 
-## 非スコープ
+## スコープ境界
 
-- AI エージェントが複数 codebases をどう扱うか（探索対象選択、cwd 切替、結果マージ）
+### AI Engine の in-scope / out-of-scope
+
+データモデル刷新に伴い AI Engine の関数群もシグネチャ変更が避けられないため、最低限の修正を in-scope に含める。新機能は別 spec に回す。
+
+**in-scope（このspec で扱う、regression 防止の最低限修正）**:
+- 単一 `codebasePath` への参照を `codebases[]` に置き換えるシグネチャ改修
+- 呼び出し側が対象 codebase（1 件）を引数で指定する形に変更
+- 既存の単一 codebase 機能が壊れない範囲でコンパイルを通す
+- codebases 0 件時は呼び出し側（UI）で操作を無効化するため、engine 側は `codebases.length === 0` のケースを受け取らない前提でよい
+
+**out-of-scope（別 spec で扱う）**:
+- 複数 codebases を跨いだ探索（cwd 切替、結果マージ、エージェント並行実行）
+- ユーザーが「どの codebase を探索対象にするか」を選ぶ UI と API
+- codebases 間のクロスリファレンス（backend の関数から frontend の呼び出し箇所を辿る等）
+
+### そのほかの非スコープ
+
 - Git 公開ワークフロー（registry 外部のチーム共有、プロジェクト dir の repo 化ヘルパ）
 - マシン間移動（絶対パス持ち回り問題。将来 `Codebase.path` に変数展開や overlay を検討）
 - レジストリの並行編集（現時点ではロック不要、将来必要なら fcntl lock）
