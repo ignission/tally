@@ -1,16 +1,20 @@
-import { FileSystemProjectStore } from '@tally/storage';
+import { FileSystemProjectStore, listProjects } from '@tally/storage';
 import { NextResponse } from 'next/server';
-
-import { resolveProjectById } from '@/lib/project-resolver';
 
 interface RouteContext {
   params: Promise<{ id: string; nodeId: string }>;
 }
 
+// registry から id に対応するプロジェクトディレクトリを解決する
+async function resolveDir(id: string): Promise<string | null> {
+  const list = await listProjects();
+  return list.find((p) => p.id === id)?.path ?? null;
+}
+
 export async function PATCH(req: Request, context: RouteContext): Promise<NextResponse> {
   const { id, nodeId } = await context.params;
-  const handle = await resolveProjectById(id);
-  if (!handle) return NextResponse.json({ error: 'project not found', id }, { status: 404 });
+  const dir = await resolveDir(id);
+  if (!dir) return NextResponse.json({ error: 'project not found', id }, { status: 404 });
 
   const raw = await req.json().catch(() => null);
   if (raw === null || typeof raw !== 'object') {
@@ -20,7 +24,7 @@ export async function PATCH(req: Request, context: RouteContext): Promise<NextRe
   if ('type' in (raw as Record<string, unknown>)) {
     return NextResponse.json({ error: 'type is immutable' }, { status: 400 });
   }
-  const store = new FileSystemProjectStore(handle.workspaceRoot);
+  const store = new FileSystemProjectStore(dir);
   const exists = await store.getNode(nodeId);
   if (!exists) return NextResponse.json({ error: 'node not found' }, { status: 404 });
   try {
@@ -33,9 +37,9 @@ export async function PATCH(req: Request, context: RouteContext): Promise<NextRe
 
 export async function DELETE(_req: Request, context: RouteContext): Promise<NextResponse> {
   const { id, nodeId } = await context.params;
-  const handle = await resolveProjectById(id);
-  if (!handle) return NextResponse.json({ error: 'project not found', id }, { status: 404 });
-  const store = new FileSystemProjectStore(handle.workspaceRoot);
+  const dir = await resolveDir(id);
+  if (!dir) return NextResponse.json({ error: 'project not found', id }, { status: 404 });
+  const store = new FileSystemProjectStore(dir);
   await store.deleteNode(nodeId);
   return new NextResponse(null, { status: 204 });
 }
