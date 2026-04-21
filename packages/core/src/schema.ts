@@ -155,6 +155,26 @@ export const CodebaseSchema = z.object({
 
 export type Codebase = z.infer<typeof CodebaseSchema>;
 
+// codebases[].id の重複を検出して issue を積む。superRefine の共通ロジック。
+function checkUniqueCodebaseIds(
+  codebases: { id: string }[] | undefined,
+  ctx: z.RefinementCtx,
+): void {
+  if (!codebases) return;
+  const seen = new Set<string>();
+  for (const c of codebases) {
+    if (seen.has(c.id)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `codebases[].id 重複: ${c.id}`,
+        path: ['codebases'],
+      });
+      return;
+    }
+    seen.add(c.id);
+  }
+}
+
 // .tally/project.yaml に対応する meta のみのスキーマ。
 // ノード・エッジはファイル分割で永続化するため、ここには含めない。
 export const ProjectMetaSchema = z
@@ -167,17 +187,7 @@ export const ProjectMetaSchema = z
     createdAt: z.string(),
     updatedAt: z.string(),
   })
-  .superRefine((meta, ctx) => {
-    const ids = meta.codebases.map((c) => c.id);
-    const dup = ids.find((id, idx) => ids.indexOf(id) !== idx);
-    if (dup !== undefined) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: `codebases[].id 重複: ${dup}`,
-        path: ['codebases'],
-      });
-    }
-  });
+  .superRefine((meta, ctx) => checkUniqueCodebaseIds(meta.codebases, ctx));
 
 // 実行時に Project 全体を扱う際の合成スキーマ (メモリ上表現)。
 export const ProjectSchema = z
@@ -191,17 +201,7 @@ export const ProjectSchema = z
     nodes: z.array(NodeSchema),
     edges: z.array(EdgeSchema),
   })
-  .superRefine((p, ctx) => {
-    const ids = p.codebases.map((c) => c.id);
-    const dup = ids.find((id, idx) => ids.indexOf(id) !== idx);
-    if (dup !== undefined) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: `codebases[].id 重複: ${dup}`,
-        path: ['codebases'],
-      });
-    }
-  });
+  .superRefine((p, ctx) => checkUniqueCodebaseIds(p.codebases, ctx));
 
 // PATCH /api/projects/:id の body スキーマ。codebases 全置換のみ許可（部分更新はしない）。
 export const ProjectMetaPatchSchema = z
@@ -211,19 +211,7 @@ export const ProjectMetaPatchSchema = z
     codebases: z.array(CodebaseSchema).optional(),
   })
   .strict()
-  .superRefine((patch, ctx) => {
-    if (patch.codebases) {
-      const ids = patch.codebases.map((c) => c.id);
-      const dup = ids.find((id, idx) => ids.indexOf(id) !== idx);
-      if (dup !== undefined) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `codebases[].id 重複: ${dup}`,
-          path: ['codebases'],
-        });
-      }
-    }
-  });
+  .superRefine((patch, ctx) => checkUniqueCodebaseIds(patch.codebases, ctx));
 
 // ---------------------------------------------------------------------------
 // チャットスキーマ (Phase 6)
