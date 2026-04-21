@@ -1,0 +1,40 @@
+{
+  "name": "@tally/frontend",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Tally のフロントエンド (Next.js 15 App Router + React Flow キャンバス)",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@tally/ai-engine": "workspace:*",
+    "@tally/core": "workspace:*",
+    "@tally/storage": "workspace:*",
+    "@xyflow/react": "^12.3.5",
+    "dagre": "^0.8.5",
+    "dompurify": "^3.4.0",
+    "mermaid": "^11.14.0",
+    "nanoid": "^5.0.0",
+    "next": "^15.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zustand": "^5.0.0"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/dagre": "^0.7.54",
+    "@types/dompurify": "^3.2.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "jsdom": "^29.0.2",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

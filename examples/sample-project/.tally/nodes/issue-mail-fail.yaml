@@ -1,0 +1,8 @@
+id: issue-mail-fail
+type: issue
+x: 640
+y: 740
+title: メール配信失敗時の挙動
+body: |
+  SendGrid エラー時、招待リンクは作成したがメールは届かない状態になる。
+  再送機能か、管理画面でリンク表示の必要あり。

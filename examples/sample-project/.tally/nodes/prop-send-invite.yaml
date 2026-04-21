@@ -1,0 +1,11 @@
+id: prop-send-invite
+type: proposal
+x: 340
+y: 200
+title: '[AI] 招待リンクを発行する'
+body: |
+  アクター: プロジェクト管理者
+  事前条件: プロジェクトが存在、管理者としてログイン済み
+  主フロー: メール・権限を指定→リンク生成→送信
+adoptAs: usecase
+sourceAgentId: decompose-to-stories

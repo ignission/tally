@@ -1,0 +1,9 @@
+id: code-mail
+type: coderef
+x: 640
+y: 380
+title: MailSender
+body: |
+  既存。SendGrid 経由でメール送信。
+  テンプレート管理あり。
+filePath: src/infra/mail/sender.ts

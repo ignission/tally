@@ -1,0 +1,9 @@
+id: uc-accept-invite
+type: usecase
+x: 340
+y: 120
+title: 招待を承認する
+body: |
+  アクター: 被招待者
+  事前条件: 招待リンクを持っている
+  主フロー: リンクアクセス→ログインor登録→参加完了

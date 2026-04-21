@@ -1,0 +1,9 @@
+id: code-project
+type: coderef
+x: 640
+y: 200
+title: Project 集約
+body: |
+  既存。プロジェクトの基本情報とメンバー管理。
+  招待機能は未実装。
+filePath: src/domain/project/mod.ts

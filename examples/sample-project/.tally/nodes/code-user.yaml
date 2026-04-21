@@ -1,0 +1,9 @@
+id: code-user
+type: coderef
+x: 640
+y: 40
+title: User モデル
+body: |
+  既存。ユーザーの基本情報とプロジェクト所属を持つ。
+  権限は project_members テーブルで管理。
+filePath: src/domain/user/mod.ts

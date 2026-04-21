@@ -1,0 +1,11 @@
+id: req-expiry
+type: requirement
+x: 40
+y: 480
+title: 有効期限の管理
+body: |
+  セキュリティのため招待リンクに有効期限を設けたい。
+  期限切れリンクの再発行も容易に。
+kind: non_functional
+qualityCategory: security
+priority: should

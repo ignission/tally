@@ -1,0 +1,17 @@
+id: q-duplicate
+type: question
+x: 340
+y: 660
+title: 同一メール宛の複数招待
+body: 同じメールに未承認の招待が複数ある状態はどう扱う？
+options:
+  - id: opt_auto_expire
+    text: 新しい招待で古いものを自動失効
+    selected: false
+  - id: opt_coexist
+    text: 複数併存、どれでも承認可
+    selected: false
+  - id: opt_reject
+    text: 重複を拒否（既存招待のキャンセル後に再招待）
+    selected: false
+decision: null

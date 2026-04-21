@@ -1,0 +1,13 @@
+id: req-permissions
+type: requirement
+x: 40
+y: 260
+title: 権限レベルの柔軟設定
+body: |
+  招待時に権限を指定できるようにしたい。
+
+  ・管理者 / 編集者 / 閲覧者
+  ・プロジェクト単位で設定
+  ・後から変更可能
+kind: functional
+priority: must

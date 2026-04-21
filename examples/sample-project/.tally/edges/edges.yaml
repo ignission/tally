@@ -1,0 +1,54 @@
+edges:
+  # 要求 → 論点 (derive)
+  - id: e-req2-q1
+    from: req-permissions
+    to: q-permission-rules
+    type: derive
+  - id: e-req3-q2
+    from: req-expiry
+    to: q-link-expiry
+    type: derive
+  - id: e-req1-q3
+    from: req-invite
+    to: q-duplicate
+    type: derive
+
+  # 要求 → AI提案 UC (satisfy)
+  - id: e-req1-p1
+    from: req-invite
+    to: prop-send-invite
+    type: satisfy
+  - id: e-req1-p2
+    from: req-invite
+    to: prop-accept
+    type: satisfy
+
+  # AI提案 UC → 既存コード (refine)
+  - id: e-p1-c2
+    from: prop-send-invite
+    to: code-project
+    type: refine
+  - id: e-p1-c3
+    from: prop-send-invite
+    to: code-mail
+    type: refine
+  - id: e-p2-c4
+    from: prop-accept
+    to: code-auth
+    type: refine
+
+  # 要求 → 既存コード (refine)
+  - id: e-req2-c1
+    from: req-permissions
+    to: code-user
+    type: refine
+  - id: e-req2-c2
+    from: req-permissions
+    to: code-project
+    type: refine
+
+  # AI提案 → 課題 (derive)
+  - id: e-p1-i1
+    from: prop-send-invite
+    to: issue-mail-fail
+    type: derive

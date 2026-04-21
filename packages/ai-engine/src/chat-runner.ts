@@ -1,0 +1,516 @@
+import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
+import {
+  newChatMessageId,
+  newToolUseId,
+  type ChatBlock,
+  type ChatMessage,
+} from '@tally/core';
+import type { ChatStore, ProjectStore } from '@tally/storage';
+
+import type { SdkLike } from './agent-runner';
+import type { ChatEvent, SdkMessageLike } from './stream';
+import { CreateEdgeInputSchema, createEdgeHandler } from './tools/create-edge';
+import { CreateNodeInputSchema, createNodeHandler } from './tools/create-node';
+import { FindRelatedInputSchema, findRelatedHandler } from './tools/find-related';
+import { ListByTypeInputSchema, listByTypeHandler } from './tools/list-by-type';
+
+// ChatRunner の依存。外部から差し込める SDK と 2 つの store を取る。
+// threadId は ChatRunner インスタンスのライフタイム内で不変 (スレッド切替は別インスタンス)。
+export interface ChatRunnerDeps {
+  sdk: SdkLike;
+  chatStore: ChatStore;
+  projectStore: ProjectStore;
+  workspaceRoot: string;
+  threadId: string;
+}
+
+// SDK の assistant message から抽出する block の単純化形。
+// MCP 経路に一本化したため tool_use は拾わないが、将来のデバッグ用に型定義は保持。
+type ExtractedBlock = { type: 'text'; text: string };
+
+// MCP ツール名と、そのハンドラ (承認必要かどうか) を束ねるエントリ。
+// 承認必須のツールは create_* 系 (書き込み)、承認不要は find_related / list_by_type (読み取り)。
+export interface ToolEntry {
+  name: string;
+  requiresApproval: boolean;
+  handler: (input: unknown) => Promise<{ ok: boolean; output: string }>;
+}
+
+// ChatRunner は 1 スレッド分の multi-turn 対話を駆動する。
+// 各 user turn を `runUserTurn` で流し、tool_use 承認は外部から `approveTool` で通知する。
+//
+// 重要な設計判断:
+// - SDK handler 経由の tool_use_id は使わず、ChatRunner が独自に生成した ui-toolUseId を
+//   承認 UI / 永続化の主キーとする (tool-<nanoid>)。
+// - assistant message 内の text block は turn 末にまとめて永続化 (ストリーミング送出は逐次)。
+//   tool_use / tool_result は発生都度永続化 (クラッシュ耐性重視)。
+// - tool 呼び出しは createSdkMcpServer で登録した MCP 経由でのみ行う。
+//   MCP ハンドラ内で invokeInterceptedTool を呼び、pending → 承認 → 実行 → result を完結させる。
+//   SDK 側から見ると通常の tool 呼び出し (同期的に output を返す) に見える。
+export class ChatRunner {
+  private readonly deps: ChatRunnerDeps;
+  // 承認待ちの Promise resolver。ui-toolUseId → (approved) => void。
+  private readonly pendingApprovals = new Map<string, (approved: boolean) => void>();
+
+  constructor(deps: ChatRunnerDeps) {
+    this.deps = deps;
+  }
+
+  // 外部 (WS / UI) から呼ぶ。該当 ui-toolUseId の待機 Promise を解決する。
+  // 見つからなければ無視 (重複クリックや古い id は安全に no-op)。
+  approveTool(toolUseId: string, approved: boolean): void {
+    const resolver = this.pendingApprovals.get(toolUseId);
+    if (resolver) {
+      this.pendingApprovals.delete(toolUseId);
+      resolver(approved);
+    }
+  }
+
+  private awaitApproval(toolUseId: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      this.pendingApprovals.set(toolUseId, resolve);
+    });
+  }
+
+  // user の 1 ターンを実行する。
+  // 1) user message を append
+  // 2) 空 assistant message を append (ID 確保)
+  // 3) MCP サーバを組み立てて SDK に渡し、assistant stream を iterate
+  // 4) text block は buffer + delta emit。tool_use は MCP ハンドラ内で承認 intercept される。
+  // 5) turn 末に text blocks を assistant message 先頭に統合
+  async *runUserTurn(userText: string): AsyncGenerator<ChatEvent> {
+    const { sdk, chatStore, workspaceRoot, threadId } = this.deps;
+
+    const thread = await chatStore.getChat(threadId);
+    if (!thread) {
+      yield { type: 'error', code: 'not_found', message: `thread: ${threadId}` };
+      return;
+    }
+
+    // 1. user message append
+    const userMsgId = newChatMessageId();
+    const userMsg: ChatMessage = {
+      id: userMsgId,
+      role: 'user',
+      blocks: [{ type: 'text', text: userText }],
+      createdAt: new Date().toISOString(),
+    };
+    await chatStore.appendMessage(threadId, userMsg);
+    yield { type: 'chat_user_message_appended', messageId: userMsgId };
+
+    // 2. 空の assistant message を append (後続の tool_use 即時永続化の親として必要)
+    const assistantMsgId = newChatMessageId();
+    await chatStore.appendMessage(threadId, {
+      id: assistantMsgId,
+      role: 'assistant',
+      blocks: [],
+      createdAt: new Date().toISOString(),
+    });
+    yield { type: 'chat_assistant_message_started', messageId: assistantMsgId };
+
+    // 3. prompt / system prompt を組む (user msg 追加後の履歴込み)
+    const threadWithUser = await chatStore.getChat(threadId);
+    const prompt = buildChatPrompt(threadWithUser?.messages ?? []);
+    const systemPrompt = buildChatSystemPrompt();
+
+    // 4. MCP 経由で呼ばれる tool ハンドラ内で invokeInterceptedTool を回す。
+    //    MCP handler は SDK query を block するので、イベント emit は AsyncQueue 経由に分離する。
+    //    さもないと deadlock (SDK が MCP 応答待ち / MCP が承認待ち / 承認は UI 経由で queue flush が必要)。
+    const queue = new EventQueue<ChatEvent>();
+    const tools = this.buildToolRegistry();
+    const emit = (e: ChatEvent) => queue.push(e);
+    const mcp = this.buildMcpServer(tools, emit, assistantMsgId);
+
+    const textBuffer: string[] = [];
+
+    // 5. SDK query をバックグラウンドで走らせ、queue にイベントを push する。
+    //    generator 側は queue をドレインして yield するだけ。
+    const sdkDone = (async () => {
+      try {
+        const iter = sdk.query({
+          prompt,
+          options: {
+            systemPrompt,
+            mcpServers: { tally: mcp as unknown as Record<string, unknown> },
+            tools: [],
+            allowedTools: [
+              'mcp__tally__create_node',
+              'mcp__tally__create_edge',
+              'mcp__tally__find_related',
+              'mcp__tally__list_by_type',
+            ],
+            permissionMode: 'dontAsk',
+            settingSources: [],
+            cwd: workspaceRoot,
+            ...(process.env.CLAUDE_CODE_PATH
+              ? { pathToClaudeCodeExecutable: process.env.CLAUDE_CODE_PATH }
+              : {}),
+          },
+        });
+
+        for await (const msg of iter) {
+          // biome-ignore lint/suspicious/noConsole: debug trace (Phase 6 MVP、本番では一旦残す)
+          console.log('[chat-runner] sdk msg:', JSON.stringify(msg).slice(0, 200));
+          const blocks = extractAssistantBlocks(msg);
+          for (const b of blocks) {
+            if (b.type === 'text') {
+              textBuffer.push(b.text);
+              queue.push({ type: 'chat_text_delta', messageId: assistantMsgId, text: b.text });
+            }
+          }
+        }
+
+        // text blocks を assistant message の先頭に統合 (tool_use/result は intercept 経路で既に append 済み)
+        if (textBuffer.length > 0) {
+          const current = await chatStore.getChat(threadId);
+          const target = current?.messages.find((m) => m.id === assistantMsgId);
+          if (current && target) {
+            const textBlocks: ChatBlock[] = textBuffer.map((t) => ({ type: 'text', text: t }));
+            await chatStore.replaceMessageBlocks(threadId, assistantMsgId, [
+              ...textBlocks,
+              ...target.blocks,
+            ]);
+          }
+        }
+
+        queue.push({ type: 'chat_assistant_message_completed', messageId: assistantMsgId });
+        queue.push({ type: 'chat_turn_ended' });
+      } catch (err) {
+        queue.push({ type: 'error', code: 'agent_failed', message: String(err) });
+      } finally {
+        queue.finish();
+      }
+    })();
+
+    // 6. queue をドレイン。MCP handler から push される pending/result も含め全て通過する。
+    while (true) {
+      const evt = await queue.next();
+      if (evt === null) break;
+      yield evt;
+    }
+
+    await sdkDone; // バックグラウンドタスクの未捕捉エラーを顕在化
+  }
+
+  // 承認 intercept + 実ツール呼び出し。
+  // 非同期進行を 2 段階で公開する:
+  //   - pendingEmitted: pending event (または read-only の即 result) が emit された時点で解決
+  //   - done: 実行まで含めて全完了した時点で解決。MCP ハンドラはこれを await して
+  //           SDK に返す CallToolResult を組み立てる。
+  //
+  // `public` にしてあるのは MCP ハンドラ (同ファイル内) とテストから直接呼ぶため。
+  public invokeInterceptedTool(opts: {
+    entry: ToolEntry;
+    input: unknown;
+    emit: (e: ChatEvent) => void;
+    assistantMsgId: string;
+  }): { pendingEmitted: Promise<void>; done: Promise<{ ok: boolean; output: string }> } {
+    const { entry, input, emit, assistantMsgId } = opts;
+    const { chatStore, threadId } = this.deps;
+
+    let resolvePending!: () => void;
+    const pendingEmitted = new Promise<void>((resolve) => {
+      resolvePending = resolve;
+    });
+
+    const done = (async (): Promise<{ ok: boolean; output: string }> => {
+      // 承認不要ツール: 実行 → tool_use(approved) + tool_result を append、pending は発火しない。
+      if (!entry.requiresApproval) {
+        const uiId = newToolUseId();
+        const res = await entry.handler(input);
+        await chatStore.appendBlockToMessage(threadId, assistantMsgId, {
+          type: 'tool_use',
+          toolUseId: uiId,
+          name: entry.name,
+          input,
+          approval: 'approved',
+        });
+        await chatStore.appendBlockToMessage(threadId, assistantMsgId, {
+          type: 'tool_result',
+          toolUseId: uiId,
+          ok: res.ok,
+          output: res.output,
+        });
+        emit({
+          type: 'chat_tool_result',
+          messageId: assistantMsgId,
+          toolUseId: uiId,
+          ok: res.ok,
+          output: res.output,
+        });
+        // read-only は pending 概念が無いので pendingEmitted も result 時点で同時解決する。
+        resolvePending();
+        return { ok: res.ok, output: res.output };
+      }
+
+      // 書き込み系: 承認必須。先に tool_use(pending) を永続化 → pending event emit →
+      // resolvePending で generator にフラッシュを委ねる → 承認待ち → 実行 → tool_result。
+      const uiToolUseId = newToolUseId();
+      await chatStore.appendBlockToMessage(threadId, assistantMsgId, {
+        type: 'tool_use',
+        toolUseId: uiToolUseId,
+        name: entry.name,
+        input,
+        approval: 'pending',
+      });
+      emit({
+        type: 'chat_tool_pending',
+        messageId: assistantMsgId,
+        toolUseId: uiToolUseId,
+        name: entry.name,
+        input,
+      });
+      // pending event が sideEvents に積まれた段階で generator にフラッシュ機会を渡す。
+      resolvePending();
+
+      const approved = await this.awaitApproval(uiToolUseId);
+
+      await chatStore.updateBlockApproval(
+        threadId,
+        assistantMsgId,
+        uiToolUseId,
+        approved ? 'approved' : 'rejected',
+      );
+
+      if (!approved) {
+        const output = 'ユーザー却下';
+        await chatStore.appendBlockToMessage(threadId, assistantMsgId, {
+          type: 'tool_result',
+          toolUseId: uiToolUseId,
+          ok: false,
+          output,
+        });
+        emit({
+          type: 'chat_tool_result',
+          messageId: assistantMsgId,
+          toolUseId: uiToolUseId,
+          ok: false,
+          output,
+        });
+        return { ok: false, output };
+      }
+
+      const res = await entry.handler(input);
+      await chatStore.appendBlockToMessage(threadId, assistantMsgId, {
+        type: 'tool_result',
+        toolUseId: uiToolUseId,
+        ok: res.ok,
+        output: res.output,
+      });
+      emit({
+        type: 'chat_tool_result',
+        messageId: assistantMsgId,
+        toolUseId: uiToolUseId,
+        ok: res.ok,
+        output: res.output,
+      });
+      return { ok: res.ok, output: res.output };
+    })();
+
+    // done が reject したときに pendingEmitted が未解決で残らないようにする
+    // (外側が await pendingEmitted でハングするのを防ぐ)。
+    done.catch(() => resolvePending());
+
+    return { pendingEmitted, done };
+  }
+
+  // チャットで使う tool handler を 1 つの配列に束ねる。
+  // create_node / create_edge は承認必須、find_related / list_by_type は承認不要。
+  // chat では anchor 概念が無いので anchor は (0,0) / anchorId は空で固定する。
+  // 既存 createNodeHandler は agentName を要求するが chat 文脈に正確な agent は無いので
+  // 便宜上 'decompose-to-stories' (proposal 生成系のデフォルト) を流用する。
+  //
+  // `public` にしてあるのは MCP 構築とテストから直接参照するため。
+  public buildToolRegistry(): ToolEntry[] {
+    const { projectStore } = this.deps;
+    // createNodeHandler / createEdgeHandler は内部で emit を呼ぶ (node_created / edge_created)
+    // が、これは AgentEvent 用で chat には不要。no-op emit を渡す。
+    const createNode = createNodeHandler({
+      store: projectStore,
+      emit: () => {},
+      anchor: { x: 0, y: 0 },
+      anchorId: '',
+      agentName: 'decompose-to-stories',
+    });
+    const createEdge = createEdgeHandler({
+      store: projectStore,
+      emit: () => {},
+    });
+    const findRelated = findRelatedHandler({ store: projectStore });
+    const listByType = listByTypeHandler({ store: projectStore });
+
+    return [
+      { name: 'mcp__tally__create_node', requiresApproval: true, handler: createNode },
+      { name: 'mcp__tally__create_edge', requiresApproval: true, handler: createEdge },
+      { name: 'mcp__tally__find_related', requiresApproval: false, handler: findRelated },
+      { name: 'mcp__tally__list_by_type', requiresApproval: false, handler: listByType },
+    ];
+  }
+
+  // 4 ツール分の MCP サーバを組み立てる。
+  // 各ツールの handler は invokeInterceptedTool を起動 → done の {ok, output} を
+  // CallToolResult (content + isError) に包んで SDK に返す。
+  // SDK 視点では通常の tool_use → tool_result の往復。
+  // 間に挟まる pending / result の ChatEvent は emit callback で直接 queue に流す
+  // (sideEvents buffer にすると SDK block 中に flush できず deadlock するため)。
+  private buildMcpServer(
+    tools: ToolEntry[],
+    emit: (e: ChatEvent) => void,
+    assistantMsgId: string,
+  ) {
+    const find = (name: string): ToolEntry => {
+      const t = tools.find((x) => x.name === name);
+      if (!t) throw new Error(`tool not registered: ${name}`);
+      return t;
+    };
+
+    const makeHandler = (name: string) => async (input: unknown) => {
+      const entry = find(name);
+      const { done } = this.invokeInterceptedTool({ entry, input, emit, assistantMsgId });
+      const result = await done;
+      return {
+        content: [{ type: 'text' as const, text: result.output }],
+        isError: !result.ok,
+      };
+    };
+
+    return createSdkMcpServer({
+      name: 'tally',
+      version: '0.1.0',
+      tools: [
+        tool(
+          'create_node',
+          'Tally に新しい proposal ノードを作る。adoptAs は採用時に昇格する NodeType。',
+          CreateNodeInputSchema.shape,
+          makeHandler('mcp__tally__create_node'),
+        ),
+        tool(
+          'create_edge',
+          'Tally に新しいエッジを作る。from/to はノード ID、type は SysML 2.0 エッジ種別。',
+          CreateEdgeInputSchema.shape,
+          makeHandler('mcp__tally__create_edge'),
+        ),
+        tool(
+          'find_related',
+          '与えた node id に対して直接エッジで繋がったノード一覧を返す。',
+          FindRelatedInputSchema.shape,
+          makeHandler('mcp__tally__find_related'),
+        ),
+        tool(
+          'list_by_type',
+          '指定した NodeType のノードを全件返す。',
+          ListByTypeInputSchema.shape,
+          makeHandler('mcp__tally__list_by_type'),
+        ),
+      ],
+    });
+  }
+}
+
+// --- helpers ---
+
+// 非同期イベントキュー: push (producer 複数可) と next (consumer 1 つ前提) を提供。
+// chat-runner では SDK/MCP (producer) と generator (consumer) を分離するために使う。
+// finish() 後の push は無視、buffer 残りを drain しきったら next は null を返す。
+class EventQueue<T> {
+  private buf: T[] = [];
+  private waiter: ((v: T | null) => void) | null = null;
+  private finished = false;
+
+  push(value: T): void {
+    if (this.finished) return;
+    if (this.waiter) {
+      const w = this.waiter;
+      this.waiter = null;
+      w(value);
+      return;
+    }
+    this.buf.push(value);
+  }
+
+  finish(): void {
+    if (this.finished) return;
+    this.finished = true;
+    if (this.waiter) {
+      const w = this.waiter;
+      this.waiter = null;
+      w(null);
+    }
+  }
+
+  async next(): Promise<T | null> {
+    if (this.buf.length > 0) return this.buf.shift() ?? null;
+    if (this.finished) return null;
+    return new Promise<T | null>((resolve) => {
+      this.waiter = resolve;
+    });
+  }
+}
+
+function buildChatSystemPrompt(): string {
+  return [
+    'あなたは Tally の対話アシスタントです。',
+    'ユーザーと対話しながら、キャンバスに requirement / usecase / userstory / question / issue / coderef',
+    'の proposal ノードを生やし、必要に応じて satisfy / contain / derive / refine エッジを張ります。',
+    '',
+    '重要な方針:',
+    '- 一度にノードを作りすぎない。ユーザーの意図を確認してから小刻みに create_node を呼ぶ。',
+    '- create_node / create_edge は必ずユーザー承認を経る (サーバ側で承認 UI を挟む)。',
+    '- 迷ったら質問する。勝手に決めない。',
+    '- 既存ノード把握したい時は list_by_type / find_related を使う (承認不要)。',
+  ].join('\n');
+}
+
+// チャット履歴を単一 prompt にエンコードする。
+// tool_use / tool_result は冗長なので省き、text block だけを role 付きで並べる。
+// 最後の user message は current として別タグに出し、モデルの「今答えるべきもの」を明示する。
+function buildChatPrompt(messages: ChatMessage[]): string {
+  const lines: string[] = [];
+  const last = messages[messages.length - 1];
+  const past = last?.role === 'user' ? messages.slice(0, -1) : messages;
+
+  if (past.length > 0) {
+    lines.push('<conversation_history>');
+    for (const m of past) {
+      const texts = m.blocks
+        .filter((b): b is Extract<ChatBlock, { type: 'text' }> => b.type === 'text')
+        .map((b) => b.text);
+      if (texts.length > 0) {
+        lines.push(`<message role="${m.role}">`);
+        lines.push(texts.join('\n'));
+        lines.push('</message>');
+      }
+    }
+    lines.push('</conversation_history>');
+  }
+
+  if (last && last.role === 'user') {
+    const texts = last.blocks
+      .filter((b): b is Extract<ChatBlock, { type: 'text' }> => b.type === 'text')
+      .map((b) => b.text);
+    lines.push('<current_user_message>');
+    lines.push(texts.join('\n'));
+    lines.push('</current_user_message>');
+  }
+
+  return lines.join('\n');
+}
+
+// SDK から流れてくる assistant message の content 配列から text を取り出す。
+// tool_use は MCP 経路が処理するのでここでは無視する (重複処理を避ける)。
+// 実行時 duck typing (agent-runner.ts の sdkMessageToAgentEvent と同じパターン)。
+function extractAssistantBlocks(msg: SdkMessageLike): ExtractedBlock[] {
+  const m = msg as unknown as { type?: string; message?: { content?: unknown[] } };
+  if (m.type !== 'assistant' || !m.message?.content) return [];
+  const out: ExtractedBlock[] = [];
+  for (const block of m.message.content) {
+    const b = block as {
+      type?: string;
+      text?: string;
+    };
+    if (b.type === 'text' && typeof b.text === 'string') {
+      out.push({ type: 'text', text: b.text });
+    }
+  }
+  return out;
+}

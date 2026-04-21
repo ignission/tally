@@ -1,0 +1,17 @@
+id: q-permission-rules
+type: question
+x: 340
+y: 260
+title: 権限の継承ルール
+body: 招待者の権限は被招待者の権限上限になる？
+options:
+  - id: opt_own_max
+    text: 招待者の権限を上限とする（管理者のみ他管理者を招待可）
+    selected: false
+  - id: opt_below
+    text: 招待者は自分以下の権限のみ付与可
+    selected: false
+  - id: opt_db
+    text: ロール別の制限をDBで設定
+    selected: false
+decision: null

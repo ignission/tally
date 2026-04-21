@@ -1,0 +1,11 @@
+id: prop-accept
+type: proposal
+x: 340
+y: 340
+title: '[AI] 招待を承認する'
+body: |
+  アクター: 被招待者
+  事前条件: 招待リンクを持っている
+  主フロー: リンクアクセス→ログインor登録→参加完了
+adoptAs: usecase
+sourceAgentId: decompose-to-stories

@@ -1,0 +1,10 @@
+id: req-invite
+type: requirement
+x: 40
+y: 40
+title: チーム招待機能
+body: |
+  複数ユーザーから「仕事仲間をプロジェクトに招待したい」と要望。
+  メール経由の招待リンクで参加できるようにしたい。
+kind: functional
+priority: must

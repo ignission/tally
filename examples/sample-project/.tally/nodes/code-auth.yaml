@@ -1,0 +1,9 @@
+id: code-auth
+type: coderef
+x: 640
+y: 560
+title: Auth ミドルウェア
+body: |
+  既存。JWT トークン認証。
+  招待リンク用の一時トークン検証は未実装。
+filePath: src/api/middleware/auth.ts
