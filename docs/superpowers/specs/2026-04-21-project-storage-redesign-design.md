@@ -316,12 +316,16 @@ interface FolderBrowserDialogProps {
 
 バリデーション（NewProjectDialog 側で実施、FolderBrowserDialog 確定後に呼び出し側がチェック）:
 - 名前必須
-- プロジェクトルートは以下のいずれか（これ以外は作成ボタン disabled、メッセージで誘導）:
-  - 存在しないパス（親ディレクトリが存在する必要あり）→ 作成時に mkdir
-  - 既存の**空**ディレクトリ → そのまま使う
-- 既に `project.yaml` を含む dir が選ばれた場合は「これは既存プロジェクト。インポートする？」と ProjectImportDialog への誘導を表示
-- 非空だが `project.yaml` を含まない dir が選ばれた場合は「このディレクトリは空ではありません」と警告し disabled
 - `codebases[].id` 重複不可
+- プロジェクトルートのパスは以下の 4 ケースに分類して判定する:
+
+| 選択された dir の状態 | 扱い | UI |
+|---|---|---|
+| 存在しないパス（親ディレクトリは存在する） | **許可** | 作成時に mkdir |
+| 既存の空 dir | **許可** | そのまま使う |
+| 既存 dir + `project.yaml` を含む | **拒否** | 「既存プロジェクト。インポートする？」と ProjectImportDialog への誘導 |
+| 既存 dir + 非空かつ `project.yaml` なし | **拒否** | 「ディレクトリは空ではありません」と警告し disabled |
+| 親ディレクトリも存在しない | **拒否** | 「親ディレクトリが存在しません」と disabled |
 
 ### ProjectImportDialog（新規）
 
