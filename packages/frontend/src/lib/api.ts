@@ -1,4 +1,4 @@
-import type { AdoptableType, Edge, EdgeType, Node, NodeType, ProjectMeta } from '@tally/core';
+import type { AdoptableType, Codebase, Edge, EdgeType, Node, NodeType, ProjectMeta } from '@tally/core';
 
 export type NodeDraftInput = Omit<Node, 'id'>;
 export type NodePatchInput<T extends NodeType = NodeType> = Partial<
@@ -203,12 +203,10 @@ export function deleteEdge(projectId: string, edgeId: string): Promise<void> {
   });
 }
 
-// ProjectMeta の部分更新。
-// codebasePath: null = 削除、string = 置換、undefined = 維持。
-// additionalCodebasePaths: [] = 削除、配列 = 置換、undefined = 維持。
+// ProjectMeta の部分更新。codebases は全置換（部分更新なし）。
 export function patchProjectMeta(
   projectId: string,
-  patch: { codebasePath?: string | null; additionalCodebasePaths?: string[] },
+  patch: { name?: string; description?: string | null; codebases?: Codebase[] },
 ): Promise<ProjectMeta> {
   return requestJson<ProjectMeta>(`${base(projectId)}`, {
     method: 'PATCH',

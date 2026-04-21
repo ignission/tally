@@ -6,6 +6,7 @@ import type {
   AgentName,
   ChatMessage,
   ChatThreadMeta,
+  Codebase,
   Edge,
   EdgeType,
   Node,
@@ -82,8 +83,9 @@ interface CanvasState {
     input: IngestDocumentInput,
   ) => Promise<{ ok: boolean; errorMessage?: string }>;
   patchProjectMeta: (patch: {
-    codebasePath?: string | null;
-    additionalCodebasePaths?: string[];
+    name?: string;
+    description?: string | null;
+    codebases?: Codebase[];
   }) => Promise<void>;
 
   // Phase 6: チャットスレッド管理。
@@ -532,7 +534,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
       return runAgentWithInput('ingest-document', input, label);
     },
 
-    // ProjectMeta の部分更新 (codebasePath 等)。サーバ応答で state を上書きする。
+    // ProjectMeta の部分更新 (codebases 全置換など)。サーバ応答で state を上書きする。
     patchProjectMeta: async (patch) => {
       const pid = get().projectId;
       if (!pid) throw new Error('projectId is not set');
