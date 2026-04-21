@@ -5,6 +5,7 @@ import {
   ChatMessageSchema,
   ChatThreadMetaSchema,
   ChatThreadSchema,
+  CodebaseSchema,
   CodeRefNodeSchema,
   EdgeSchema,
   NodeSchema,
@@ -131,58 +132,65 @@ describe('ProposalNodeSchema passthrough', () => {
   });
 });
 
-describe('ProjectMetaSchema', () => {
-  it('description と codebasePath を省略できる', () => {
-    const parsed = ProjectMetaSchema.parse({
-      id: 'proj1',
-      name: '招待機能',
-      createdAt: '2026-04-18T10:00:00Z',
-      updatedAt: '2026-04-18T10:00:00Z',
-    });
-    expect(parsed.description).toBeUndefined();
-    expect(parsed.codebasePath).toBeUndefined();
+describe('CodebaseSchema', () => {
+  it('id / label / path を必須で受け入れる', () => {
+    const input = { id: 'frontend', label: 'TaskFlow Web', path: '/abs/path' };
+    expect(CodebaseSchema.parse(input)).toEqual(input);
   });
 
-  it('空の name は弾く', () => {
+  it('id が空文字は拒否', () => {
+    expect(() => CodebaseSchema.parse({ id: '', label: 'x', path: '/abs' })).toThrow();
+  });
+
+  it('id は kebab-case 英小文字 32 字以内', () => {
+    expect(() => CodebaseSchema.parse({ id: 'Frontend', label: 'x', path: '/abs' })).toThrow();
     expect(() =>
-      ProjectMetaSchema.parse({
-        id: 'proj1',
-        name: '',
-        createdAt: '2026-04-18T10:00:00Z',
-        updatedAt: '2026-04-18T10:00:00Z',
-      }),
+      CodebaseSchema.parse({ id: 'a'.repeat(33), label: 'x', path: '/abs' }),
     ).toThrow();
+    expect(CodebaseSchema.parse({ id: 'a', label: 'x', path: '/abs' }).id).toBe('a');
   });
 });
 
-describe('ProjectMetaPatchSchema', () => {
-  it('codebasePath: string を受理する', () => {
-    const r = ProjectMetaPatchSchema.safeParse({ codebasePath: '../backend' });
-    expect(r.success).toBe(true);
-    if (r.success) expect(r.data.codebasePath).toBe('../backend');
+describe('ProjectMetaSchema (刷新後)', () => {
+  it('codebases: Codebase[] を必須で受け入れる (空配列可)', () => {
+    const meta = {
+      id: 'proj-abc',
+      name: 'p',
+      codebases: [],
+      createdAt: '2026-04-21T00:00:00Z',
+      updatedAt: '2026-04-21T00:00:00Z',
+    };
+    expect(ProjectMetaSchema.parse(meta).codebases).toEqual([]);
   });
 
-  it('codebasePath: null を削除シグナルとして受理する', () => {
-    const r = ProjectMetaPatchSchema.safeParse({ codebasePath: null });
-    expect(r.success).toBe(true);
-    if (r.success) expect(r.data.codebasePath).toBeNull();
+  it('codebasePath / additionalCodebasePaths を受け入れない', () => {
+    const meta = {
+      id: 'proj-abc',
+      name: 'p',
+      codebases: [],
+      codebasePath: '/x',
+      createdAt: '2026-04-21T00:00:00Z',
+      updatedAt: '2026-04-21T00:00:00Z',
+    };
+    const parsed = ProjectMetaSchema.parse(meta);
+    expect('codebasePath' in parsed).toBe(false);
   });
 
-  it('空オブジェクトも受理する (no-op patch)', () => {
-    const r = ProjectMetaPatchSchema.safeParse({});
-    expect(r.success).toBe(true);
-  });
-
-  it('未知フィールドは strict で弾く', () => {
-    const r = ProjectMetaPatchSchema.safeParse({ name: 'x' });
-    expect(r.success).toBe(false);
-  });
-
-  it('codebasePath に number は受理しない', () => {
-    const r = ProjectMetaPatchSchema.safeParse({ codebasePath: 42 });
-    expect(r.success).toBe(false);
+  it('codebases[].id の重複を拒否', () => {
+    const meta = {
+      id: 'proj-abc',
+      name: 'p',
+      codebases: [
+        { id: 'dup', label: 'A', path: '/a' },
+        { id: 'dup', label: 'B', path: '/b' },
+      ],
+      createdAt: '2026-04-21T00:00:00Z',
+      updatedAt: '2026-04-21T00:00:00Z',
+    };
+    expect(() => ProjectMetaSchema.parse(meta)).toThrow(/codebases\[\]\.id/);
   });
 });
+
 
 describe('CodeRefNodeSchema summary/impact', () => {
   it('summary と impact を持つ coderef をパースできる', () => {

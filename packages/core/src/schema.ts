@@ -143,36 +143,87 @@ export const EdgeSchema = z.object({
 // プロジェクトスキーマ
 // ----------------------------------------------------------------------------
 
+export const CodebaseSchema = z.object({
+  id: z
+    .string()
+    .regex(/^[a-z][a-z0-9-]{0,31}$/u, {
+      message: 'codebase id は先頭英小文字 + 英小文字/数字/ハイフン、32 字以内',
+    }),
+  label: z.string().min(1),
+  path: z.string().min(1),
+});
+
+export type Codebase = z.infer<typeof CodebaseSchema>;
+
 // .tally/project.yaml に対応する meta のみのスキーマ。
 // ノード・エッジはファイル分割で永続化するため、ここには含めない。
-export const ProjectMetaSchema = z.object({
-  id: z.string().min(1),
-  name: z.string().min(1),
-  description: z.string().optional(),
-  codebasePath: z.string().optional(),
-  // 複数リポジトリにまたがる機能用。AI エージェントは primary (codebasePath) を
-  // cwd にして、ここに列挙されたパスも読み取り対象に含める。
-  additionalCodebasePaths: z.array(z.string().min(1)).optional(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-});
+export const ProjectMetaSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    description: z.string().optional(),
+    // 0 件以上。code ノードが存在するときは最低 1 件必要（整合性は storage 層で検証）。
+    codebases: z.array(CodebaseSchema),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })
+  .superRefine((meta, ctx) => {
+    const ids = meta.codebases.map((c) => c.id);
+    const dup = ids.find((id, idx) => ids.indexOf(id) !== idx);
+    if (dup !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `codebases[].id 重複: ${dup}`,
+        path: ['codebases'],
+      });
+    }
+  });
 
 // 実行時に Project 全体を扱う際の合成スキーマ (メモリ上表現)。
-export const ProjectSchema = ProjectMetaSchema.extend({
-  nodes: z.array(NodeSchema),
-  edges: z.array(EdgeSchema),
-});
+export const ProjectSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    description: z.string().optional(),
+    codebases: z.array(CodebaseSchema),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+    nodes: z.array(NodeSchema),
+    edges: z.array(EdgeSchema),
+  })
+  .superRefine((p, ctx) => {
+    const ids = p.codebases.map((c) => c.id);
+    const dup = ids.find((id, idx) => ids.indexOf(id) !== idx);
+    if (dup !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `codebases[].id 重複: ${dup}`,
+        path: ['codebases'],
+      });
+    }
+  });
 
-// PATCH /api/projects/:id の body スキーマ。
-// .strict() で未知フィールドは 400 に倒す (将来追加するフィールドは明示登録が必要)。
-// null は「そのキーを削除」シグナルとしてサーバに渡す (updateNode の更新慣例と合わせる)。
+// PATCH /api/projects/:id の body スキーマ。codebases 全置換のみ許可（部分更新はしない）。
 export const ProjectMetaPatchSchema = z
   .object({
-    codebasePath: z.union([z.string(), z.null()]).optional(),
-    // [] を渡せば全削除、省略なら変更しない。null は渡せない (削除は [])。
-    additionalCodebasePaths: z.array(z.string().min(1)).optional(),
+    name: z.string().min(1).optional(),
+    description: z.string().nullable().optional(),
+    codebases: z.array(CodebaseSchema).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((patch, ctx) => {
+    if (patch.codebases) {
+      const ids = patch.codebases.map((c) => c.id);
+      const dup = ids.find((id, idx) => ids.indexOf(id) !== idx);
+      if (dup !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `codebases[].id 重複: ${dup}`,
+          path: ['codebases'],
+        });
+      }
+    }
+  });
 
 // ---------------------------------------------------------------------------
 // チャットスキーマ (Phase 6)
