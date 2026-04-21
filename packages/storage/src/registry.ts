@@ -61,3 +61,44 @@ export async function saveRegistry(reg: Registry): Promise<void> {
   const dump = yaml.stringify(RegistrySchema.parse(reg));
   await atomicWriteFile(filePath, dump);
 }
+
+// ---------------------------------------------------------------------------
+// CRUD
+// ---------------------------------------------------------------------------
+
+export async function listProjects(): Promise<RegistryEntry[]> {
+  const reg = await loadRegistry();
+  return [...reg.projects].sort((a, b) => b.lastOpenedAt.localeCompare(a.lastOpenedAt));
+}
+
+export async function registerProject(entry: { id: string; path: string }): Promise<void> {
+  const reg = await loadRegistry();
+  const now = new Date().toISOString();
+  const next: Registry = {
+    version: 1,
+    projects: [
+      ...reg.projects.filter((p) => p.id !== entry.id),
+      { id: entry.id, path: entry.path, lastOpenedAt: now },
+    ],
+  };
+  await saveRegistry(next);
+}
+
+export async function unregisterProject(id: string): Promise<void> {
+  const reg = await loadRegistry();
+  const next: Registry = {
+    version: 1,
+    projects: reg.projects.filter((p) => p.id !== id),
+  };
+  await saveRegistry(next);
+}
+
+export async function touchProject(id: string): Promise<void> {
+  const reg = await loadRegistry();
+  const now = new Date().toISOString();
+  const next: Registry = {
+    version: 1,
+    projects: reg.projects.map((p) => (p.id === id ? { ...p, lastOpenedAt: now } : p)),
+  };
+  await saveRegistry(next);
+}
