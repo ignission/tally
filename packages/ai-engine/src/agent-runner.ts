@@ -53,7 +53,7 @@ export interface RunAgentDeps {
 }
 
 // 指定された StartRequest を実行し、進捗を AgentEvent として順次 yield する。
-// 事前バリデーション (agent 名 / 入力 schema / ノード存在 / ノード型 / codebasePath 等) は
+// 事前バリデーション (agent 名 / 入力 schema / ノード存在 / ノード型 / codebases[0] 等) は
 // registry のエージェント定義に委ねてから SDK を起動する。
 // SDK 呼び出し中に MCP ツールハンドラが emit した side events (node_created など) は
 // 次の SDK メッセージを受け取るタイミングで合流して flush する。

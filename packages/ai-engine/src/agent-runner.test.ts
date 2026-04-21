@@ -227,7 +227,7 @@ describe('runAgent', () => {
       await store.saveProjectMeta({
         id: 'proj-test',
         name: 'FRC integration',
-        codebasePath: codebaseDir,
+        codebases: [{ id: 'main', label: 'Main', path: codebaseDir }],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       });
@@ -287,7 +287,7 @@ describe('runAgent', () => {
     await store.saveProjectMeta({
       id: 'proj-test',
       name: 'P',
-      codebasePath: codebaseDir,
+      codebases: [{ id: 'main', label: 'Main', path: codebaseDir }],
       createdAt: '2026-04-18T00:00:00Z',
       updatedAt: '2026-04-18T00:00:00Z',
     });

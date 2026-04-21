@@ -20,6 +20,7 @@ describe('WS /agent', () => {
     await store.saveProjectMeta({
       id: 'proj-ws',
       name: 'WS',
+      codebases: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
@@ -148,6 +149,7 @@ describe('WS /chat', () => {
     await store.saveProjectMeta({
       id: 'proj-ws',
       name: 'WS',
+      codebases: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });

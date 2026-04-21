@@ -42,7 +42,7 @@ describe('findRelatedCodeAgent.validateInput', () => {
     await store.saveProjectMeta({
       id: 'proj-frc',
       name: 'FRC',
-      codebasePath: codebaseDir,
+      codebases: [{ id: 'main', label: 'Main', path: codebaseDir }],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
@@ -95,10 +95,14 @@ describe('findRelatedCodeAgent.validateInput', () => {
   });
 
   it('codebasePath 未設定は bad_request', async () => {
-    const current = await store.getProjectMeta();
-    if (!current) throw new Error('meta missing');
-    const { codebasePath: _drop, ...rest } = current;
-    await store.saveProjectMeta(rest);
+    // codebases が空の場合は primary が存在しないので bad_request になる。
+    await store.saveProjectMeta({
+      id: 'proj-frc',
+      name: 'FRC',
+      codebases: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
     const uc = await store.addNode({ type: 'usecase', x: 0, y: 0, title: 'uc', body: 'b' });
     const r = await findRelatedCodeAgent.validateInput({ store, workspaceRoot }, { nodeId: uc.id });
     expect(r.ok).toBe(false);
@@ -111,7 +115,7 @@ describe('findRelatedCodeAgent.validateInput', () => {
     await store.saveProjectMeta({
       id: 'proj-frc',
       name: 'FRC',
-      codebasePath: filePath,
+      codebases: [{ id: 'main', label: 'Main', path: filePath }],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
@@ -125,7 +129,7 @@ describe('findRelatedCodeAgent.validateInput', () => {
     await store.saveProjectMeta({
       id: 'proj-frc',
       name: 'FRC',
-      codebasePath: '../nonexistent-xyz',
+      codebases: [{ id: 'main', label: 'Main', path: '../nonexistent-xyz' }],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });

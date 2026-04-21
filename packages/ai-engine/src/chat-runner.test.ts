@@ -19,6 +19,7 @@ describe('ChatRunner', () => {
     await ps.saveProjectMeta({
       id: 'proj-1',
       name: 'P',
+      codebases: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });

@@ -27,3 +27,10 @@ export { initProject } from './init-project';
 export type { InitProjectInput, InitProjectResult } from './init-project';
 export { clearProject } from './clear-project';
 export type { ClearProjectResult } from './clear-project';
+export {
+  discoverProjects,
+  listWorkspaceCandidates,
+  loadProjectById,
+  resolveProjectById,
+} from './project-resolver';
+export type { ProjectHandle, WorkspaceCandidate } from './project-resolver';

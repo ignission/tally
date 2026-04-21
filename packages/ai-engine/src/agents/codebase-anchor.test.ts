@@ -51,13 +51,14 @@ describe('validateCodebaseAnchor', () => {
   });
 
   it('codebasePath 未設定なら bad_request', async () => {
+    // codebases が空配列 → primary が存在しないので bad_request になる。
     const store = makeStore({
       getNode: vi
         .fn()
         .mockResolvedValue({ id: 'uc', type: 'usecase', x: 0, y: 0, title: '', body: '' }),
       getProjectMeta: vi
         .fn()
-        .mockResolvedValue({ id: 'p', name: 'x', createdAt: '', updatedAt: '' }),
+        .mockResolvedValue({ id: 'p', name: 'x', codebases: [], createdAt: '', updatedAt: '' }),
     });
     const r = await validateCodebaseAnchor(
       { store, workspaceRoot },
@@ -80,7 +81,7 @@ describe('validateCodebaseAnchor', () => {
       getProjectMeta: vi.fn().mockResolvedValue({
         id: 'p',
         name: 'x',
-        codebasePath: '/nonexistent/path/xyz',
+        codebases: [{ id: 'main', label: 'Main', path: '/nonexistent/path/xyz' }],
         createdAt: '',
         updatedAt: '',
       }),
@@ -108,7 +109,7 @@ describe('validateCodebaseAnchor', () => {
         .mockResolvedValue({
           id: 'p',
           name: 'x',
-          codebasePath: 'a.txt',
+          codebases: [{ id: 'main', label: 'Main', path: 'a.txt' }],
           createdAt: '',
           updatedAt: '',
         }),
@@ -131,7 +132,13 @@ describe('validateCodebaseAnchor', () => {
       getNode: vi.fn().mockResolvedValue(node),
       getProjectMeta: vi
         .fn()
-        .mockResolvedValue({ id: 'p', name: 'x', codebasePath: '.', createdAt: '', updatedAt: '' }),
+        .mockResolvedValue({
+          id: 'p',
+          name: 'x',
+          codebases: [{ id: 'main', label: 'Main', path: '.' }],
+          createdAt: '',
+          updatedAt: '',
+        }),
     });
     const r = await validateCodebaseAnchor(
       { store, workspaceRoot: dir },
@@ -153,7 +160,7 @@ describe('validateCodebaseAnchor', () => {
       getNode: vi.fn().mockResolvedValue(node),
       getProjectMeta: vi
         .fn()
-        .mockResolvedValue({ id: 'p', name: 'x', createdAt: '', updatedAt: '' }),
+        .mockResolvedValue({ id: 'p', name: 'x', codebases: [], createdAt: '', updatedAt: '' }),
     });
     const r = await validateCodebaseAnchor(
       { store, workspaceRoot },

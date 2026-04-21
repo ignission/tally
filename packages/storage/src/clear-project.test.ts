@@ -18,7 +18,7 @@ describe('clearProject', () => {
   it('nodes / chats を全削除し edges を空配列に、project.yaml は維持', async () => {
     const projectDir = makeProjectDir();
     try {
-      await initProject({ projectDir, name: 'P' });
+      await initProject({ projectDir, name: 'P', codebases: [] });
       const ps = new FileSystemProjectStore(projectDir);
       const cs = new FileSystemChatStore(projectDir);
 
@@ -47,7 +47,7 @@ describe('clearProject', () => {
   it('何も無くても冪等 (ENOENT 許容)', async () => {
     const projectDir = makeProjectDir();
     try {
-      await initProject({ projectDir, name: 'P' });
+      await initProject({ projectDir, name: 'P', codebases: [] });
       const result = await clearProject(projectDir);
       expect(result.removedNodes).toBe(0);
       expect(result.removedChats).toBe(0);
