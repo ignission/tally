@@ -1,92 +1,90 @@
 import { promises as fs } from 'node:fs';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import os from 'node:os';
 import path from 'node:path';
-
-import { describe, expect, it } from 'vitest';
-
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { initProject } from './init-project';
-import { FileSystemProjectStore } from './project-store';
+import { listProjects } from './registry';
 
-function makeRoot(): string {
-  return mkdtempSync(path.join(tmpdir(), 'tally-init-'));
-}
+let tallyHome: string;
+let workspace: string;
+const orig = { ...process.env };
+
+beforeEach(async () => {
+  tallyHome = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-home-'));
+  workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-ws-'));
+  process.env.TALLY_HOME = tallyHome;
+});
+afterEach(async () => {
+  process.env = { ...orig };
+  await fs.rm(tallyHome, { recursive: true, force: true });
+  await fs.rm(workspace, { recursive: true, force: true });
+});
 
 describe('initProject', () => {
-  it('workspaceRoot 配下に .tally/ と project.yaml / edges.yaml / nodes/ を作る', async () => {
-    const root = makeRoot();
-    try {
-      const r = await initProject({ workspaceRoot: root, name: 'MyProject' });
-      expect(r.id.startsWith('proj-')).toBe(true);
-      expect(r.workspaceRoot).toBe(path.resolve(root));
-
-      const store = new FileSystemProjectStore(root);
-      const meta = await store.getProjectMeta();
-      expect(meta).not.toBeNull();
-      expect(meta?.name).toBe('MyProject');
-      expect(meta?.id).toBe(r.id);
-
-      const edges = await store.listEdges();
-      expect(edges).toEqual([]);
-
-      const nodesDirStat = await fs.stat(path.join(root, '.tally', 'nodes'));
-      expect(nodesDirStat.isDirectory()).toBe(true);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+  it('空 projectDir に project.yaml / nodes / edges を作り registry に登録', async () => {
+    const projectDir = path.join(workspace, 'new-proj');
+    const result = await initProject({
+      projectDir,
+      name: 'new proj',
+      codebases: [],
+    });
+    expect(result.id).toMatch(/^proj-/);
+    expect(result.projectDir).toBe(projectDir);
+    expect((await fs.stat(path.join(projectDir, 'project.yaml'))).isFile()).toBe(true);
+    expect((await fs.stat(path.join(projectDir, 'nodes'))).isDirectory()).toBe(true);
+    expect((await fs.stat(path.join(projectDir, 'edges', 'edges.yaml'))).isFile()).toBe(true);
+    const reg = await listProjects();
+    expect(reg.map((p) => p.id)).toContain(result.id);
   });
 
-  it('description を渡すと meta に保存される', async () => {
-    const root = makeRoot();
-    try {
-      await initProject({ workspaceRoot: root, name: 'P', description: '説明文' });
-      const store = new FileSystemProjectStore(root);
-      const meta = await store.getProjectMeta();
-      expect(meta?.description).toBe('説明文');
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+  it('codebases を受け取って保存', async () => {
+    const projectDir = path.join(workspace, 'with-cb');
+    const codebases = [{ id: 'web', label: 'Web', path: '/w' }];
+    await initProject({ projectDir, name: 'x', codebases });
+    const raw = await fs.readFile(path.join(projectDir, 'project.yaml'), 'utf8');
+    expect(raw).toContain('web');
+    expect(raw).toContain('/w');
   });
 
-  it('workspaceRoot が存在しなければ throw', async () => {
+  it('codebases 0 件でも成功する', async () => {
+    const projectDir = path.join(workspace, 'no-cb');
+    await expect(initProject({ projectDir, name: 'x', codebases: [] })).resolves.toBeDefined();
+  });
+
+  it('既存の project.yaml を含む dir は拒否', async () => {
+    const projectDir = path.join(workspace, 'existing');
+    await fs.mkdir(projectDir);
+    await fs.writeFile(path.join(projectDir, 'project.yaml'), 'id: old\n');
     await expect(
-      initProject({ workspaceRoot: '/nonexistent/path/xyz', name: 'P' }),
-    ).rejects.toThrow(/存在しない/);
+      initProject({ projectDir, name: 'x', codebases: [] }),
+    ).rejects.toThrow(/既存の project\.yaml/);
   });
 
-  it('workspaceRoot がファイルなら throw', async () => {
-    const root = makeRoot();
-    const file = path.join(root, 'a.txt');
-    await fs.writeFile(file, 'x');
-    try {
-      await expect(initProject({ workspaceRoot: file, name: 'P' })).rejects.toThrow(
-        /ディレクトリではない/,
-      );
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+  it('非空の dir で project.yaml 無しは拒否', async () => {
+    const projectDir = path.join(workspace, 'dirty');
+    await fs.mkdir(projectDir);
+    await fs.writeFile(path.join(projectDir, 'random.txt'), 'x');
+    await expect(
+      initProject({ projectDir, name: 'x', codebases: [] }),
+    ).rejects.toThrow(/空ではありません/);
   });
 
-  it('既に .tally/ があれば throw', async () => {
-    const root = makeRoot();
-    try {
-      await initProject({ workspaceRoot: root, name: 'First' });
-      await expect(initProject({ workspaceRoot: root, name: 'Second' })).rejects.toThrow(
-        /既に .tally/,
-      );
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+  it('存在しないパスでも親ディレクトリが存在すれば成功', async () => {
+    const projectDir = path.join(workspace, 'fresh');
+    await initProject({ projectDir, name: 'x', codebases: [] });
+    expect((await fs.stat(projectDir)).isDirectory()).toBe(true);
   });
 
-  it('name が空なら throw', async () => {
-    const root = makeRoot();
-    try {
-      await expect(initProject({ workspaceRoot: root, name: '   ' })).rejects.toThrow(
-        /name が空/,
-      );
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+  it('親ディレクトリが存在しないパスは拒否', async () => {
+    const projectDir = path.join(workspace, 'missing-parent', 'sub');
+    await expect(
+      initProject({ projectDir, name: 'x', codebases: [] }),
+    ).rejects.toThrow(/親ディレクトリ/);
+  });
+
+  it('name が空は拒否', async () => {
+    await expect(
+      initProject({ projectDir: path.join(workspace, 'p'), name: '  ', codebases: [] }),
+    ).rejects.toThrow(/name/);
   });
 });

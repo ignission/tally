@@ -6,6 +6,7 @@ export {
   ChatMessageSchema,
   ChatThreadMetaSchema,
   ChatThreadSchema,
+  CodebaseSchema,
   EDGE_TYPES,
   EdgeSchema,
   NODE_TYPES,
@@ -24,6 +25,7 @@ export {
   IssueNodeSchema,
   ProposalNodeSchema,
 } from './schema';
+export type { Codebase } from './schema';
 export { EDGE_META, NODE_META } from './meta';
 export type { EdgeMeta, NodeMeta } from './meta';
 export {
