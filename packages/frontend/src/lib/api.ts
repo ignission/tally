@@ -225,3 +225,15 @@ export function adoptProposal(
     body: JSON.stringify({ adoptAs, additional }),
   });
 }
+
+// GET /api/projects/default-path: プロジェクト名から保存先を提案。
+export async function fetchDefaultProjectPath(name: string): Promise<string> {
+  const res = await fetch(
+    `/api/projects/default-path?name=${encodeURIComponent(name)}`,
+  );
+  if (!res.ok) {
+    throw new Error(`GET /api/projects/default-path ${res.status}`);
+  }
+  const body = (await res.json()) as { path: string };
+  return body.path;
+}

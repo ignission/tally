@@ -6,6 +6,7 @@ import {
   createProject,
   deleteEdge,
   deleteNode,
+  fetchDefaultProjectPath,
   fetchRegistryProjects,
   importProject,
   listDirectory,
@@ -278,5 +279,24 @@ describe('mkdir', () => {
     expect(res.path).toBe('/a/b');
     const body = JSON.parse((spy.mock.calls[0]?.[1] as RequestInit).body as string) as unknown;
     expect(body).toEqual({ path: '/a', name: 'b' });
+  });
+});
+
+describe('fetchDefaultProjectPath', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it('/api/projects/default-path?name= を叩いて path を返す', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ path: '/home/you/.local/share/tally/projects/my-proj' }),
+        {
+          status: 200,
+        },
+      ),
+    ) as typeof fetch;
+    const p = await fetchDefaultProjectPath('My Proj');
+    expect(p).toContain('/my-proj');
   });
 });

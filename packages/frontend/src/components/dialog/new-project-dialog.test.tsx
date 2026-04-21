@@ -13,6 +13,13 @@ beforeEach(() => {
     if (u.pathname === '/api/projects' && init?.method === 'POST') {
       return new Response(JSON.stringify({ id: 'proj-new', projectDir: '/x' }), { status: 201 });
     }
+    if (u.pathname === '/api/projects/default-path') {
+      const name = u.searchParams.get('name') ?? 'default';
+      return new Response(
+        JSON.stringify({ path: `/home/you/.local/share/tally/projects/${name.toLowerCase()}` }),
+        { status: 200 },
+      );
+    }
     if (u.pathname === '/api/fs/ls') {
       return new Response(
         JSON.stringify({

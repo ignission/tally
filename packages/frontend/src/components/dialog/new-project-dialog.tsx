@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
 
 import type { Codebase } from '@tally/core';
-import { createProject } from '@/lib/api';
+import { createProject, fetchDefaultProjectPath } from '@/lib/api';
 import { FolderBrowserDialog } from './folder-browser-dialog';
 
 interface Props {
@@ -17,6 +17,7 @@ export function NewProjectDialog({ open, onClose }: Props) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [projectDir, setProjectDir] = useState('');
+  const [dirManuallySet, setDirManuallySet] = useState(false);
   const [codebases, setCodebases] = useState<Codebase[]>([]);
   const [pickerFor, setPickerFor] = useState<null | 'root' | 'codebase'>(null);
   const [busy, setBusy] = useState(false);
@@ -40,8 +41,20 @@ export function NewProjectDialog({ open, onClose }: Props) {
     projectDir.trim().length === 0 ||
     duplicateIds.size > 0;
 
+  const onNameBlur = async () => {
+    if (dirManuallySet) return;
+    if (name.trim().length === 0) return;
+    try {
+      const suggested = await fetchDefaultProjectPath(name.trim());
+      setProjectDir(suggested);
+    } catch {
+      // 提案失敗は無視
+    }
+  };
+
   const onPickRoot = (p: string) => {
     setProjectDir(p);
+    setDirManuallySet(true);
     setPickerFor(null);
   };
 
@@ -87,6 +100,7 @@ export function NewProjectDialog({ open, onClose }: Props) {
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
+            onBlur={() => void onNameBlur()}
             disabled={busy}
             style={INPUT}
           />
