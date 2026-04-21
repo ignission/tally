@@ -11,7 +11,7 @@ import {
   type ChatThreadMeta,
 } from '@tally/core';
 
-import { chatFileName, resolveTallyPaths } from './paths';
+import { chatFileName, resolveProjectPaths } from './project-dir';
 import { readYaml, writeYaml } from './yaml';
 
 export interface CreateChatInput {
@@ -60,13 +60,13 @@ export interface ChatStore {
 }
 
 export class FileSystemChatStore implements ChatStore {
-  private readonly paths: ReturnType<typeof resolveTallyPaths>;
+  private readonly paths: ReturnType<typeof resolveProjectPaths>;
   // 同一スレッドへの書き込みを FIFO 直列化するための mutex 集合。
   // 並列 appendBlockToMessage が来た時に read-modify-write が重ならないようにする。
   private readonly writeLocks = new Map<string, Promise<unknown>>();
 
-  constructor(workspaceRoot: string) {
-    this.paths = resolveTallyPaths(workspaceRoot);
+  constructor(projectDir: string) {
+    this.paths = resolveProjectPaths(projectDir);
   }
 
   // 指定 threadId に対する書き込みを直列化する。

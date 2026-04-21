@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-import { resolveTallyPaths } from './paths';
+import { resolveProjectPaths } from './project-dir';
 
 export interface ClearProjectResult {
   removedNodes: number;
@@ -11,8 +11,8 @@ export interface ClearProjectResult {
 
 // プロジェクトの内容を初期化する。project.yaml は維持、nodes/*.yaml と chats/*.yaml を全削除、
 // edges.yaml は空配列に書き戻す。呼び出し側 (UI/CLI) が確認ダイアログを出す前提。
-export async function clearProject(workspaceRoot: string): Promise<ClearProjectResult> {
-  const paths = resolveTallyPaths(workspaceRoot);
+export async function clearProject(projectDir: string): Promise<ClearProjectResult> {
+  const paths = resolveProjectPaths(projectDir);
   const removedNodes = await clearDir(paths.nodesDir);
   const removedChats = await clearDir(paths.chatsDir);
   // edges.yaml を空配列で書き直す (無ければ作成)。

@@ -3,42 +3,42 @@ import path from 'node:path';
 
 import { newProjectId } from '@tally/core';
 
-import { resolveTallyPaths } from './paths';
+import { resolveProjectPaths } from './project-dir';
 import { FileSystemProjectStore } from './project-store';
 
 export interface InitProjectInput {
-  // 初期化先のディレクトリ (絶対パス、既存)。ここに .tally/ を掘る。
-  workspaceRoot: string;
+  // 初期化先のディレクトリ (絶対パス、既存)。ここに node/ chats/ 等を掘る。
+  projectDir: string;
   name: string;
   description?: string;
 }
 
 export interface InitProjectResult {
   id: string;
-  workspaceRoot: string;
+  projectDir: string;
 }
 
-// UI / CLI から呼ぶプロジェクト初期化。workspaceRoot 配下に .tally/ 一式を作る。
-// 失敗条件: workspaceRoot 非存在 / ディレクトリではない / 既に .tally/ がある。
+// UI / CLI から呼ぶプロジェクト初期化。projectDir 配下に node/, chats/ 一式を作る。
+// 失敗条件: projectDir 非存在 / ディレクトリではない / 既に project.yaml がある。
 export async function initProject(input: InitProjectInput): Promise<InitProjectResult> {
-  const absWorkspaceRoot = path.resolve(input.workspaceRoot);
+  const absProjectDir = path.resolve(input.projectDir);
 
-  // 1. workspaceRoot の存在・ディレクトリ確認
+  // 1. projectDir の存在・ディレクトリ確認
   let stat: Awaited<ReturnType<typeof fs.stat>>;
   try {
-    stat = await fs.stat(absWorkspaceRoot);
+    stat = await fs.stat(absProjectDir);
   } catch {
-    throw new Error(`workspaceRoot が存在しない: ${absWorkspaceRoot}`);
+    throw new Error(`projectDir が存在しない: ${absProjectDir}`);
   }
   if (!stat.isDirectory()) {
-    throw new Error(`workspaceRoot がディレクトリではない: ${absWorkspaceRoot}`);
+    throw new Error(`projectDir がディレクトリではない: ${absProjectDir}`);
   }
 
-  // 2. 既存 .tally/ 重複ガード
-  const paths = resolveTallyPaths(absWorkspaceRoot);
+  // 2. 既存 project.yaml 重複ガード
+  const paths = resolveProjectPaths(absProjectDir);
   try {
-    await fs.stat(paths.root);
-    throw new Error(`既に .tally/ が存在: ${paths.root}`);
+    await fs.stat(paths.projectFile);
+    throw new Error(`既に project.yaml が存在: ${paths.projectFile}`);
   } catch (err) {
     // ENOENT 以外は投げる (権限エラー等)
     const code = (err as NodeJS.ErrnoException).code;
@@ -57,10 +57,11 @@ export async function initProject(input: InitProjectInput): Promise<InitProjectR
 
   const id = newProjectId();
   const now = new Date().toISOString();
-  const store = new FileSystemProjectStore(absWorkspaceRoot);
+  const store = new FileSystemProjectStore(absProjectDir);
   await store.saveProjectMeta({
     id,
     name,
+    codebases: [],
     ...(input.description ? { description: input.description } : {}),
     createdAt: now,
     updatedAt: now,
@@ -68,5 +69,5 @@ export async function initProject(input: InitProjectInput): Promise<InitProjectR
   // edges.yaml は ProjectStore 経由で空配列を書く (listEdges が最初から読める)。
   await fs.writeFile(paths.edgesFile, 'edges: []\n', 'utf8');
 
-  return { id, workspaceRoot: absWorkspaceRoot };
+  return { id, projectDir: absProjectDir };
 }

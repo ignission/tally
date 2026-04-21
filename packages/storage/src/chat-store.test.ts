@@ -1,20 +1,21 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { promises as fs } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
 import { FileSystemChatStore } from './chat-store';
 
-function makeRoot(): string {
+function makeProjectDir(): string {
   return mkdtempSync(path.join(tmpdir(), 'tally-chat-'));
 }
 
 describe('FileSystemChatStore', () => {
   it('createChat → listChats で新規スレッドが出る', async () => {
-    const root = makeRoot();
+    const projectDir = makeProjectDir();
     try {
-      const store = new FileSystemChatStore(root);
+      const store = new FileSystemChatStore(projectDir);
       const thread = await store.createChat({ projectId: 'proj-1', title: '新規検討' });
       expect(thread.id.startsWith('chat-')).toBe(true);
       expect(thread.title).toBe('新規検討');
@@ -23,14 +24,14 @@ describe('FileSystemChatStore', () => {
       expect(list.map((t) => t.id)).toContain(thread.id);
       expect(list[0]?.title).toBe('新規検討');
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
     }
   });
 
   it('appendMessage でメッセージが追加され updatedAt が更新', async () => {
-    const root = makeRoot();
+    const projectDir = makeProjectDir();
     try {
-      const store = new FileSystemChatStore(root);
+      const store = new FileSystemChatStore(projectDir);
       const thread = await store.createChat({ projectId: 'proj-1', title: 't' });
       const beforeUpdated = thread.updatedAt;
       await new Promise((r) => setTimeout(r, 10));
@@ -45,14 +46,14 @@ describe('FileSystemChatStore', () => {
       const reloaded = await store.getChat(thread.id);
       expect(reloaded?.messages[0]?.blocks[0]).toEqual({ type: 'text', text: 'hello' });
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
     }
   });
 
   it('updateMessageBlock で特定 block の approval を変更できる', async () => {
-    const root = makeRoot();
+    const projectDir = makeProjectDir();
     try {
-      const store = new FileSystemChatStore(root);
+      const store = new FileSystemChatStore(projectDir);
       const thread = await store.createChat({ projectId: 'proj-1', title: 't' });
       await store.appendMessage(thread.id, {
         id: 'msg-1',
@@ -80,27 +81,27 @@ describe('FileSystemChatStore', () => {
       const block = reloaded?.messages[0]?.blocks[1];
       expect(block && block.type === 'tool_use' && block.approval === 'approved').toBe(true);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
     }
   });
 
   it('updateChatTitle でタイトル変更', async () => {
-    const root = makeRoot();
+    const projectDir = makeProjectDir();
     try {
-      const store = new FileSystemChatStore(root);
+      const store = new FileSystemChatStore(projectDir);
       const thread = await store.createChat({ projectId: 'proj-1', title: 'old' });
       await store.updateChatTitle(thread.id, '新タイトル');
       const reloaded = await store.getChat(thread.id);
       expect(reloaded?.title).toBe('新タイトル');
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
     }
   });
 
   it('listChats は updatedAt 降順', async () => {
-    const root = makeRoot();
+    const projectDir = makeProjectDir();
     try {
-      const store = new FileSystemChatStore(root);
+      const store = new FileSystemChatStore(projectDir);
       const t1 = await store.createChat({ projectId: 'p', title: 'first' });
       await new Promise((r) => setTimeout(r, 10));
       const t2 = await store.createChat({ projectId: 'p', title: 'second' });
@@ -108,24 +109,24 @@ describe('FileSystemChatStore', () => {
       expect(list[0]?.id).toBe(t2.id);
       expect(list[1]?.id).toBe(t1.id);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
     }
   });
 
   it('存在しないスレッドは getChat で null', async () => {
-    const root = makeRoot();
+    const projectDir = makeProjectDir();
     try {
-      const store = new FileSystemChatStore(root);
+      const store = new FileSystemChatStore(projectDir);
       expect(await store.getChat('chat-missing')).toBeNull();
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
     }
   });
 
   it('appendMessage で存在しないスレッド ID は throw', async () => {
-    const root = makeRoot();
+    const projectDir = makeProjectDir();
     try {
-      const store = new FileSystemChatStore(root);
+      const store = new FileSystemChatStore(projectDir);
       await expect(
         store.appendMessage('chat-missing', {
           id: 'msg-1',
@@ -135,14 +136,14 @@ describe('FileSystemChatStore', () => {
         }),
       ).rejects.toThrow(/thread が存在しない/);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
     }
   });
 
   it('appendBlockToMessage で既存メッセージの blocks に append される', async () => {
-    const root = makeRoot();
+    const projectDir = makeProjectDir();
     try {
-      const store = new FileSystemChatStore(root);
+      const store = new FileSystemChatStore(projectDir);
       const thread = await store.createChat({ projectId: 'proj-1', title: 't' });
       await store.appendMessage(thread.id, {
         id: 'msg-1',
@@ -167,14 +168,14 @@ describe('FileSystemChatStore', () => {
         approval: 'pending',
       });
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
     }
   });
 
   it('appendBlockToMessage で存在しない messageId は throw', async () => {
-    const root = makeRoot();
+    const projectDir = makeProjectDir();
     try {
-      const store = new FileSystemChatStore(root);
+      const store = new FileSystemChatStore(projectDir);
       const thread = await store.createChat({ projectId: 'proj-1', title: 't' });
       await expect(
         store.appendBlockToMessage(thread.id, 'msg-missing', {
@@ -183,14 +184,14 @@ describe('FileSystemChatStore', () => {
         }),
       ).rejects.toThrow(/message が存在しない/);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
     }
   });
 
   it('replaceMessageBlocks で blocks 配列を置換 + updatedAt 更新', async () => {
-    const root = makeRoot();
+    const projectDir = makeProjectDir();
     try {
-      const store = new FileSystemChatStore(root);
+      const store = new FileSystemChatStore(projectDir);
       const thread = await store.createChat({ projectId: 'proj-1', title: 't' });
       const created = await store.appendMessage(thread.id, {
         id: 'msg-1',
@@ -210,14 +211,14 @@ describe('FileSystemChatStore', () => {
       expect(reloaded?.messages[0]?.blocks[1]).toEqual({ type: 'text', text: 'beta' });
       expect(reloaded && reloaded.updatedAt > before).toBe(true);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
     }
   });
 
   it('updateBlockApproval で該当 toolUseId の approval を更新', async () => {
-    const root = makeRoot();
+    const projectDir = makeProjectDir();
     try {
-      const store = new FileSystemChatStore(root);
+      const store = new FileSystemChatStore(projectDir);
       const thread = await store.createChat({ projectId: 'proj-1', title: 't' });
       await store.appendMessage(thread.id, {
         id: 'msg-1',
@@ -251,14 +252,14 @@ describe('FileSystemChatStore', () => {
       // tool-b のみ approved に遷移
       expect(blocks[2]?.type === 'tool_use' && blocks[2].approval === 'approved').toBe(true);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
     }
   });
 
   it('並列 appendBlockToMessage (Promise.all 3 件) が全件永続化される', async () => {
-    const root = makeRoot();
+    const projectDir = makeProjectDir();
     try {
-      const store = new FileSystemChatStore(root);
+      const store = new FileSystemChatStore(projectDir);
       const thread = await store.createChat({ projectId: 'proj-1', title: 't' });
       await store.appendMessage(thread.id, {
         id: 'msg-1',
@@ -281,14 +282,14 @@ describe('FileSystemChatStore', () => {
         .sort();
       expect(texts).toEqual(['A', 'B', 'C']);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
     }
   });
 
   it('deleteChat で YAML が消え listChats から外れる、存在しない id は no-op', async () => {
-    const root = makeRoot();
+    const projectDir = makeProjectDir();
     try {
-      const store = new FileSystemChatStore(root);
+      const store = new FileSystemChatStore(projectDir);
       const t1 = await store.createChat({ projectId: 'p', title: 'a' });
       const t2 = await store.createChat({ projectId: 'p', title: 'b' });
       expect((await store.listChats()).length).toBe(2);
@@ -299,7 +300,7 @@ describe('FileSystemChatStore', () => {
       await store.deleteChat('chat-missing');
       expect((await store.listChats()).length).toBe(1);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
     }
   });
 });
