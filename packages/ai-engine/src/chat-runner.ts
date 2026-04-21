@@ -20,7 +20,7 @@ export interface ChatRunnerDeps {
   sdk: SdkLike;
   chatStore: ChatStore;
   projectStore: ProjectStore;
-  workspaceRoot: string;
+  projectDir: string;
   threadId: string;
 }
 
@@ -79,7 +79,7 @@ export class ChatRunner {
   // 4) text block は buffer + delta emit。tool_use は MCP ハンドラ内で承認 intercept される。
   // 5) turn 末に text blocks を assistant message 先頭に統合
   async *runUserTurn(userText: string): AsyncGenerator<ChatEvent> {
-    const { sdk, chatStore, workspaceRoot, threadId } = this.deps;
+    const { sdk, chatStore, projectDir, threadId } = this.deps;
 
     const thread = await chatStore.getChat(threadId);
     if (!thread) {
@@ -141,7 +141,7 @@ export class ChatRunner {
             ],
             permissionMode: 'dontAsk',
             settingSources: [],
-            cwd: workspaceRoot,
+            cwd: projectDir,
             ...(process.env.CLAUDE_CODE_PATH
               ? { pathToClaudeCodeExecutable: process.env.CLAUDE_CODE_PATH }
               : {}),

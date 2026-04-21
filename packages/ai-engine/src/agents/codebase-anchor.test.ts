@@ -17,13 +17,13 @@ function makeStore(overrides: Partial<ProjectStore>): ProjectStore {
 }
 
 describe('validateCodebaseAnchor', () => {
-  const workspaceRoot = '/workspace';
+  const projectDir = '/workspace';
   const allowed = ['usecase', 'requirement', 'userstory'] as const;
 
   it('nodeId が存在しなければ not_found', async () => {
     const store = makeStore({ getNode: vi.fn().mockResolvedValue(null) });
     const r = await validateCodebaseAnchor(
-      { store, workspaceRoot },
+      { store, projectDir },
       'x',
       allowed,
       'analyze-impact',
@@ -38,7 +38,7 @@ describe('validateCodebaseAnchor', () => {
         .mockResolvedValue({ id: 'n', type: 'issue', x: 0, y: 0, title: '', body: '' }),
     });
     const r = await validateCodebaseAnchor(
-      { store, workspaceRoot },
+      { store, projectDir },
       'n',
       allowed,
       'analyze-impact',
@@ -61,7 +61,7 @@ describe('validateCodebaseAnchor', () => {
         .mockResolvedValue({ id: 'p', name: 'x', codebases: [], createdAt: '', updatedAt: '' }),
     });
     const r = await validateCodebaseAnchor(
-      { store, workspaceRoot },
+      { store, projectDir },
       'uc',
       allowed,
       'analyze-impact',
@@ -87,7 +87,7 @@ describe('validateCodebaseAnchor', () => {
       }),
     });
     const r = await validateCodebaseAnchor(
-      { store, workspaceRoot: '/' },
+      { store, projectDir: '/' },
       'uc',
       allowed,
       'analyze-impact',
@@ -115,7 +115,7 @@ describe('validateCodebaseAnchor', () => {
         }),
     });
     const r = await validateCodebaseAnchor(
-      { store, workspaceRoot: dir },
+      { store, projectDir: dir },
       'uc',
       allowed,
       'analyze-impact',
@@ -141,7 +141,7 @@ describe('validateCodebaseAnchor', () => {
         }),
     });
     const r = await validateCodebaseAnchor(
-      { store, workspaceRoot: dir },
+      { store, projectDir: dir },
       'uc',
       allowed,
       'analyze-impact',
@@ -163,7 +163,7 @@ describe('validateCodebaseAnchor', () => {
         .mockResolvedValue({ id: 'p', name: 'x', codebases: [], createdAt: '', updatedAt: '' }),
     });
     const r = await validateCodebaseAnchor(
-      { store, workspaceRoot },
+      { store, projectDir },
       'uc',
       allowed,
       'extract-questions',
@@ -179,7 +179,7 @@ describe('validateCodebaseAnchor', () => {
   it('requireCodebasePath: false でも nodeId 不存在 / 対象外 type は従来通り弾く', async () => {
     const store = makeStore({ getNode: vi.fn().mockResolvedValue(null) });
     const r = await validateCodebaseAnchor(
-      { store, workspaceRoot },
+      { store, projectDir },
       'missing',
       allowed,
       'extract-questions',

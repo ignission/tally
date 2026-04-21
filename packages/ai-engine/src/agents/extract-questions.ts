@@ -72,9 +72,9 @@ const ALLOWED_ANCHOR_TYPES = ['usecase', 'requirement', 'userstory'] as const;
 export const extractQuestionsAgent: AgentDefinition<ExtractQuestionsInput> = {
   name: 'extract-questions',
   inputSchema: ExtractQuestionsInputSchema,
-  async validateInput({ store, workspaceRoot }, input) {
+  async validateInput({ store, projectDir }, input) {
     return validateCodebaseAnchor(
-      { store, workspaceRoot },
+      { store, projectDir },
       input.nodeId,
       ALLOWED_ANCHOR_TYPES,
       'extract-questions',

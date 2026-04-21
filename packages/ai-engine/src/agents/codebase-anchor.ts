@@ -34,7 +34,7 @@ export interface ValidateCodebaseAnchorOptions {
 // Task 24 時点では primary codebase (codebases[0]) のみを使用。
 // 複数 codebase を跨いだ探索は別 spec のスコープ (out-of-scope)。
 export async function validateCodebaseAnchor(
-  deps: { store: ProjectStore; workspaceRoot: string },
+  deps: { store: ProjectStore; projectDir: string },
   nodeId: string,
   allowedTypes: readonly NodeType[],
   agentLabel: string,
@@ -68,8 +68,8 @@ export async function validateCodebaseAnchor(
       message: 'プロジェクト設定で codebasePath を指定してください',
     };
   }
-  // primary.path は絶対パスまたは workspaceRoot 相対パスとして解決する。
-  const abs = path.resolve(deps.workspaceRoot, primary.path);
+  // primary.path は絶対パスまたは projectDir 相対パスとして解決する。
+  const abs = path.resolve(deps.projectDir, primary.path);
   try {
     const st = await fs.stat(abs);
     if (!st.isDirectory()) {

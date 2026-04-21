@@ -48,7 +48,7 @@ export interface SdkLike {
 export interface RunAgentDeps {
   sdk: SdkLike;
   store: ProjectStore;
-  workspaceRoot: string;
+  projectDir: string;
   req: StartRequest;
 }
 
@@ -58,7 +58,7 @@ export interface RunAgentDeps {
 // SDK 呼び出し中に MCP ツールハンドラが emit した side events (node_created など) は
 // 次の SDK メッセージを受け取るタイミングで合流して flush する。
 export async function* runAgent(deps: RunAgentDeps): AsyncGenerator<AgentEvent> {
-  const { sdk, store, workspaceRoot, req } = deps;
+  const { sdk, store, projectDir, req } = deps;
   yield { type: 'start', agent: req.agent, input: req.input };
 
   const def = AGENT_REGISTRY[req.agent];
@@ -77,7 +77,7 @@ export async function* runAgent(deps: RunAgentDeps): AsyncGenerator<AgentEvent> 
   // validateInput の input 型は各エージェント入力型の intersection になる。
   // 実際には req.agent に対応する def の inputSchema で既に safeParse 済みのため unknown 経由でキャストする。
   const vr = await def.validateInput(
-    { store, workspaceRoot },
+    { store, projectDir },
     parsed.data as unknown as never,
   );
   if (!vr.ok) {

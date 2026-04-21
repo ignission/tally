@@ -41,7 +41,7 @@ export interface AgentDefinition<TInput = unknown> {
   name: AgentName;
   inputSchema: z.ZodType<TInput>;
   validateInput(
-    deps: { store: ProjectStore; workspaceRoot: string },
+    deps: { store: ProjectStore; projectDir: string },
     input: TInput,
   ): Promise<AgentValidateResult>;
   buildPrompt(args: AgentPromptInput): AgentPrompt;

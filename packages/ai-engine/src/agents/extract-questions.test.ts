@@ -68,7 +68,7 @@ describe('extractQuestionsAgent', () => {
         .mockResolvedValue({ id: 'p', name: 'x', createdAt: '', updatedAt: '' }),
     } as unknown as ProjectStore;
     const r = await extractQuestionsAgent.validateInput(
-      { store, workspaceRoot: '/ws' },
+      { store, projectDir: '/ws' },
       { nodeId: 'uc-1' },
     );
     expect(r.ok).toBe(true);
@@ -85,7 +85,7 @@ describe('extractQuestionsAgent', () => {
       getProjectMeta: vi.fn().mockResolvedValue(null),
     } as unknown as ProjectStore;
     const r = await extractQuestionsAgent.validateInput(
-      { store, workspaceRoot: '/ws' },
+      { store, projectDir: '/ws' },
       { nodeId: 'i-1' },
     );
     expect(r.ok).toBe(false);

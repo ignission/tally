@@ -85,9 +85,9 @@ const ALLOWED_ANCHOR_TYPES = ['usecase', 'requirement', 'userstory'] as const;
 export const analyzeImpactAgent: AgentDefinition<AnalyzeImpactInput> = {
   name: 'analyze-impact',
   inputSchema: AnalyzeImpactInputSchema,
-  async validateInput({ store, workspaceRoot }, input) {
+  async validateInput({ store, projectDir }, input) {
     return validateCodebaseAnchor(
-      { store, workspaceRoot },
+      { store, projectDir },
       input.nodeId,
       ALLOWED_ANCHOR_TYPES,
       'analyze-impact',

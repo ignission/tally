@@ -50,7 +50,7 @@ describe('ChatRunner', () => {
       sdk,
       chatStore,
       projectStore,
-      workspaceRoot: root,
+      projectDir: root,
       threadId: thread.id,
     });
 
@@ -96,7 +96,7 @@ describe('ChatRunner', () => {
       sdk,
       chatStore,
       projectStore,
-      workspaceRoot: root,
+      projectDir: root,
       threadId: thread.id,
     });
 
@@ -148,7 +148,7 @@ describe('ChatRunner', () => {
       sdk,
       chatStore,
       projectStore,
-      workspaceRoot: root,
+      projectDir: root,
       threadId: thread.id,
     });
 

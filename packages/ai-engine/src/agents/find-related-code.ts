@@ -59,9 +59,9 @@ const ALLOWED_ANCHOR_TYPES = ['usecase', 'requirement', 'userstory'] as const;
 export const findRelatedCodeAgent: AgentDefinition<FindRelatedCodeInput> = {
   name: 'find-related-code',
   inputSchema: FindRelatedCodeInputSchema,
-  async validateInput({ store, workspaceRoot }, input) {
+  async validateInput({ store, projectDir }, input) {
     return validateCodebaseAnchor(
-      { store, workspaceRoot },
+      { store, projectDir },
       input.nodeId,
       ALLOWED_ANCHOR_TYPES,
       'find-related-code',

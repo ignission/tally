@@ -75,7 +75,7 @@ describe('runAgent', () => {
     for await (const e of runAgent({
       sdk: mockSdk as never,
       store,
-      workspaceRoot: root,
+      projectDir: root,
       req: {
         type: 'start',
         agent: 'decompose-to-stories',
@@ -116,7 +116,7 @@ describe('runAgent', () => {
     for await (const e of runAgent({
       sdk: mockSdk as never,
       store,
-      workspaceRoot: root,
+      projectDir: root,
       req: {
         type: 'start',
         agent: 'decompose-to-stories',
@@ -148,7 +148,7 @@ describe('runAgent', () => {
     for await (const e of runAgent({
       sdk: mockSdk as never,
       store,
-      workspaceRoot: root,
+      projectDir: root,
       req: {
         type: 'start',
         agent: 'decompose-to-stories',
@@ -173,7 +173,7 @@ describe('runAgent', () => {
     for await (const e of runAgent({
       sdk: mockSdk as never,
       store,
-      workspaceRoot: root,
+      projectDir: root,
       req: {
         type: 'start',
         // biome-ignore lint/suspicious/noExplicitAny: 未知 agent を注入するための意図的キャスト
@@ -202,7 +202,7 @@ describe('runAgent', () => {
     for await (const e of runAgent({
       sdk: mockSdk as never,
       store,
-      workspaceRoot: root,
+      projectDir: root,
       req: {
         type: 'start',
         agent: 'decompose-to-stories',
@@ -221,7 +221,7 @@ describe('runAgent', () => {
   });
 
   it('find-related-code では built-in ツールが Read/Glob/Grep のみに絞られ Bash/Edit/Write は含まない', async () => {
-    // codebasePath を解決可能にするため、workspaceRoot に meta と codebase dir を仕立てる。
+    // codebasePath を解決可能にするため、projectDir に meta と codebase dir を仕立てる。
     const codebaseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-codebase-'));
     try {
       await store.saveProjectMeta({
@@ -256,7 +256,7 @@ describe('runAgent', () => {
       for await (const e of runAgent({
         sdk: mockSdk as never,
         store,
-        workspaceRoot: root,
+        projectDir: root,
         req: {
           type: 'start',
           agent: 'find-related-code',
@@ -315,7 +315,7 @@ describe('runAgent', () => {
     for await (const e of runAgent({
       sdk: mockSdk as never,
       store,
-      workspaceRoot: root,
+      projectDir: root,
       req: {
         type: 'start',
         agent: 'analyze-impact',
@@ -354,7 +354,7 @@ describe('runAgent', () => {
   });
 
   it('extract-questions: codebasePath 無しで start + tool_use イベントを流す', async () => {
-    const workspaceRoot = '/ws';
+    const projectDir = '/ws';
     const anchor = {
       id: 'uc-1',
       type: 'usecase' as const,
@@ -409,7 +409,7 @@ describe('runAgent', () => {
     for await (const e of runAgent({
       sdk,
       store,
-      workspaceRoot,
+      projectDir,
       req: {
         type: 'start',
         agent: 'extract-questions',
@@ -466,7 +466,7 @@ describe('runAgent', () => {
     for await (const e of runAgent({
       sdk,
       store,
-      workspaceRoot: '/ws',
+      projectDir: '/ws',
       req: {
         type: 'start',
         agent: 'ingest-document',

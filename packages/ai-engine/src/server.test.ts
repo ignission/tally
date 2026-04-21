@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { FileSystemChatStore, FileSystemProjectStore } from '@tally/storage';
+import { FileSystemChatStore, FileSystemProjectStore, registerProject } from '@tally/storage';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 
@@ -11,11 +11,14 @@ import type { AgentEvent } from './stream';
 
 describe('WS /agent', () => {
   let root: string;
+  let tallyHome: string;
   let close: (() => Promise<void>) | null = null;
-  const prev = process.env.TALLY_WORKSPACE;
+  const prevTallyHome = process.env.TALLY_HOME;
 
   beforeEach(async () => {
     root = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-ws-'));
+    tallyHome = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-home-'));
+    process.env.TALLY_HOME = tallyHome;
     const store = new FileSystemProjectStore(root);
     await store.saveProjectMeta({
       id: 'proj-ws',
@@ -26,14 +29,15 @@ describe('WS /agent', () => {
     });
     await fs.mkdir(path.join(root, '.tally', 'nodes'), { recursive: true });
     await store.addNode({ type: 'usecase', x: 0, y: 0, title: 'uc', body: 'b' });
-    process.env.TALLY_WORKSPACE = root;
+    await registerProject({ id: 'proj-ws', path: root });
   });
 
   afterEach(async () => {
-    process.env.TALLY_WORKSPACE = prev;
+    process.env.TALLY_HOME = prevTallyHome;
     if (close) await close();
     close = null;
     await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(tallyHome, { recursive: true, force: true });
   });
 
   it('start → mock sdk → done が WS で返ってくる', async () => {
@@ -140,11 +144,14 @@ describe('WS /agent', () => {
 
 describe('WS /chat', () => {
   let root: string;
+  let tallyHome: string;
   let close: (() => Promise<void>) | null = null;
-  const prev = process.env.TALLY_WORKSPACE;
+  const prevTallyHome = process.env.TALLY_HOME;
 
   beforeEach(async () => {
     root = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-ws-chat-'));
+    tallyHome = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-home-'));
+    process.env.TALLY_HOME = tallyHome;
     const store = new FileSystemProjectStore(root);
     await store.saveProjectMeta({
       id: 'proj-ws',
@@ -153,14 +160,15 @@ describe('WS /chat', () => {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
-    process.env.TALLY_WORKSPACE = root;
+    await registerProject({ id: 'proj-ws', path: root });
   });
 
   afterEach(async () => {
-    process.env.TALLY_WORKSPACE = prev;
+    process.env.TALLY_HOME = prevTallyHome;
     if (close) await close();
     close = null;
     await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(tallyHome, { recursive: true, force: true });
   });
 
   it('/chat: open → user_message で text 応答と turn_ended が返る', async () => {

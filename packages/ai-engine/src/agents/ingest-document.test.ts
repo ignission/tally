@@ -82,7 +82,7 @@ describe('ingestDocumentAgent', () => {
 
   it('validateInput paste: 無条件で ok / cwd は無し', async () => {
     const r = await ingestDocumentAgent.validateInput(
-      { store: {} as never, workspaceRoot: '/ws' },
+      { store: {} as never, projectDir: '/ws' },
       pasteInput,
     );
     expect(r.ok).toBe(true);
@@ -92,11 +92,11 @@ describe('ingestDocumentAgent', () => {
     }
   });
 
-  it('validateInput docs-dir: ディレクトリが存在し workspaceRoot 配下なら ok + cwd', async () => {
+  it('validateInput docs-dir: ディレクトリが存在し projectDir 配下なら ok + cwd', async () => {
     const root = mkdtempSync(path.join(tmpdir(), 'tally-docs-dir-'));
     await fs.mkdir(path.join(root, 'docs'), { recursive: true });
     const r = await ingestDocumentAgent.validateInput(
-      { store: {} as never, workspaceRoot: root },
+      { store: {} as never, projectDir: root },
       docsDirInput,
     );
     expect(r.ok).toBe(true);
@@ -107,7 +107,7 @@ describe('ingestDocumentAgent', () => {
   it('validateInput docs-dir: 存在しないディレクトリは not_found', async () => {
     const root = mkdtempSync(path.join(tmpdir(), 'tally-docs-dir-'));
     const r = await ingestDocumentAgent.validateInput(
-      { store: {} as never, workspaceRoot: root },
+      { store: {} as never, projectDir: root },
       { source: 'docs-dir', dirPath: 'missing' } as const,
     );
     expect(r.ok).toBe(false);
@@ -115,10 +115,10 @@ describe('ingestDocumentAgent', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  it('validateInput docs-dir: workspaceRoot 外 (..) は bad_request', async () => {
+  it('validateInput docs-dir: projectDir 外 (..) は bad_request', async () => {
     const root = mkdtempSync(path.join(tmpdir(), 'tally-docs-dir-'));
     const r = await ingestDocumentAgent.validateInput(
-      { store: {} as never, workspaceRoot: root },
+      { store: {} as never, projectDir: root },
       { source: 'docs-dir', dirPath: '../escape' } as const,
     );
     expect(r.ok).toBe(false);
@@ -130,7 +130,7 @@ describe('ingestDocumentAgent', () => {
     const root = mkdtempSync(path.join(tmpdir(), 'tally-docs-dir-'));
     await fs.writeFile(path.join(root, 'f.md'), 'x');
     const r = await ingestDocumentAgent.validateInput(
-      { store: {} as never, workspaceRoot: root },
+      { store: {} as never, projectDir: root },
       { source: 'docs-dir', dirPath: 'f.md' } as const,
     );
     expect(r.ok).toBe(false);
