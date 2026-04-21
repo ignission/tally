@@ -25,14 +25,16 @@ export interface ValidateCodebaseAnchorOptions {
   // codebases[0] の存在を必須にするか (default: true)。
   // extract-questions のように codebase を読まないエージェントは false を渡す。
   requireCodebasePath?: boolean;
+  // フロントから送られる codebase 指定 ID。指定があれば codebases[0] より優先する。
+  codebaseId?: string;
 }
 
-// anchor type と (必要なら) codebases[0] を検証する共通ヘルパ。
+// anchor type と (必要なら) 選択 codebase を検証する共通ヘルパ。
 // find-related-code / analyze-impact は requireCodebasePath=true (default) で使う。
 // extract-questions は requireCodebasePath=false を渡してグラフ文脈のみで起動する。
 //
-// Task 24 時点では primary codebase (codebases[0]) のみを使用。
-// 複数 codebase を跨いだ探索は別 spec のスコープ (out-of-scope)。
+// codebaseId が指定されている場合はそれを優先してルックアップする。
+// 未指定の場合は後方互換として codebases[0] を使う。
 export async function validateCodebaseAnchor(
   deps: { store: ProjectStore; projectDir: string },
   nodeId: string,
@@ -60,16 +62,32 @@ export async function validateCodebaseAnchor(
   }
 
   const meta = await deps.store.getProjectMeta();
-  const primary: Codebase | undefined = meta?.codebases[0];
-  if (!primary) {
+  const codebases = meta?.codebases ?? [];
+
+  // codebaseId 指定があればそれを優先、なければ codebases[0] (後方互換)。
+  let target: Codebase | undefined;
+  if (options.codebaseId) {
+    target = codebases.find((c) => c.id === options.codebaseId);
+    if (!target) {
+      return {
+        ok: false,
+        code: 'bad_request',
+        message: `指定された codebaseId が見つかりません: ${options.codebaseId}`,
+      };
+    }
+  } else {
+    target = codebases[0];
+  }
+
+  if (!target) {
     return {
       ok: false,
       code: 'bad_request',
       message: 'プロジェクト設定で codebasePath を指定してください',
     };
   }
-  // primary.path は絶対パスまたは projectDir 相対パスとして解決する。
-  const abs = path.resolve(deps.projectDir, primary.path);
+  // target.path は絶対パスまたは projectDir 相対パスとして解決する。
+  const abs = path.resolve(deps.projectDir, target.path);
   try {
     const st = await fs.stat(abs);
     if (!st.isDirectory()) {

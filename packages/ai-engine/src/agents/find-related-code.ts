@@ -48,7 +48,11 @@ export function buildFindRelatedCodePrompt(input: FindRelatedCodePromptInput): {
   return { systemPrompt, userPrompt };
 }
 
-const FindRelatedCodeInputSchema = z.object({ nodeId: z.string().min(1) });
+const FindRelatedCodeInputSchema = z.object({
+  nodeId: z.string().min(1),
+  // フロントから選択された codebase の ID。省略時は codebases[0] を使う (後方互換)。
+  codebaseId: z.string().optional(),
+});
 type FindRelatedCodeInput = z.infer<typeof FindRelatedCodeInputSchema>;
 
 // 対象ノード type: find-related-code はユーザーの「意図」を起点にコード探索するため、
@@ -65,6 +69,7 @@ export const findRelatedCodeAgent: AgentDefinition<FindRelatedCodeInput> = {
       input.nodeId,
       ALLOWED_ANCHOR_TYPES,
       'find-related-code',
+      { ...(input.codebaseId !== undefined ? { codebaseId: input.codebaseId } : {}) },
     );
   },
   // anchor 必須エージェント: validateInput が通過した時点で anchor は必ず存在する。

@@ -77,7 +77,11 @@ export function buildAnalyzeImpactPrompt(input: AnalyzeImpactPromptInput): {
   return { systemPrompt, userPrompt };
 }
 
-const AnalyzeImpactInputSchema = z.object({ nodeId: z.string().min(1) });
+const AnalyzeImpactInputSchema = z.object({
+  nodeId: z.string().min(1),
+  // フロントから選択された codebase の ID。省略時は codebases[0] を使う (後方互換)。
+  codebaseId: z.string().optional(),
+});
 type AnalyzeImpactInput = z.infer<typeof AnalyzeImpactInputSchema>;
 
 const ALLOWED_ANCHOR_TYPES = ['usecase', 'requirement', 'userstory'] as const;
@@ -91,6 +95,7 @@ export const analyzeImpactAgent: AgentDefinition<AnalyzeImpactInput> = {
       input.nodeId,
       ALLOWED_ANCHOR_TYPES,
       'analyze-impact',
+      { ...(input.codebaseId !== undefined ? { codebaseId: input.codebaseId } : {}) },
     );
   },
   // anchor 必須エージェント: validateInput が通過した時点で anchor は必ず存在する。

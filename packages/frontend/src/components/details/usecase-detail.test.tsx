@@ -37,7 +37,7 @@ describe('UseCaseDetail', () => {
     useCanvasStore.getState().hydrate({
       id: 'proj-1',
       name: 'P',
-      codebasePath: '../backend',
+      codebases: [{ id: 'backend', label: 'Backend', path: '../backend' }],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       nodes: [{ id: 'uc-1', type: 'usecase', x: 0, y: 0, title: '', body: '' }],
@@ -55,7 +55,7 @@ describe('UseCaseDetail', () => {
     useCanvasStore.getState().hydrate({
       id: 'proj-1',
       name: 'P',
-      codebasePath: '../backend',
+      codebases: [{ id: 'backend', label: 'Backend', path: '../backend' }],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       nodes: [{ id: 'uc-1', type: 'usecase', x: 0, y: 0, title: '', body: '' }],
