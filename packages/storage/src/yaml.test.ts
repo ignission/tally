@@ -5,7 +5,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { YamlValidationError, readYaml, writeYaml } from './yaml';
+import { YamlValidationError, atomicWriteFile, readYaml, writeYaml } from './yaml';
 
 async function mkTmp(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'tally-yaml-test-'));
@@ -166,6 +166,23 @@ name: old
         }),
       );
       expect(result).toEqual(data);
+    });
+  });
+
+  describe('atomicWriteFile', () => {
+    it('temp → rename で書き込み、既存を上書きする', async () => {
+      const target = path.join(workspace, 'a.txt');
+      await fs.writeFile(target, 'old');
+      await atomicWriteFile(target, 'new');
+      expect(await fs.readFile(target, 'utf8')).toBe('new');
+      // 同じディレクトリに .tmp が残っていない
+      const entries = await fs.readdir(workspace);
+      expect(entries.filter((e) => e.endsWith('.tmp'))).toHaveLength(0);
+    });
+
+    it('親ディレクトリが無ければエラー', async () => {
+      const target = path.join(workspace, 'nope', 'a.txt');
+      await expect(atomicWriteFile(target, 'x')).rejects.toThrow();
     });
   });
 });
