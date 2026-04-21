@@ -63,7 +63,3 @@ pnpm --filter @tally/frontend dev        # http://localhost:3000
 pnpm --filter @tally/frontend build
 pnpm --filter @tally/frontend typecheck
 ```
-
-## 参考
-
-`docs/prototypes/tally-mobile.jsx` にモバイル向けプロトタイプがあります。設計意図の参考にしてください（本実装はパッケージ分割・型安全・テストを徹底）。

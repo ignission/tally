@@ -2,7 +2,7 @@
 
 - **日付**: 2026-04-19
 - **ステータス**: Accepted
-- **関連**: ADR-0002 (Agent SDK 採用) / `docs/superpowers/specs/2026-04-19-phase5a-find-related-code-design.md`
+- **関連**: ADR-0002 (Agent SDK 採用)
 
 ## コンテキスト
 

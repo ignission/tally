@@ -129,7 +129,6 @@ Claude Agent SDK を使った最小限の AI アクションが動く。
 - 生成後にキャンバスが自動更新される
 - 認証未設定時に `not_authenticated` エラーが UI に出る
 
-手動 E2E 手順は `docs/phase-4-manual-e2e.md` 参照。
 
 ---
 
@@ -147,7 +146,6 @@ Claude Agent SDK を使った最小限の AI アクションが動く。
 - [x] ProposalDetail の additional 引き継ぎ（coderef 採用時に filePath 等を保持）
 - [x] agent registry 化（decompose-to-stories も移行）
 
-手動 E2E 手順は `docs/phase-5a-manual-e2e.md` 参照。
 
 ### Phase 5b (完了)
 
@@ -158,7 +156,6 @@ Claude Agent SDK を使った最小限の AI アクションが動く。
 - [x] 3 detail (UC / requirement / userstory) に配置
 - [x] `validateCodebaseAnchor` 共通ヘルパ抽出 + find-related-code 移行
 
-手動 E2E 手順は `docs/phase-5b-manual-e2e.md` 参照。
 
 ### Phase 5c (完了)
 
@@ -167,19 +164,16 @@ Claude Agent SDK を使った最小限の AI アクションが動く。
 - [x] `GraphAgentButton` 共通抽出 + `ExtractQuestionsButton` thin wrapper
 - [x] 3 detail (UC / requirement / userstory) に配置
 
-手動 E2E 手順は `docs/phase-5c-manual-e2e.md` 参照。
 
 ### Phase 5d (完了)
 
 - [x] `ingest-document.ts`：要求書取り込み (貼り付けテキスト → requirement + usecase + satisfy)
 
-手動 E2E 手順は `docs/phase-5d-manual-e2e.md` 参照。
 
 ### Phase 5e (完了)
 
 - [x] `ingest-document` にディレクトリ入力を追加 (docs-dir モード): workspaceRoot 配下の Markdown 群を AI が Glob + Read で読み requirement + usecase を生成
 
-手動 E2E 手順は `docs/phase-5e-manual-e2e.md` 参照。
 
 ---
 
@@ -208,7 +202,6 @@ Claude Agent SDK を使った最小限の AI アクションが動く。
 - 承認フロー: 個別承認 (tool 毎)、read-only tool (find_related / list_by_type) は承認不要
 - マルチスレッド: プロジェクトごと複数、独立コンテキスト
 
-手動 E2E 手順は `docs/phase-6-manual-e2e.md` 参照。
 
 ### 完了条件
 

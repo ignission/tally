@@ -15,7 +15,6 @@
       "**/coverage/**",
       "**/*.tsbuildinfo",
       "pnpm-lock.yaml",
-      "docs/prototypes/**",
       "examples/**/.tally/**"
     ]
   },
