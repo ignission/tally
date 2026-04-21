@@ -192,6 +192,24 @@ describe('ProjectMetaSchema (刷新後)', () => {
 });
 
 
+describe('CodeRefNodeSchema (codebaseId 必須化)', () => {
+  const base = { id: 'c-1', x: 0, y: 0, title: 't', body: 'b', type: 'coderef' as const };
+
+  it('codebaseId 必須', () => {
+    expect(() => CodeRefNodeSchema.parse(base)).toThrow();
+  });
+
+  it('codebaseId があれば合格', () => {
+    expect(CodeRefNodeSchema.parse({ ...base, codebaseId: 'frontend' }).codebaseId).toBe(
+      'frontend',
+    );
+  });
+
+  it('codebaseId が空文字は拒否', () => {
+    expect(() => CodeRefNodeSchema.parse({ ...base, codebaseId: '' })).toThrow();
+  });
+});
+
 describe('CodeRefNodeSchema summary/impact', () => {
   it('summary と impact を持つ coderef をパースできる', () => {
     const parsed = CodeRefNodeSchema.parse({
@@ -201,6 +219,7 @@ describe('CodeRefNodeSchema summary/impact', () => {
       y: 0,
       title: 'src/a.ts:10',
       body: '何かの説明',
+      codebaseId: 'frontend',
       filePath: 'src/a.ts',
       startLine: 10,
       endLine: 20,
@@ -219,6 +238,7 @@ describe('CodeRefNodeSchema summary/impact', () => {
       y: 0,
       title: 's',
       body: '',
+      codebaseId: 'frontend',
     });
     expect(parsed.summary).toBeUndefined();
     expect(parsed.impact).toBeUndefined();

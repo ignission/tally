@@ -96,6 +96,7 @@ export const QuestionNodeSchema = z.object({
 export const CodeRefNodeSchema = z.object({
   ...baseNodeShape,
   type: z.literal('coderef'),
+  codebaseId: z.string().min(1),
   filePath: z.string().optional(),
   startLine: z.number().int().nonnegative().optional(),
   endLine: z.number().int().nonnegative().optional(),
