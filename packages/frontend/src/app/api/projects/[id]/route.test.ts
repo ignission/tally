@@ -2,111 +2,131 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { FileSystemProjectStore } from '@tally/storage';
+import { initProject, listProjects } from '@tally/storage';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { GET, PATCH } from './route';
 
-describe('app/api/projects/[id] route', () => {
-  let workspace: string;
-  const prev = process.env.TALLY_WORKSPACE;
+let home: string;
+let ws: string;
+let projectId: string;
+const orig = { ...process.env };
 
-  beforeEach(async () => {
-    workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-route-'));
-    process.env.TALLY_WORKSPACE = workspace;
-    const store = new FileSystemProjectStore(workspace);
-    await fs.mkdir(path.join(workspace, '.tally', 'nodes'), { recursive: true });
-    await store.saveProjectMeta({
-      id: 'proj-route',
-      name: 'route',
-      createdAt: '2026-04-18T00:00:00Z',
-      updatedAt: '2026-04-18T00:00:00Z',
-    });
+beforeEach(async () => {
+  home = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-home-'));
+  ws = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-ws-'));
+  process.env.TALLY_HOME = home;
+  const res = await initProject({
+    projectDir: path.join(ws, 'p'),
+    name: 'P',
+    codebases: [],
   });
+  projectId = res.id;
+});
 
-  afterEach(async () => {
-    if (prev === undefined) {
-      // biome の noDelete に従い undefined 代入で env var をリセット。
-      // beforeEach で毎回 workspace を上書きするため実害なし。
-      process.env.TALLY_WORKSPACE = undefined;
-    } else {
-      process.env.TALLY_WORKSPACE = prev;
-    }
-    await fs.rm(workspace, { recursive: true, force: true });
-  });
+afterEach(async () => {
+  process.env = { ...orig };
+  await fs.rm(home, { recursive: true, force: true });
+  await fs.rm(ws, { recursive: true, force: true });
+});
 
-  it('GET は既存プロジェクトを返す', async () => {
-    const res = await GET(new Request('http://t/'), {
-      params: Promise.resolve({ id: 'proj-route' }),
+describe('GET /api/projects/:id', () => {
+  it('プロジェクトを返し、touchProject を呼ぶ', async () => {
+    const before = Date.now();
+    await new Promise((r) => setTimeout(r, 5));
+    const res = await GET(new Request('http://localhost'), {
+      params: Promise.resolve({ id: projectId }),
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { id: string };
-    expect(body.id).toBe('proj-route');
+    const body = (await res.json()) as { id: string; codebases: unknown[] };
+    expect(body.id).toBe(projectId);
+    expect(body.codebases).toEqual([]);
+    const list = await listProjects();
+    const entry = list.find((p) => p.id === projectId);
+    expect(entry).toBeDefined();
+    expect(new Date(entry?.lastOpenedAt ?? '').getTime()).toBeGreaterThanOrEqual(before);
   });
 
-  it('PATCH で codebasePath を保存できる', async () => {
+  it('未知 id は 404', async () => {
+    const res = await GET(new Request('http://localhost'), {
+      params: Promise.resolve({ id: 'nope' }),
+    });
+    expect(res.status).toBe(404);
+  });
+});
+
+describe('PATCH /api/projects/:id', () => {
+  it('codebases を全置換', async () => {
     const res = await PATCH(
-      new Request('http://t/', {
+      new Request('http://localhost', {
         method: 'PATCH',
-        body: JSON.stringify({ codebasePath: '../backend' }),
-        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ codebases: [{ id: 'web', label: 'Web', path: '/w' }] }),
       }),
-      { params: Promise.resolve({ id: 'proj-route' }) },
+      { params: Promise.resolve({ id: projectId }) },
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { codebasePath?: string; updatedAt: string };
-    expect(body.codebasePath).toBe('../backend');
-    expect(body.updatedAt).not.toBe('2026-04-18T00:00:00Z');
-
-    // 往復確認: ストアに書かれているか
-    const store = new FileSystemProjectStore(workspace);
-    const meta = await store.getProjectMeta();
-    expect(meta?.codebasePath).toBe('../backend');
+    const body = (await res.json()) as { codebases: unknown };
+    expect(body.codebases).toEqual([{ id: 'web', label: 'Web', path: '/w' }]);
   });
 
-  it('PATCH で codebasePath: null は削除シグナル', async () => {
-    const store = new FileSystemProjectStore(workspace);
-    await store.saveProjectMeta({
-      id: 'proj-route',
-      name: 'route',
-      codebasePath: '../old',
-      createdAt: '2026-04-18T00:00:00Z',
-      updatedAt: '2026-04-18T00:00:00Z',
-    });
+  it('name を更新', async () => {
     const res = await PATCH(
-      new Request('http://t/', {
-        method: 'PATCH',
-        body: JSON.stringify({ codebasePath: null }),
-        headers: { 'content-type': 'application/json' },
-      }),
-      { params: Promise.resolve({ id: 'proj-route' }) },
-    );
-    expect(res.status).toBe(200);
-    const meta = await store.getProjectMeta();
-    expect(meta?.codebasePath).toBeUndefined();
-  });
-
-  it('PATCH で不明なフィールドは 400', async () => {
-    const res = await PATCH(
-      new Request('http://t/', {
+      new Request('http://localhost', {
         method: 'PATCH',
         body: JSON.stringify({ name: 'newname' }),
-        headers: { 'content-type': 'application/json' },
       }),
-      { params: Promise.resolve({ id: 'proj-route' }) },
+      { params: Promise.resolve({ id: projectId }) },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { name: string };
+    expect(body.name).toBe('newname');
+  });
+
+  it('description に null を渡すと削除', async () => {
+    // 事前に description を設定
+    await PATCH(
+      new Request('http://localhost', {
+        method: 'PATCH',
+        body: JSON.stringify({ description: 'initial' }),
+      }),
+      { params: Promise.resolve({ id: projectId }) },
+    );
+    const res = await PATCH(
+      new Request('http://localhost', {
+        method: 'PATCH',
+        body: JSON.stringify({ description: null }),
+      }),
+      { params: Promise.resolve({ id: projectId }) },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { description?: string };
+    expect(body.description).toBeUndefined();
+  });
+
+  it('未知フィールドは strict で 400', async () => {
+    const res = await PATCH(
+      new Request('http://localhost', {
+        method: 'PATCH',
+        body: JSON.stringify({ codebasePath: '/old' }),
+      }),
+      { params: Promise.resolve({ id: projectId }) },
     );
     expect(res.status).toBe(400);
   });
 
-  it('PATCH で存在しないプロジェクトは 404', async () => {
+  it('codebases[].id 重複は 400', async () => {
     const res = await PATCH(
-      new Request('http://t/', {
+      new Request('http://localhost', {
         method: 'PATCH',
-        body: JSON.stringify({ codebasePath: '../x' }),
-        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          codebases: [
+            { id: 'a', label: 'A', path: '/a' },
+            { id: 'a', label: 'A2', path: '/b' },
+          ],
+        }),
       }),
-      { params: Promise.resolve({ id: 'proj-missing' }) },
+      { params: Promise.resolve({ id: projectId }) },
     );
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(400);
   });
 });
