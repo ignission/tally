@@ -1,17 +1,21 @@
 import { EDGE_TYPES } from '@tally/core';
-import { FileSystemProjectStore } from '@tally/storage';
+import { FileSystemProjectStore, listProjects } from '@tally/storage';
 import { NextResponse } from 'next/server';
-
-import { resolveProjectById } from '@/lib/project-resolver';
 
 interface RouteContext {
   params: Promise<{ id: string; edgeId: string }>;
 }
 
+// registry から id に対応するプロジェクトディレクトリを解決する
+async function resolveDir(id: string): Promise<string | null> {
+  const list = await listProjects();
+  return list.find((p) => p.id === id)?.path ?? null;
+}
+
 export async function PATCH(req: Request, context: RouteContext): Promise<NextResponse> {
   const { id, edgeId } = await context.params;
-  const handle = await resolveProjectById(id);
-  if (!handle) return NextResponse.json({ error: 'project not found', id }, { status: 404 });
+  const dir = await resolveDir(id);
+  if (!dir) return NextResponse.json({ error: 'project not found', id }, { status: 404 });
 
   const raw = await req.json().catch(() => null);
   if (raw === null || typeof raw !== 'object') {
@@ -25,7 +29,7 @@ export async function PATCH(req: Request, context: RouteContext): Promise<NextRe
   if (typeof body.type !== 'string' || !(EDGE_TYPES as readonly string[]).includes(body.type)) {
     return NextResponse.json({ error: 'invalid type' }, { status: 400 });
   }
-  const store = new FileSystemProjectStore(handle.workspaceRoot);
+  const store = new FileSystemProjectStore(dir);
   try {
     const updated = await store.updateEdge(edgeId, {
       type: body.type as (typeof EDGE_TYPES)[number],
@@ -41,9 +45,9 @@ export async function PATCH(req: Request, context: RouteContext): Promise<NextRe
 
 export async function DELETE(_req: Request, context: RouteContext): Promise<NextResponse> {
   const { id, edgeId } = await context.params;
-  const handle = await resolveProjectById(id);
-  if (!handle) return NextResponse.json({ error: 'project not found', id }, { status: 404 });
-  const store = new FileSystemProjectStore(handle.workspaceRoot);
+  const dir = await resolveDir(id);
+  if (!dir) return NextResponse.json({ error: 'project not found', id }, { status: 404 });
+  const store = new FileSystemProjectStore(dir);
   await store.deleteEdge(edgeId);
   return new NextResponse(null, { status: 204 });
 }

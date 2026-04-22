@@ -41,6 +41,9 @@ export interface CreateNodeDeps {
   // AI が生成した proposal に sourceAgentId として刻むエージェント名。
   // どの agent が作ったかを後から辿れるようにするため required。
   agentName: AgentName;
+  // agent が探索対象とした codebase の id。coderef proposal 生成時に additional へ注入する。
+  // codebase を読まない agent (extract-questions など) は省略可。
+  codebaseId?: string;
 }
 
 export interface ToolResult {
@@ -64,6 +67,7 @@ async function findDuplicateCoderef(
   store: ProjectStore,
   filePath: string,
   startLine: number,
+  codebaseId: string | undefined,
 ): Promise<{ id: string; startLine: number } | null> {
   const all = await store.listNodes();
   for (const n of all) {
@@ -77,6 +81,12 @@ async function findDuplicateCoderef(
     const sl = rec.startLine as number | undefined;
     if (!fp || typeof sl !== 'number') continue;
     if (normalizeFilePath(fp) !== filePath) continue;
+    // マルチコードベース対応: 同一 filePath でも codebaseId が異なれば別物として扱う。
+    // codebaseId 未指定の旧 proposal (レガシー) や横断エージェントは従来通り全件比較する。
+    const existingCb = rec.codebaseId as string | undefined;
+    if (codebaseId !== undefined && existingCb !== undefined && existingCb !== codebaseId) {
+      continue;
+    }
     if (Math.abs(sl - startLine) <= CODEREF_LINE_TOLERANCE) {
       return { id: rec.id as string, startLine: sl };
     }
@@ -106,15 +116,23 @@ export function createNodeHandler(deps: CreateNodeDeps) {
     const { adoptAs, title, body, x, y, additional } = parsed.data;
 
     // coderef のとき filePath を正規化して additional に戻し、さらに近接 coderef を探して重複ガード。
+    // deps.codebaseId があれば additional に必ず注入し、adopt 時に codebaseId 必須検証が通るようにする。
     let normalizedAdditional = additional;
-    if (adoptAs === 'coderef' && additional) {
-      const fp = additional.filePath;
+    if (adoptAs === 'coderef') {
+      const base = additional ?? {};
+      const withCb: Record<string, unknown> =
+        deps.codebaseId !== undefined && base.codebaseId === undefined
+          ? { ...base, codebaseId: deps.codebaseId }
+          : { ...base };
+      const fp = withCb.filePath;
       if (typeof fp === 'string' && fp.length > 0) {
         const normalized = normalizeFilePath(fp);
-        normalizedAdditional = { ...additional, filePath: normalized };
-        const sl = additional.startLine;
+        withCb.filePath = normalized;
+        const sl = withCb.startLine;
         if (typeof sl === 'number') {
-          const dup = await findDuplicateCoderef(deps.store, normalized, sl);
+          const activeCbId =
+            typeof withCb.codebaseId === 'string' ? (withCb.codebaseId as string) : undefined;
+          const dup = await findDuplicateCoderef(deps.store, normalized, sl, activeCbId);
           if (dup) {
             return {
               ok: false,
@@ -123,6 +141,7 @@ export function createNodeHandler(deps: CreateNodeDeps) {
           }
         }
       }
+      normalizedAdditional = withCb;
     }
 
     // adoptAs=question: options の正規化 + 有効数チェック + anchor 重複ガード。

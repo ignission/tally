@@ -13,9 +13,7 @@ export function ProposalNodeView({ data }: NodeProps) {
   // AI提案とわかるプレフィックス「✦ 提案」＋「→ 要求」などのバッジ。
   const headerLabel = targetMeta ? `✦ 提案 → ${targetMeta.label}` : NODE_META.proposal.label;
 
-  const badge = node.adoptAs ? (
-    <NodeBadge bgColor={NODE_META.proposal.color}>AI</NodeBadge>
-  ) : null;
+  const badge = node.adoptAs ? <NodeBadge bgColor={NODE_META.proposal.color}>AI</NodeBadge> : null;
 
   const commonProps = {
     meta: NODE_META.proposal,

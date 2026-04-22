@@ -48,17 +48,17 @@ export interface SdkLike {
 export interface RunAgentDeps {
   sdk: SdkLike;
   store: ProjectStore;
-  workspaceRoot: string;
+  projectDir: string;
   req: StartRequest;
 }
 
 // 指定された StartRequest を実行し、進捗を AgentEvent として順次 yield する。
-// 事前バリデーション (agent 名 / 入力 schema / ノード存在 / ノード型 / codebasePath 等) は
+// 事前バリデーション (agent 名 / 入力 schema / ノード存在 / ノード型 / codebases[0] 等) は
 // registry のエージェント定義に委ねてから SDK を起動する。
 // SDK 呼び出し中に MCP ツールハンドラが emit した side events (node_created など) は
 // 次の SDK メッセージを受け取るタイミングで合流して flush する。
 export async function* runAgent(deps: RunAgentDeps): AsyncGenerator<AgentEvent> {
-  const { sdk, store, workspaceRoot, req } = deps;
+  const { sdk, store, projectDir, req } = deps;
   yield { type: 'start', agent: req.agent, input: req.input };
 
   const def = AGENT_REGISTRY[req.agent];
@@ -76,10 +76,7 @@ export async function* runAgent(deps: RunAgentDeps): AsyncGenerator<AgentEvent> 
   // AGENT_REGISTRY[req.agent] は AgentName ごとの AgentDefinition の union となり、
   // validateInput の input 型は各エージェント入力型の intersection になる。
   // 実際には req.agent に対応する def の inputSchema で既に safeParse 済みのため unknown 経由でキャストする。
-  const vr = await def.validateInput(
-    { store, workspaceRoot },
-    parsed.data as unknown as never,
-  );
+  const vr = await def.validateInput({ store, projectDir }, parsed.data as unknown as never);
   if (!vr.ok) {
     yield { type: 'error', code: vr.code, message: vr.message };
     return;
@@ -87,6 +84,7 @@ export async function* runAgent(deps: RunAgentDeps): AsyncGenerator<AgentEvent> 
   const anchor = vr.anchor;
   const cwd = vr.cwd;
   const additionalCwds = vr.additionalCwds;
+  const codebaseId = vr.codebaseId;
 
   const sideEvents: AgentEvent[] = [];
   const mcp = buildTallyMcpServer({
@@ -95,12 +93,14 @@ export async function* runAgent(deps: RunAgentDeps): AsyncGenerator<AgentEvent> 
     anchor: anchor ? { x: anchor.x, y: anchor.y } : { x: 0, y: 0 },
     anchorId: anchor?.id ?? '',
     agentName: req.agent,
+    ...(vr.codebaseId !== undefined ? { codebaseId: vr.codebaseId } : {}),
   });
 
   const prompt = def.buildPrompt({
     ...(anchor !== undefined ? { anchor } : {}),
     ...(cwd !== undefined ? { cwd } : {}),
     ...(additionalCwds !== undefined ? { additionalCwds } : {}),
+    ...(codebaseId !== undefined ? { codebaseId } : {}),
     input: parsed.data,
   });
   try {

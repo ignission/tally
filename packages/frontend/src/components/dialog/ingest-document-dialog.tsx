@@ -26,8 +26,7 @@ export function IngestDocumentDialog({ open, onClose }: IngestDocumentDialogProp
 
   if (!open) return null;
 
-  const disabledByEmpty =
-    mode === 'paste' ? text.trim().length === 0 : dirPath.trim().length === 0;
+  const disabledByEmpty = mode === 'paste' ? text.trim().length === 0 : dirPath.trim().length === 0;
 
   const onIngest = async () => {
     setError(null);
@@ -50,8 +49,9 @@ export function IngestDocumentDialog({ open, onClose }: IngestDocumentDialogProp
       <div style={DIALOG_STYLE}>
         <h2 style={TITLE_STYLE}>要求書から取り込む</h2>
         <p style={DESC_STYLE}>
-          要求書を貼り付け、または workspaceRoot 配下のドキュメントディレクトリを指定してください。AI
-          が requirement と usecase の proposal を生成します。
+          要求書を貼り付け、または workspaceRoot
+          配下のドキュメントディレクトリを指定してください。AI が requirement と usecase の proposal
+          を生成します。
         </p>
         <div style={TABS_STYLE} role="tablist">
           <button

@@ -1,4 +1,12 @@
-import type { AdoptableType, Edge, EdgeType, Node, NodeType, ProjectMeta } from '@tally/core';
+import type {
+  AdoptableType,
+  Codebase,
+  Edge,
+  EdgeType,
+  Node,
+  NodeType,
+  ProjectMeta,
+} from '@tally/core';
 
 export type NodeDraftInput = Omit<Node, 'id'>;
 export type NodePatchInput<T extends NodeType = NodeType> = Partial<
@@ -22,31 +30,101 @@ function base(projectId: string): string {
   return `/api/projects/${encodeURIComponent(projectId)}`;
 }
 
-export interface WorkspaceCandidate {
+export interface CodebaseDto {
+  id: string;
+  label: string;
   path: string;
-  hasTally: boolean;
 }
 
-// GET /api/workspace-candidates: 新規プロジェクトダイアログの選択肢。
-export async function fetchWorkspaceCandidates(): Promise<WorkspaceCandidate[]> {
-  const res = await fetch('/api/workspace-candidates');
-  if (!res.ok) throw new Error(`API GET /api/workspace-candidates ${res.status}`);
-  const body = (await res.json()) as { candidates: WorkspaceCandidate[] };
-  return body.candidates;
+export interface RegistryProjectDto {
+  id: string;
+  name: string;
+  description: string | null;
+  codebases: CodebaseDto[];
+  projectDir: string;
+  createdAt: string;
+  updatedAt: string;
+  lastOpenedAt: string;
+}
+
+// GET /api/projects: レジストリ登録済みプロジェクト一覧。
+export async function fetchRegistryProjects(): Promise<RegistryProjectDto[]> {
+  const res = await fetch('/api/projects');
+  if (!res.ok) throw new Error(`API GET /api/projects ${res.status}`);
+  const body = (await res.json()) as { projects: RegistryProjectDto[] };
+  return body.projects;
 }
 
 export interface CreateProjectInput {
-  workspaceRoot: string;
+  projectDir: string;
   name: string;
   description?: string;
+  codebases: CodebaseDto[];
 }
 
-export interface CreateProjectResult {
-  id: string;
-  workspaceRoot: string;
+// POST /api/projects/import: 既存 .tally ディレクトリからプロジェクトをインポート。
+export async function importProject(
+  projectDir: string,
+): Promise<{ id: string; projectDir: string }> {
+  const res = await fetch('/api/projects/import', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ projectDir }),
+  });
+  if (!res.ok) {
+    const err = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(err.error ?? `POST /api/projects/import ${res.status}`);
+  }
+  return (await res.json()) as { id: string; projectDir: string };
 }
 
-// POST /api/projects: エラーメッセージをハンドルできるよう requestJson を使わず生 fetch。
+// POST /api/projects/:id/unregister: レジストリからプロジェクトの登録解除 (ファイルは削除しない)。
+export async function unregisterProjectApi(id: string): Promise<void> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(id)}/unregister`, {
+    method: 'POST',
+  });
+  if (!res.ok) throw new Error(`POST /unregister ${res.status}`);
+}
+
+export interface FsEntry {
+  name: string;
+  path: string;
+  isHidden: boolean;
+  hasProjectYaml: boolean;
+}
+
+export interface FsListResult {
+  path: string;
+  parent: string | null;
+  entries: FsEntry[];
+  containsProjectYaml: boolean;
+}
+
+// GET /api/fs/ls: ディレクトリ一覧取得。path 省略時はデフォルトパス。
+export async function listDirectory(targetPath?: string): Promise<FsListResult> {
+  const params = targetPath !== undefined ? `?path=${encodeURIComponent(targetPath)}` : '';
+  const res = await fetch(`/api/fs/ls${params}`);
+  if (!res.ok) {
+    const err = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(err.error ?? `GET /api/fs/ls ${res.status}`);
+  }
+  return (await res.json()) as FsListResult;
+}
+
+// POST /api/fs/mkdir: ディレクトリ作成。
+export async function mkdir(parentPath: string, name: string): Promise<{ path: string }> {
+  const res = await fetch('/api/fs/mkdir', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ path: parentPath, name }),
+  });
+  if (!res.ok) {
+    const err = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(err.error ?? `POST /api/fs/mkdir ${res.status}`);
+  }
+  return (await res.json()) as { path: string };
+}
+
 // POST /api/projects/[id]/clear: プロジェクトのノード/エッジ/チャットを全削除。
 export async function clearProjectBoard(projectId: string): Promise<void> {
   const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/clear`, {
@@ -66,24 +144,19 @@ export async function deleteChatThread(projectId: string, threadId: string): Pro
   }
 }
 
-export async function createProject(input: CreateProjectInput): Promise<CreateProjectResult> {
+export async function createProject(
+  input: CreateProjectInput,
+): Promise<{ id: string; projectDir: string }> {
   const res = await fetch('/api/projects', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(input),
   });
-  const body = (await res.json().catch(() => ({}))) as {
-    id?: string;
-    workspaceRoot?: string;
-    error?: string;
-  };
   if (!res.ok) {
-    throw new Error(body.error ?? `API POST /api/projects ${res.status}`);
+    const err = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(err.error ?? `POST /api/projects ${res.status}`);
   }
-  if (!body.id || !body.workspaceRoot) {
-    throw new Error(`API POST /api/projects: 不正なレスポンス`);
-  }
-  return { id: body.id, workspaceRoot: body.workspaceRoot };
+  return (await res.json()) as { id: string; projectDir: string };
 }
 
 export function createNode(projectId: string, draft: NodeDraftInput): Promise<Node> {
@@ -142,12 +215,10 @@ export function deleteEdge(projectId: string, edgeId: string): Promise<void> {
   });
 }
 
-// ProjectMeta の部分更新。
-// codebasePath: null = 削除、string = 置換、undefined = 維持。
-// additionalCodebasePaths: [] = 削除、配列 = 置換、undefined = 維持。
+// ProjectMeta の部分更新。codebases は全置換（部分更新なし）。
 export function patchProjectMeta(
   projectId: string,
-  patch: { codebasePath?: string | null; additionalCodebasePaths?: string[] },
+  patch: { name?: string; description?: string | null; codebases?: Codebase[] },
 ): Promise<ProjectMeta> {
   return requestJson<ProjectMeta>(`${base(projectId)}`, {
     method: 'PATCH',
@@ -165,4 +236,14 @@ export function adoptProposal(
     method: 'POST',
     body: JSON.stringify({ adoptAs, additional }),
   });
+}
+
+// GET /api/projects/default-path: プロジェクト名から保存先を提案。
+export async function fetchDefaultProjectPath(name: string): Promise<string> {
+  const res = await fetch(`/api/projects/default-path?name=${encodeURIComponent(name)}`);
+  if (!res.ok) {
+    throw new Error(`GET /api/projects/default-path ${res.status}`);
+  }
+  const body = (await res.json()) as { path: string };
+  return body.path;
 }

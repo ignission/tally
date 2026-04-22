@@ -60,7 +60,7 @@ export async function writeYaml(filePath: string, data: unknown): Promise<void> 
       ? serializePreservingComments(existingDoc, data as Record<string, unknown>)
       : stringify(data, { lineWidth: 120, blockQuote: true });
 
-  await fs.writeFile(filePath, text, 'utf8');
+  await atomicWriteFile(filePath, text);
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -172,5 +172,20 @@ export class YamlValidationError extends Error {
   ) {
     super(`YAML validation failed: ${filePath}\n${validationMessage}`);
     this.name = 'YamlValidationError';
+  }
+}
+
+// 書き込み途中のプロセスダウンでファイルが半壊するのを防ぐため、
+// 同じディレクトリに .tmp-<pid>-<rand> を書いてから rename で置き換える。
+export async function atomicWriteFile(filePath: string, data: string): Promise<void> {
+  const dir = path.dirname(filePath);
+  const base = path.basename(filePath);
+  const tmp = path.join(dir, `.${base}.tmp-${process.pid}-${Math.random().toString(36).slice(2)}`);
+  try {
+    await fs.writeFile(tmp, data, 'utf8');
+    await fs.rename(tmp, filePath);
+  } catch (err) {
+    await fs.rm(tmp, { force: true });
+    throw err;
   }
 }

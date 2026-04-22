@@ -2,32 +2,40 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { FileSystemProjectStore } from '@tally/storage';
+import { FileSystemProjectStore, registerProject } from '@tally/storage';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { PATCH, DELETE as deleteHandler } from './[nodeId]/route';
 import { POST } from './route';
 
 describe('POST /api/projects/[id]/nodes', () => {
-  let root: string;
-  const prevEnv = process.env.TALLY_WORKSPACE;
+  let home: string;
+  let projectDir: string;
+  const prevHome = process.env.TALLY_HOME;
 
   beforeEach(async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-route-'));
-    const store = new FileSystemProjectStore(root);
+    home = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-home-'));
+    process.env.TALLY_HOME = home;
+    projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-proj-'));
+    const store = new FileSystemProjectStore(projectDir);
     await store.saveProjectMeta({
       id: 'proj-test',
       name: 'Test',
+      codebases: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
-    await fs.mkdir(path.join(root, '.tally', 'nodes'), { recursive: true });
-    process.env.TALLY_WORKSPACE = root;
+    await fs.mkdir(path.join(projectDir, 'nodes'), { recursive: true });
+    await fs.mkdir(path.join(projectDir, 'edges'), { recursive: true });
+    await fs.writeFile(path.join(projectDir, 'edges', 'edges.yaml'), 'edges: []\n');
+    await registerProject({ id: 'proj-test', path: projectDir });
   });
 
   afterEach(async () => {
-    process.env.TALLY_WORKSPACE = prevEnv;
-    await fs.rm(root, { recursive: true, force: true });
+    if (prevHome === undefined) delete process.env.TALLY_HOME;
+    else process.env.TALLY_HOME = prevHome;
+    await fs.rm(home, { recursive: true, force: true });
+    await fs.rm(projectDir, { recursive: true, force: true });
   });
 
   it('新規ノードを作成し、YAML に反映する', async () => {
@@ -43,7 +51,7 @@ describe('POST /api/projects/[id]/nodes', () => {
     expect(created.type).toBe('requirement');
     expect(created.id).toMatch(/^req-/);
 
-    const store = new FileSystemProjectStore(root);
+    const store = new FileSystemProjectStore(projectDir);
     const persisted = await store.getNode(created.id);
     expect(persisted).toEqual(created);
   });
@@ -70,30 +78,38 @@ describe('POST /api/projects/[id]/nodes', () => {
 });
 
 describe('PATCH /api/projects/[id]/nodes/[nodeId]', () => {
-  let root: string;
-  const prevEnv = process.env.TALLY_WORKSPACE;
+  let home: string;
+  let projectDir: string;
+  const prevHome = process.env.TALLY_HOME;
 
   beforeEach(async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-route-'));
-    const store = new FileSystemProjectStore(root);
+    home = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-home-'));
+    process.env.TALLY_HOME = home;
+    projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-proj-'));
+    const store = new FileSystemProjectStore(projectDir);
     await store.saveProjectMeta({
       id: 'proj-test',
       name: 'Test',
+      codebases: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
-    await fs.mkdir(path.join(root, '.tally', 'nodes'), { recursive: true });
+    await fs.mkdir(path.join(projectDir, 'nodes'), { recursive: true });
+    await fs.mkdir(path.join(projectDir, 'edges'), { recursive: true });
+    await fs.writeFile(path.join(projectDir, 'edges', 'edges.yaml'), 'edges: []\n');
     await store.addNode({ type: 'requirement', x: 0, y: 0, title: 'orig', body: '' });
-    process.env.TALLY_WORKSPACE = root;
+    await registerProject({ id: 'proj-test', path: projectDir });
   });
 
   afterEach(async () => {
-    process.env.TALLY_WORKSPACE = prevEnv;
-    await fs.rm(root, { recursive: true, force: true });
+    if (prevHome === undefined) delete process.env.TALLY_HOME;
+    else process.env.TALLY_HOME = prevHome;
+    await fs.rm(home, { recursive: true, force: true });
+    await fs.rm(projectDir, { recursive: true, force: true });
   });
 
   it('title の部分更新が反映される', async () => {
-    const store = new FileSystemProjectStore(root);
+    const store = new FileSystemProjectStore(projectDir);
     const nodes = await store.listNodes();
     const node = nodes[0];
     if (!node) throw new Error('setup failure: node not created');
@@ -113,7 +129,7 @@ describe('PATCH /api/projects/[id]/nodes/[nodeId]', () => {
   });
 
   it('type 変更は拒否する (400)', async () => {
-    const store = new FileSystemProjectStore(root);
+    const store = new FileSystemProjectStore(projectDir);
     const nodes = await store.listNodes();
     const node = nodes[0];
     if (!node) throw new Error('setup failure: node not created');
@@ -141,7 +157,7 @@ describe('PATCH /api/projects/[id]/nodes/[nodeId]', () => {
   });
 
   it('null を送ると optional フィールドが削除される', async () => {
-    const store = new FileSystemProjectStore(root);
+    const store = new FileSystemProjectStore(projectDir);
     const created = await store.addNode({
       type: 'requirement',
       x: 0,
@@ -166,29 +182,37 @@ describe('PATCH /api/projects/[id]/nodes/[nodeId]', () => {
 });
 
 describe('DELETE /api/projects/[id]/nodes/[nodeId]', () => {
-  let root: string;
-  const prevEnv = process.env.TALLY_WORKSPACE;
+  let home: string;
+  let projectDir: string;
+  const prevHome = process.env.TALLY_HOME;
 
   beforeEach(async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-route-'));
-    const store = new FileSystemProjectStore(root);
+    home = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-home-'));
+    process.env.TALLY_HOME = home;
+    projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-proj-'));
+    const store = new FileSystemProjectStore(projectDir);
     await store.saveProjectMeta({
       id: 'proj-test',
       name: 'Test',
+      codebases: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
-    await fs.mkdir(path.join(root, '.tally', 'nodes'), { recursive: true });
-    process.env.TALLY_WORKSPACE = root;
+    await fs.mkdir(path.join(projectDir, 'nodes'), { recursive: true });
+    await fs.mkdir(path.join(projectDir, 'edges'), { recursive: true });
+    await fs.writeFile(path.join(projectDir, 'edges', 'edges.yaml'), 'edges: []\n');
+    await registerProject({ id: 'proj-test', path: projectDir });
   });
 
   afterEach(async () => {
-    process.env.TALLY_WORKSPACE = prevEnv;
-    await fs.rm(root, { recursive: true, force: true });
+    if (prevHome === undefined) delete process.env.TALLY_HOME;
+    else process.env.TALLY_HOME = prevHome;
+    await fs.rm(home, { recursive: true, force: true });
+    await fs.rm(projectDir, { recursive: true, force: true });
   });
 
   it('ノードと付随エッジを削除する', async () => {
-    const store = new FileSystemProjectStore(root);
+    const store = new FileSystemProjectStore(projectDir);
     const a = await store.addNode({ type: 'requirement', x: 0, y: 0, title: 'a', body: '' });
     const b = await store.addNode({ type: 'usecase', x: 0, y: 0, title: 'b', body: '' });
     await store.addEdge({ from: a.id, to: b.id, type: 'satisfy' });

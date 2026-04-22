@@ -1,17 +1,21 @@
 import { EDGE_TYPES } from '@tally/core';
-import { FileSystemProjectStore } from '@tally/storage';
+import { FileSystemProjectStore, listProjects } from '@tally/storage';
 import { NextResponse } from 'next/server';
-
-import { resolveProjectById } from '@/lib/project-resolver';
 
 interface RouteContext {
   params: Promise<{ id: string }>;
 }
 
+// registry から id に対応するプロジェクトディレクトリを解決する
+async function resolveDir(id: string): Promise<string | null> {
+  const list = await listProjects();
+  return list.find((p) => p.id === id)?.path ?? null;
+}
+
 export async function POST(req: Request, context: RouteContext): Promise<NextResponse> {
   const { id } = await context.params;
-  const handle = await resolveProjectById(id);
-  if (!handle) return NextResponse.json({ error: 'project not found', id }, { status: 404 });
+  const dir = await resolveDir(id);
+  if (!dir) return NextResponse.json({ error: 'project not found', id }, { status: 404 });
 
   const raw = await req.json().catch(() => null);
   if (raw === null || typeof raw !== 'object') {
@@ -24,7 +28,7 @@ export async function POST(req: Request, context: RouteContext): Promise<NextRes
   if (!(EDGE_TYPES as readonly string[]).includes(type)) {
     return NextResponse.json({ error: 'invalid edge type' }, { status: 400 });
   }
-  const store = new FileSystemProjectStore(handle.workspaceRoot);
+  const store = new FileSystemProjectStore(dir);
   // 参照整合性を守るため、両端ノードの実在を確認してから追加する。
   const [src, dst] = await Promise.all([store.getNode(from), store.getNode(to)]);
   if (!src || !dst) {

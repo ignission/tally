@@ -1,11 +1,7 @@
 import { AGENT_NAMES } from '@tally/core';
 import type { AgentName } from '@tally/core';
-import {
-  FileSystemChatStore,
-  FileSystemProjectStore,
-  resolveProjectById,
-} from '@tally/storage';
-import { WebSocketServer, type WebSocket } from 'ws';
+import { FileSystemChatStore, FileSystemProjectStore, listProjects } from '@tally/storage';
+import { type WebSocket, WebSocketServer } from 'ws';
 import { z } from 'zod';
 
 import { runAgent } from './agent-runner';
@@ -39,6 +35,13 @@ const ChatApproveToolSchema = z.object({
   toolUseId: z.string().min(1),
   approved: z.boolean(),
 });
+
+// registry からプロジェクト ID に対応するディレクトリパスを返す。
+// 見つからなければ null。
+async function resolveDir(id: string): Promise<string | null> {
+  const list = await listProjects();
+  return list.find((p) => p.id === id)?.path ?? null;
+}
 
 export interface StartServerOptions {
   port: number;
@@ -92,8 +95,8 @@ function handleAgentConnection(ws: WebSocket, sdk: SdkLike): void {
       ws.close();
       return;
     }
-    const handle = await resolveProjectById(parsed.projectId);
-    if (!handle) {
+    const dir = await resolveDir(parsed.projectId);
+    if (!dir) {
       send({
         type: 'error',
         code: 'not_found',
@@ -102,7 +105,7 @@ function handleAgentConnection(ws: WebSocket, sdk: SdkLike): void {
       ws.close();
       return;
     }
-    const store = new FileSystemProjectStore(handle.workspaceRoot);
+    const store = new FileSystemProjectStore(dir);
     try {
       // z.unknown() は undefined を許容するため parsed.input は unknown | undefined。
       // StartRequest.input は unknown (必須) なので ?? {} で埋める。agent-runner 内で
@@ -110,7 +113,7 @@ function handleAgentConnection(ws: WebSocket, sdk: SdkLike): void {
       for await (const evt of runAgent({
         sdk,
         store,
-        workspaceRoot: handle.workspaceRoot,
+        projectDir: dir,
         req: {
           type: parsed.type,
           agent: parsed.agent,
@@ -163,25 +166,25 @@ function handleChatConnection(ws: WebSocket, sdk: SdkLike): void {
         send({ type: 'error', code: 'bad_request', message: 'already opened' });
         return;
       }
-      const handle = await resolveProjectById(result.data.projectId);
-      if (!handle) {
+      const dir = await resolveDir(result.data.projectId);
+      if (!dir) {
         send({ type: 'error', code: 'not_found', message: `project: ${result.data.projectId}` });
         ws.close();
         return;
       }
-      const chatStore = new FileSystemChatStore(handle.workspaceRoot);
+      const chatStore = new FileSystemChatStore(dir);
       const thread = await chatStore.getChat(result.data.threadId);
       if (!thread) {
         send({ type: 'error', code: 'not_found', message: `thread: ${result.data.threadId}` });
         ws.close();
         return;
       }
-      const projectStore = new FileSystemProjectStore(handle.workspaceRoot);
+      const projectStore = new FileSystemProjectStore(dir);
       runner = new ChatRunner({
         sdk,
         chatStore,
         projectStore,
-        workspaceRoot: handle.workspaceRoot,
+        projectDir: dir,
         threadId: result.data.threadId,
       });
       send({ type: 'chat_opened', threadId: result.data.threadId });

@@ -10,7 +10,7 @@ tally/
 │   ├── core/        # 型定義・ドメインロジック・YAML スキーマ
 │   ├── frontend/    # Next.js, キャンバスUI
 │   ├── ai-engine/   # Claude Agent SDK ラッパー、WebSocketサーバー
-│   └── storage/     # .tally/ ディレクトリへの YAML 読み書き
+│   └── storage/     # プロジェクトディレクトリへの YAML 読み書き、レジストリ管理
 ```
 
 ## レイヤー構成
@@ -31,7 +31,7 @@ tally/
 ┌────────┴────────────┐  │  - 論点抽出            │
 │  Storage Layer       │  │  - 要求書取り込み       │
 │  - YAML 読み書き       │  └───────────┬──────────┘
-│  - .tally/ 操作     │              │
+│  - projectDir 操作  │              │
 └─────────────────────┘              │
                                       │ Claude Agent SDK
                                       │ (Read / Glob / Grep / MCP)
@@ -84,9 +84,10 @@ Claude Agent SDK のラッパー。単独プロセスとして起動し、フロ
 
 ### packages/storage
 
-永続化層。`.tally/` ディレクトリ配下の YAML ファイルを読み書きする。
+永続化層。プロジェクトディレクトリ直下の YAML ファイルを読み書きする。`.tally/` サブディレクトリは設けない。
 
-- `project-store.ts`：プロジェクト単位の CRUD
+- `project-store.ts`：プロジェクト単位の CRUD（projectDir 引数で初期化）
+- `registry-store.ts`：レジストリ（`$TALLY_HOME/registry.yaml`）の読み書き
 - `node-store.ts`：ノード単位の CRUD
 - `edge-store.ts`：エッジ単位の CRUD
 - `yaml.ts`：YAML 読み書きユーティリティ
@@ -103,7 +104,7 @@ User clicks "+ Add Node"
   → Zustand store updates (optimistic)
   → POST /api/projects/:id/nodes
     → storage.addNode(projectId, node)
-      → write .tally/nodes/<id>.yaml
+      → write <projectDir>/nodes/<id>.yaml
   → Response { node: Node }
   → Zustand confirms
 ```
@@ -173,7 +174,7 @@ AI Engine を別プロセスにする理由：
 ```
 ANTHROPIC_API_KEY=sk-ant-...   # Claude Agent SDK
 TALLY_AI_PORT=3001             # AI Engine WebSocket ポート
-TALLY_WORKSPACE=./workspace    # .tally/ の置き場
+TALLY_HOME=~/.local/share/tally  # レジストリ・デフォルトプロジェクト置き場（省略時はこの値）
 ```
 
 ## セキュリティ考慮

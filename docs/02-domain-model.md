@@ -139,11 +139,17 @@ AI提案（proposal）から正規ノードへの昇格フロー。
 複数のノード・エッジを束ねる単位。
 
 ```typescript
+interface Codebase {
+  id: string;
+  label: string;
+  path: string; // AI が探索する Git リポジトリの絶対パス
+}
+
 interface Project {
   id: string;
   name: string;
   description?: string;
-  codebasePath?: string; // 紐付けられた Git リポジトリのパス
+  codebases: Codebase[]; // 紐付けられた Git リポジトリ（複数可）
   nodes: Node[];
   edges: Edge[];
   createdAt: string;
@@ -153,22 +159,24 @@ interface Project {
 
 ## 永続化形式
 
-プロジェクトは `.tally/` ディレクトリに YAML ファイルとして保存する。
+プロジェクトは任意のディレクトリ（projectDir）直下に YAML ファイルとして保存する。`.tally/` サブディレクトリは設けない。
 
 ```
-<repo_root>/
-├── .tally/
-│   ├── project.yaml         # メタデータ
-│   ├── nodes/
-│   │   ├── req-invite.yaml
-│   │   ├── uc-send-invite.yaml
-│   │   └── ...
-│   └── edges/
-│       └── edges.yaml
-└── src/
+~/.local/share/tally/projects/taskflow-invite/  # projectDir の例
+├── project.yaml         # メタデータ（codebases[] を含む）
+├── nodes/
+│   ├── req-invite.yaml
+│   ├── uc-send-invite.yaml
+│   └── ...
+├── edges/
+│   └── edges.yaml
+└── chats/
+    └── <thread-id>.yaml
 ```
 
-詳細は ADR-0003 を参照。
+既知プロジェクトの一覧は `$TALLY_HOME/registry.yaml`（デフォルト: `~/.local/share/tally/registry.yaml`）で管理する。
+
+詳細は ADR-0008（プロジェクト独立化）、ADR-0009（レジストリ）、ADR-0010（`codebases[]`）を参照。旧 ADR-0003 は Superseded。
 
 ## 参考資料
 

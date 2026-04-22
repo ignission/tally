@@ -23,9 +23,7 @@ describe('AGENT_REGISTRY', () => {
 
   it('extract-questions が登録されている', () => {
     expect(AGENT_REGISTRY['extract-questions'].name).toBe('extract-questions');
-    expect(AGENT_REGISTRY['extract-questions'].allowedTools).toContain(
-      'mcp__tally__create_node',
-    );
+    expect(AGENT_REGISTRY['extract-questions'].allowedTools).toContain('mcp__tally__create_node');
   });
 
   it('ingest-document が登録されている', () => {

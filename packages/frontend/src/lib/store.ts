@@ -6,6 +6,7 @@ import type {
   AgentName,
   ChatMessage,
   ChatThreadMeta,
+  Codebase,
   Edge,
   EdgeType,
   Node,
@@ -27,8 +28,8 @@ import {
   updateEdge as updateEdgeApi,
   updateNode as updateNodeApi,
 } from './api';
-import { computeLayout, type LayoutDirection, type LayoutedPosition } from './layout';
-import { openChat, startAgent, type ChatHandle } from './ws';
+import { type LayoutDirection, type LayoutedPosition, computeLayout } from './layout';
+import { type ChatHandle, openChat, startAgent } from './ws';
 
 export type Selected = { kind: 'node'; id: string } | { kind: 'edge'; id: string } | null;
 
@@ -75,15 +76,17 @@ interface CanvasState {
     events: AgentEvent[];
   } | null;
   startDecompose: (ucNodeId: string) => Promise<void>;
-  startFindRelatedCode: (nodeId: string) => Promise<void>;
-  startAnalyzeImpact: (nodeId: string) => Promise<void>;
+  // codebaseId: フロントで選択された codebase の ID。省略時は codebases[0] を使う。
+  startFindRelatedCode: (nodeId: string, codebaseId?: string) => Promise<void>;
+  startAnalyzeImpact: (nodeId: string, codebaseId?: string) => Promise<void>;
   startExtractQuestions: (nodeId: string) => Promise<void>;
   startIngestDocument: (
     input: IngestDocumentInput,
   ) => Promise<{ ok: boolean; errorMessage?: string }>;
   patchProjectMeta: (patch: {
-    codebasePath?: string | null;
-    additionalCodebasePaths?: string[];
+    name?: string;
+    description?: string | null;
+    codebases?: Codebase[];
   }) => Promise<void>;
 
   // Phase 6: チャットスレッド管理。
@@ -127,11 +130,14 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
   // 共通: WS イベントループを抽象化したヘルパー。
   // startDecompose / startFindRelatedCode で共有する。
   // create クロージャ内に置くことで set/get を自然にキャプチャする。
-  async function runAgentWS(agent: AgentName, nodeId: string): Promise<void> {
+  // codebaseId: フロントで選択された codebase の ID。省略時は ai-engine が codebases[0] を使う。
+  async function runAgentWS(agent: AgentName, nodeId: string, codebaseId?: string): Promise<void> {
     const pid = get().projectId;
     if (!pid) throw new Error('projectId is not set');
     set({ runningAgent: { agent, inputNodeId: nodeId, events: [] } });
-    const handle = startAgent({ agent, projectId: pid, input: { nodeId } });
+    const input: Record<string, string> = { nodeId };
+    if (codebaseId) input.codebaseId = codebaseId;
+    const handle = startAgent({ agent, projectId: pid, input });
     try {
       for await (const evt of handle.events) {
         const cur = get().runningAgent;
@@ -245,7 +251,11 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
           if (m.id !== evt.messageId) return m;
           // 対応する pending tool_use の approval を更新 + tool_result ブロック追加。
           const blocks = m.blocks.map((b) => {
-            if (b.type === 'tool_use' && b.toolUseId === evt.toolUseId && b.approval === 'pending') {
+            if (
+              b.type === 'tool_use' &&
+              b.toolUseId === evt.toolUseId &&
+              b.approval === 'pending'
+            ) {
               return { ...b, approval: evt.ok ? ('approved' as const) : ('rejected' as const) };
             }
             return b;
@@ -511,10 +521,11 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
     startDecompose: (ucNodeId) => runAgentWS('decompose-to-stories', ucNodeId),
 
     // find-related-code エージェントを起動する。同じ WS ヘルパーを共有する。
-    startFindRelatedCode: (nodeId) => runAgentWS('find-related-code', nodeId),
+    startFindRelatedCode: (nodeId, codebaseId) =>
+      runAgentWS('find-related-code', nodeId, codebaseId),
 
     // analyze-impact エージェントを起動する。coderef/issue proposal を生成する。
-    startAnalyzeImpact: (nodeId) => runAgentWS('analyze-impact', nodeId),
+    startAnalyzeImpact: (nodeId, codebaseId) => runAgentWS('analyze-impact', nodeId, codebaseId),
 
     // extract-questions エージェントを起動する。codebasePath 不要でグラフ文脈のみから
     // question proposal (選択肢候補つき) を生成する。
@@ -532,7 +543,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
       return runAgentWithInput('ingest-document', input, label);
     },
 
-    // ProjectMeta の部分更新 (codebasePath 等)。サーバ応答で state を上書きする。
+    // ProjectMeta の部分更新 (codebases 全置換など)。サーバ応答で state を上書きする。
     patchProjectMeta: async (patch) => {
       const pid = get().projectId;
       if (!pid) throw new Error('projectId is not set');

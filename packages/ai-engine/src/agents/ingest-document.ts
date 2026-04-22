@@ -96,7 +96,7 @@ function buildDocsDirPrompt(dirPath: string): { systemPrompt: string; userPrompt
   const userPrompt = [
     '以下のディレクトリを走査し、requirement と usecase proposal を生成してください。',
     '',
-    `対象ディレクトリ: ${dirPath} (workspaceRoot からの相対)`,
+    `対象ディレクトリ: ${dirPath} (projectDir からの相対)`,
   ].join('\n');
 
   return { systemPrompt, userPrompt };
@@ -116,17 +116,17 @@ const IngestDocumentInputSchema = z.discriminatedUnion('source', [
 export const ingestDocumentAgent: AgentDefinition<IngestDocumentInput> = {
   name: 'ingest-document',
   inputSchema: IngestDocumentInputSchema,
-  async validateInput({ workspaceRoot }, input) {
+  async validateInput({ projectDir }, input) {
     if (input.source === 'paste') {
       return { ok: true };
     }
-    const resolved = path.resolve(workspaceRoot, input.dirPath);
-    const rel = path.relative(workspaceRoot, resolved);
+    const resolved = path.resolve(projectDir, input.dirPath);
+    const rel = path.relative(projectDir, resolved);
     if (rel.startsWith('..') || path.isAbsolute(rel)) {
       return {
         ok: false,
         code: 'bad_request',
-        message: `dirPath が workspaceRoot 配下ではない: ${input.dirPath}`,
+        message: `dirPath が projectDir 配下ではない: ${input.dirPath}`,
       };
     }
     try {
@@ -145,7 +145,7 @@ export const ingestDocumentAgent: AgentDefinition<IngestDocumentInput> = {
         message: `dirPath が存在しない: ${input.dirPath}`,
       };
     }
-    return { ok: true, cwd: workspaceRoot };
+    return { ok: true, cwd: projectDir };
   },
   buildPrompt: ({ input }) => {
     const typed = input as IngestDocumentInput;

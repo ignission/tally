@@ -20,9 +20,7 @@ export function BulkAdoptDialog({ open, onClose }: Props) {
 
   const proposals = useMemo<ProposalNode[]>(
     () =>
-      Object.values(nodes).filter(
-        (n): n is ProposalNode => n.type === 'proposal' && !!n.adoptAs,
-      ),
+      Object.values(nodes).filter((n): n is ProposalNode => n.type === 'proposal' && !!n.adoptAs),
     [nodes],
   );
 

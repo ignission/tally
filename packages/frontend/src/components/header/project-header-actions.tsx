@@ -34,11 +34,7 @@ export function ProjectHeaderActions() {
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setIngestOpen(true)}
-        style={INGEST_BUTTON_STYLE}
-      >
+      <button type="button" onClick={() => setIngestOpen(true)} style={INGEST_BUTTON_STYLE}>
         要求書から取り込む
       </button>
       <button

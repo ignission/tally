@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { FileSystemChatStore, FileSystemProjectStore } from '@tally/storage';
+import { FileSystemChatStore, FileSystemProjectStore, registerProject } from '@tally/storage';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 
@@ -11,28 +11,34 @@ import type { AgentEvent } from './stream';
 
 describe('WS /agent', () => {
   let root: string;
+  let tallyHome: string;
   let close: (() => Promise<void>) | null = null;
-  const prev = process.env.TALLY_WORKSPACE;
+  const prevTallyHome = process.env.TALLY_HOME;
 
   beforeEach(async () => {
     root = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-ws-'));
+    tallyHome = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-home-'));
+    process.env.TALLY_HOME = tallyHome;
     const store = new FileSystemProjectStore(root);
     await store.saveProjectMeta({
       id: 'proj-ws',
       name: 'WS',
+      codebases: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
     await fs.mkdir(path.join(root, '.tally', 'nodes'), { recursive: true });
     await store.addNode({ type: 'usecase', x: 0, y: 0, title: 'uc', body: 'b' });
-    process.env.TALLY_WORKSPACE = root;
+    await registerProject({ id: 'proj-ws', path: root });
   });
 
   afterEach(async () => {
-    process.env.TALLY_WORKSPACE = prev;
+    if (prevTallyHome === undefined) delete process.env.TALLY_HOME;
+    else process.env.TALLY_HOME = prevTallyHome;
     if (close) await close();
     close = null;
     await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(tallyHome, { recursive: true, force: true });
   });
 
   it('start → mock sdk → done が WS で返ってくる', async () => {
@@ -139,26 +145,32 @@ describe('WS /agent', () => {
 
 describe('WS /chat', () => {
   let root: string;
+  let tallyHome: string;
   let close: (() => Promise<void>) | null = null;
-  const prev = process.env.TALLY_WORKSPACE;
+  const prevTallyHome = process.env.TALLY_HOME;
 
   beforeEach(async () => {
     root = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-ws-chat-'));
+    tallyHome = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-home-'));
+    process.env.TALLY_HOME = tallyHome;
     const store = new FileSystemProjectStore(root);
     await store.saveProjectMeta({
       id: 'proj-ws',
       name: 'WS',
+      codebases: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
-    process.env.TALLY_WORKSPACE = root;
+    await registerProject({ id: 'proj-ws', path: root });
   });
 
   afterEach(async () => {
-    process.env.TALLY_WORKSPACE = prev;
+    if (prevTallyHome === undefined) delete process.env.TALLY_HOME;
+    else process.env.TALLY_HOME = prevTallyHome;
     if (close) await close();
     close = null;
     await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(tallyHome, { recursive: true, force: true });
   });
 
   it('/chat: open → user_message で text 応答と turn_ended が返る', async () => {
@@ -181,9 +193,7 @@ describe('WS /chat', () => {
     const events: { type: string; [k: string]: unknown }[] = [];
     await new Promise<void>((resolve, reject) => {
       ws.on('open', () => {
-        ws.send(
-          JSON.stringify({ type: 'open', projectId: 'proj-ws', threadId: thread.id }),
-        );
+        ws.send(JSON.stringify({ type: 'open', projectId: 'proj-ws', threadId: thread.id }));
         // open 応答 (chat_opened) を受けてから user_message を送る。
         setTimeout(() => {
           ws.send(JSON.stringify({ type: 'user_message', text: 'hi' }));
@@ -200,9 +210,7 @@ describe('WS /chat', () => {
       ws.on('error', reject);
     });
     expect(events[0]).toEqual({ type: 'chat_opened', threadId: thread.id });
-    expect(
-      events.some((e) => e.type === 'chat_text_delta' && e.text === 'こんにちは'),
-    ).toBe(true);
+    expect(events.some((e) => e.type === 'chat_text_delta' && e.text === 'こんにちは')).toBe(true);
     expect(events[events.length - 1]?.type).toBe('chat_turn_ended');
   }, 10_000);
 
@@ -219,9 +227,7 @@ describe('WS /chat', () => {
     const events: { type: string; code?: string; [k: string]: unknown }[] = [];
     await new Promise<void>((resolve, reject) => {
       ws.on('open', () => {
-        ws.send(
-          JSON.stringify({ type: 'open', projectId: 'proj-ws', threadId: 'chat-missing' }),
-        );
+        ws.send(JSON.stringify({ type: 'open', projectId: 'proj-ws', threadId: 'chat-missing' }));
       });
       ws.on('message', (data) => events.push(JSON.parse(data.toString())));
       ws.on('close', () => resolve());

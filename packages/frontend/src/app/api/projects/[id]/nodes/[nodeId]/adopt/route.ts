@@ -1,11 +1,15 @@
 import type { AdoptableType } from '@tally/core';
-import { FileSystemProjectStore } from '@tally/storage';
+import { FileSystemProjectStore, listProjects } from '@tally/storage';
 import { NextResponse } from 'next/server';
-
-import { resolveProjectById } from '@/lib/project-resolver';
 
 interface RouteContext {
   params: Promise<{ id: string; nodeId: string }>;
+}
+
+// registry から id に対応するプロジェクトディレクトリを解決する
+async function resolveDir(id: string): Promise<string | null> {
+  const list = await listProjects();
+  return list.find((p) => p.id === id)?.path ?? null;
 }
 
 // proposal → 採用可能 NodeType の集合 (proposal 自身は除外)。
@@ -24,8 +28,8 @@ function isAdoptable(v: unknown): v is AdoptableType {
 
 export async function POST(req: Request, context: RouteContext): Promise<NextResponse> {
   const { id, nodeId } = await context.params;
-  const handle = await resolveProjectById(id);
-  if (!handle) return NextResponse.json({ error: 'project not found', id }, { status: 404 });
+  const dir = await resolveDir(id);
+  if (!dir) return NextResponse.json({ error: 'project not found', id }, { status: 404 });
 
   const raw = await req.json().catch(() => null);
   if (raw === null || typeof raw !== 'object') {
@@ -38,7 +42,7 @@ export async function POST(req: Request, context: RouteContext): Promise<NextRes
   const extra =
     additional && typeof additional === 'object' ? (additional as Record<string, unknown>) : {};
 
-  const store = new FileSystemProjectStore(handle.workspaceRoot);
+  const store = new FileSystemProjectStore(dir);
   const exists = await store.getNode(nodeId);
   if (!exists) return NextResponse.json({ error: 'node not found' }, { status: 404 });
   try {

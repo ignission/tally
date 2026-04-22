@@ -16,6 +16,7 @@ function baseProject(): Project {
   return {
     id: 'proj-1',
     name: 'P',
+    codebases: [],
     createdAt: now,
     updatedAt: now,
     nodes: [n1],
@@ -134,6 +135,7 @@ describe('useCanvasStore', () => {
       useCanvasStore.getState().hydrate({
         id: 'proj-1',
         name: 't',
+        codebases: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         nodes: [{ id: 'uc-1', type: 'usecase', x: 0, y: 0, title: 'uc', body: '' }],
@@ -178,6 +180,7 @@ describe('useCanvasStore', () => {
       useCanvasStore.getState().hydrate({
         id: 'proj-1',
         name: 't',
+        codebases: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         nodes: [{ id: 'uc-1', type: 'usecase', x: 0, y: 0, title: 'uc', body: '' }],
@@ -246,6 +249,7 @@ describe('useCanvasStore', () => {
       store.getState().hydrate({
         id: 'proj-1',
         name: 't',
+        codebases: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         nodes: [{ id: 'uc-1', type: 'usecase', x: 0, y: 0, title: 'uc', body: '' }],
@@ -302,6 +306,7 @@ describe('useCanvasStore', () => {
       store.getState().hydrate({
         id: 'proj-1',
         name: 't',
+        codebases: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         nodes: [{ id: 'uc-1', type: 'usecase', x: 0, y: 0, title: 'uc', body: '' }],
@@ -364,6 +369,7 @@ describe('useCanvasStore', () => {
       store.getState().hydrate({
         id: 'proj-1',
         name: 't',
+        codebases: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         nodes: [],
@@ -402,6 +408,7 @@ describe('useCanvasStore', () => {
       store.getState().hydrate({
         id: 'proj-2',
         name: 't',
+        codebases: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         nodes: [],
@@ -424,6 +431,7 @@ describe('useCanvasStore', () => {
       useCanvasStore.getState().hydrate({
         id: 'proj-1',
         name: 'P',
+        codebases: [],
         createdAt: '2026-04-18T00:00:00Z',
         updatedAt: '2026-04-18T00:00:00Z',
         nodes: [],
@@ -432,14 +440,43 @@ describe('useCanvasStore', () => {
       okJson({
         id: 'proj-1',
         name: 'P',
-        codebasePath: '../backend',
+        codebases: [{ id: 'backend', label: 'Backend', path: '../backend' }],
         createdAt: '2026-04-18T00:00:00Z',
         updatedAt: '2026-04-19T00:00:00Z',
       });
-      await useCanvasStore.getState().patchProjectMeta({ codebasePath: '../backend' });
-      expect(useCanvasStore.getState().projectMeta?.codebasePath).toBe('../backend');
+      await useCanvasStore
+        .getState()
+        .patchProjectMeta({ codebases: [{ id: 'backend', label: 'Backend', path: '../backend' }] });
+      expect(useCanvasStore.getState().projectMeta?.codebases).toEqual([
+        { id: 'backend', label: 'Backend', path: '../backend' },
+      ]);
       const call = fetchMock.mock.calls[0];
       expect(call?.[1]).toMatchObject({ method: 'PATCH' });
+    });
+
+    it('patchProjectMeta で codebases を全置換できる', async () => {
+      useCanvasStore.getState().hydrate({
+        id: 'proj-1',
+        name: 'P',
+        codebases: [{ id: 'old', label: 'Old', path: '/old' }],
+        createdAt: '2026-04-18T00:00:00Z',
+        updatedAt: '2026-04-18T00:00:00Z',
+        nodes: [],
+        edges: [],
+      });
+      okJson({
+        id: 'proj-1',
+        name: 'P',
+        codebases: [{ id: 'new', label: 'New', path: '/n' }],
+        createdAt: '2026-04-18T00:00:00Z',
+        updatedAt: '2026-04-19T00:00:00Z',
+      });
+      await useCanvasStore
+        .getState()
+        .patchProjectMeta({ codebases: [{ id: 'new', label: 'New', path: '/n' }] });
+      expect(useCanvasStore.getState().projectMeta?.codebases).toEqual([
+        { id: 'new', label: 'New', path: '/n' },
+      ]);
     });
   });
 
@@ -449,6 +486,7 @@ describe('useCanvasStore', () => {
       useCanvasStore.getState().hydrate({
         id: 'proj-1',
         name: 'P',
+        codebases: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         nodes: [
@@ -486,6 +524,7 @@ describe('useCanvasStore', () => {
       useCanvasStore.getState().hydrate({
         id: 'proj-1',
         name: 'P',
+        codebases: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         nodes: [
@@ -568,6 +607,7 @@ describe('useCanvasStore', () => {
       store.getState().hydrate({
         id: 'proj-1',
         name: 't',
+        codebases: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         nodes: [],
@@ -616,6 +656,7 @@ describe('useCanvasStore', () => {
       store.getState().hydrate({
         id: 'proj-1',
         name: 't',
+        codebases: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         nodes: [],

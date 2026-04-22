@@ -6,9 +6,9 @@ import {
   Background,
   Controls,
   MiniMap,
-  Panel,
   type NodeChange,
   type OnConnect,
+  Panel,
   type Edge as RFEdge,
   type Node as RFNode,
   ReactFlow,
@@ -102,8 +102,8 @@ function CanvasInner(props: {
   const [aligning, setAligning] = useState<null | 'TB' | 'LR'>(null);
   const [bulkAdoptOpen, setBulkAdoptOpen] = useState(false);
   const [mermaidOpen, setMermaidOpen] = useState(false);
-  const proposalCount = useCanvasStore((s) =>
-    Object.values(s.nodes).filter((n) => n.type === 'proposal' && !!n.adoptAs).length,
+  const proposalCount = useCanvasStore(
+    (s) => Object.values(s.nodes).filter((n) => n.type === 'proposal' && !!n.adoptAs).length,
   );
 
   const handleAutoLayout = async (direction: 'TB' | 'LR') => {

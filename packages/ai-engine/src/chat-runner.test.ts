@@ -19,6 +19,7 @@ describe('ChatRunner', () => {
     await ps.saveProjectMeta({
       id: 'proj-1',
       name: 'P',
+      codebases: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
@@ -49,7 +50,7 @@ describe('ChatRunner', () => {
       sdk,
       chatStore,
       projectStore,
-      workspaceRoot: root,
+      projectDir: root,
       threadId: thread.id,
     });
 
@@ -95,13 +96,11 @@ describe('ChatRunner', () => {
       sdk,
       chatStore,
       projectStore,
-      workspaceRoot: root,
+      projectDir: root,
       threadId: thread.id,
     });
 
-    const entry = runner
-      .buildToolRegistry()
-      .find((t) => t.name === 'mcp__tally__create_node');
+    const entry = runner.buildToolRegistry().find((t) => t.name === 'mcp__tally__create_node');
     if (!entry) throw new Error('entry missing');
 
     const events: ChatEvent[] = [];
@@ -147,13 +146,11 @@ describe('ChatRunner', () => {
       sdk,
       chatStore,
       projectStore,
-      workspaceRoot: root,
+      projectDir: root,
       threadId: thread.id,
     });
 
-    const entry = runner
-      .buildToolRegistry()
-      .find((t) => t.name === 'mcp__tally__create_node');
+    const entry = runner.buildToolRegistry().find((t) => t.name === 'mcp__tally__create_node');
     if (!entry) throw new Error('entry missing');
 
     const events: ChatEvent[] = [];

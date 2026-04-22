@@ -53,11 +53,7 @@ export interface BuildMermaidOptions {
   placeholderTitle?: string;
 }
 
-export function buildMermaid(
-  nodes: Node[],
-  edges: Edge[],
-  opts: BuildMermaidOptions = {},
-): string {
+export function buildMermaid(nodes: Node[], edges: Edge[], opts: BuildMermaidOptions = {}): string {
   const direction = opts.direction ?? 'LR';
   const placeholder = opts.placeholderTitle ?? '(無題)';
 

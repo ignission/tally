@@ -4,6 +4,9 @@ import type { AgentName, RequirementNode, UseCaseNode, UserStoryNode } from '@ta
 
 import { useCanvasStore } from '@/lib/store';
 
+import { CodebasePickerSelect } from './codebase-picker-select';
+import { useCodebaseSelector } from './use-codebase-selector';
+
 export type AnchorNode = UseCaseNode | RequirementNode | UserStoryNode;
 
 interface CodebaseAgentButtonProps {
@@ -12,11 +15,14 @@ interface CodebaseAgentButtonProps {
   label: string;
   busyLabel: string;
   tooltip: string;
-  onRun: (nodeId: string) => Promise<void>;
+  // codebaseId を受け取る形に変更。選択された codebase を ai-engine に渡す。
+  onRun: (nodeId: string, codebaseId: string) => Promise<void>;
 }
 
 // codebase を読むエージェント用の共通ボタン。
-// codebasePath 未設定 or 他エージェント実行中は disabled + tooltip でヒント表示。
+// codebases が 0 件: disabled + tooltip でヒント表示。
+// codebases が 1 件: 自動選択。
+// codebases が 2 件以上: select で選択できる。
 // busyLabel はこのボタン自身のエージェントが実行中のときだけ表示する
 // (他エージェント実行中に誤って自分の "実行中..." 表示が出ないように agentName で判定)。
 export function CodebaseAgentButton({
@@ -27,16 +33,21 @@ export function CodebaseAgentButton({
   tooltip,
   onRun,
 }: CodebaseAgentButtonProps) {
-  const codebasePath = useCanvasStore((s) => s.projectMeta?.codebasePath);
   const running = useCanvasStore((s) => s.runningAgent);
+  const {
+    codebases,
+    selected,
+    pick,
+    disabled: cbDisabled,
+    tooltip: cbTooltip,
+  } = useCodebaseSelector();
 
-  const hasCodebase = typeof codebasePath === 'string' && codebasePath.trim().length > 0;
   const busy = running !== null;
   const mine = running?.agent === agentName;
-  const disabled = busy || !hasCodebase;
+  const disabled = busy || cbDisabled;
 
-  const resolvedTooltip = !hasCodebase
-    ? 'codebasePath 未設定: ヘッダの設定から指定してください'
+  const resolvedTooltip = cbDisabled
+    ? cbTooltip
     : busy
       ? mine
         ? tooltip
@@ -44,24 +55,32 @@ export function CodebaseAgentButton({
       : tooltip;
 
   const onClick = () => {
-    if (disabled) return;
-    onRun(node.id).catch(console.error);
+    if (disabled || !selected) return;
+    onRun(node.id, selected.id).catch(console.error);
   };
 
   return (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={onClick}
-      title={resolvedTooltip}
-      style={{
-        ...BUTTON_STYLE,
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        opacity: disabled ? 0.6 : 1,
-      }}
-    >
-      {mine ? busyLabel : label}
-    </button>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <CodebasePickerSelect
+        codebases={codebases}
+        value={selected?.id ?? ''}
+        onChange={pick}
+        disabled={busy}
+      />
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={onClick}
+        title={resolvedTooltip}
+        style={{
+          ...BUTTON_STYLE,
+          cursor: disabled ? 'not-allowed' : 'pointer',
+          opacity: disabled ? 0.6 : 1,
+        }}
+      >
+        {mine ? busyLabel : label}
+      </button>
+    </div>
   );
 }
 

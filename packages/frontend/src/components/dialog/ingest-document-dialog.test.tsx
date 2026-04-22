@@ -72,9 +72,7 @@ describe('IngestDocumentDialog', () => {
 
   it('失敗時はテキスト保持 + エラー表示 + ダイアログ維持', async () => {
     const onClose = vi.fn();
-    const start = vi
-      .fn()
-      .mockResolvedValue({ ok: false, errorMessage: 'not_authenticated' });
+    const start = vi.fn().mockResolvedValue({ ok: false, errorMessage: 'not_authenticated' });
     useCanvasStore.setState({ startIngestDocument: start } as never);
     render(<IngestDocumentDialog open={true} onClose={onClose} />);
     const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;

@@ -27,51 +27,57 @@ describe('buildFindRelatedCodePrompt', () => {
     expect(p.userPrompt).toContain('招待');
     expect(p.userPrompt).toContain('メール招待');
   });
+
+  it('codebaseId が渡されたらプロンプト両方に含まれ、additional の契約にも codebaseId が明記される', () => {
+    const p = buildFindRelatedCodePrompt({
+      anchor: { id: 'uc-2', type: 'usecase', x: 0, y: 0, title: 'test', body: '' },
+      codebaseId: 'backend',
+    });
+    expect(p.userPrompt).toContain('backend');
+    expect(p.systemPrompt).toContain('codebaseId');
+  });
 });
 
 describe('findRelatedCodeAgent.validateInput', () => {
-  let workspaceRoot: string;
+  let projectDir: string;
   let codebaseDir: string;
   let store: FileSystemProjectStore;
 
   beforeEach(async () => {
-    workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-frc-'));
+    projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-frc-'));
     codebaseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-frc-code-'));
-    store = new FileSystemProjectStore(workspaceRoot);
-    await fs.mkdir(path.join(workspaceRoot, '.tally', 'nodes'), { recursive: true });
+    store = new FileSystemProjectStore(projectDir);
+    await fs.mkdir(path.join(projectDir, '.tally', 'nodes'), { recursive: true });
     await store.saveProjectMeta({
       id: 'proj-frc',
       name: 'FRC',
-      codebasePath: codebaseDir,
+      codebases: [{ id: 'main', label: 'Main', path: codebaseDir }],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
   });
 
   afterEach(async () => {
-    await fs.rm(workspaceRoot, { recursive: true, force: true });
+    await fs.rm(projectDir, { recursive: true, force: true });
     await fs.rm(codebaseDir, { recursive: true, force: true });
   });
 
   it('usecase ノードで ok + cwd が返る', async () => {
     const uc = await store.addNode({ type: 'usecase', x: 0, y: 0, title: 'uc', body: 'b' });
-    const r = await findRelatedCodeAgent.validateInput({ store, workspaceRoot }, { nodeId: uc.id });
+    const r = await findRelatedCodeAgent.validateInput({ store, projectDir }, { nodeId: uc.id });
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.anchor?.id).toBe(uc.id);
-      expect(r.cwd).toBe(path.resolve(workspaceRoot, codebaseDir));
+      expect(r.cwd).toBe(path.resolve(projectDir, codebaseDir));
     }
   });
 
   it('requirement / userstory も許可される', async () => {
     const req = await store.addNode({ type: 'requirement', x: 0, y: 0, title: 'r', body: '' });
     const story = await store.addNode({ type: 'userstory', x: 0, y: 0, title: 's', body: '' });
-    const r1 = await findRelatedCodeAgent.validateInput(
-      { store, workspaceRoot },
-      { nodeId: req.id },
-    );
+    const r1 = await findRelatedCodeAgent.validateInput({ store, projectDir }, { nodeId: req.id });
     const r2 = await findRelatedCodeAgent.validateInput(
-      { store, workspaceRoot },
+      { store, projectDir },
       { nodeId: story.id },
     );
     expect(r1.ok).toBe(true);
@@ -80,14 +86,14 @@ describe('findRelatedCodeAgent.validateInput', () => {
 
   it('対象外 type (question) は bad_request', async () => {
     const q = await store.addNode({ type: 'question', x: 0, y: 0, title: 'q', body: '' });
-    const r = await findRelatedCodeAgent.validateInput({ store, workspaceRoot }, { nodeId: q.id });
+    const r = await findRelatedCodeAgent.validateInput({ store, projectDir }, { nodeId: q.id });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.code).toBe('bad_request');
   });
 
   it('不在 nodeId は not_found', async () => {
     const r = await findRelatedCodeAgent.validateInput(
-      { store, workspaceRoot },
+      { store, projectDir },
       { nodeId: 'uc-missing' },
     );
     expect(r.ok).toBe(false);
@@ -95,28 +101,32 @@ describe('findRelatedCodeAgent.validateInput', () => {
   });
 
   it('codebasePath 未設定は bad_request', async () => {
-    const current = await store.getProjectMeta();
-    if (!current) throw new Error('meta missing');
-    const { codebasePath: _drop, ...rest } = current;
-    await store.saveProjectMeta(rest);
+    // codebases が空の場合は primary が存在しないので bad_request になる。
+    await store.saveProjectMeta({
+      id: 'proj-frc',
+      name: 'FRC',
+      codebases: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
     const uc = await store.addNode({ type: 'usecase', x: 0, y: 0, title: 'uc', body: 'b' });
-    const r = await findRelatedCodeAgent.validateInput({ store, workspaceRoot }, { nodeId: uc.id });
+    const r = await findRelatedCodeAgent.validateInput({ store, projectDir }, { nodeId: uc.id });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.code).toBe('bad_request');
   });
 
   it('codebasePath がファイル (非ディレクトリ) なら bad_request', async () => {
-    const filePath = path.join(workspaceRoot, 'not-a-dir.txt');
+    const filePath = path.join(projectDir, 'not-a-dir.txt');
     await fs.writeFile(filePath, 'x');
     await store.saveProjectMeta({
       id: 'proj-frc',
       name: 'FRC',
-      codebasePath: filePath,
+      codebases: [{ id: 'main', label: 'Main', path: filePath }],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
     const uc = await store.addNode({ type: 'usecase', x: 0, y: 0, title: 'uc', body: 'b' });
-    const r = await findRelatedCodeAgent.validateInput({ store, workspaceRoot }, { nodeId: uc.id });
+    const r = await findRelatedCodeAgent.validateInput({ store, projectDir }, { nodeId: uc.id });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.code).toBe('bad_request');
   });
@@ -125,12 +135,12 @@ describe('findRelatedCodeAgent.validateInput', () => {
     await store.saveProjectMeta({
       id: 'proj-frc',
       name: 'FRC',
-      codebasePath: '../nonexistent-xyz',
+      codebases: [{ id: 'main', label: 'Main', path: '../nonexistent-xyz' }],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
     const uc = await store.addNode({ type: 'usecase', x: 0, y: 0, title: 'uc', body: 'b' });
-    const r = await findRelatedCodeAgent.validateInput({ store, workspaceRoot }, { nodeId: uc.id });
+    const r = await findRelatedCodeAgent.validateInput({ store, projectDir }, { nodeId: uc.id });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.code).toBe('not_found');
   });

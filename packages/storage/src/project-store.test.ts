@@ -4,53 +4,51 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { resolveProjectPaths } from './project-dir';
 import { FileSystemProjectStore } from './project-store';
 
 // 各テスト用に tmp ディレクトリを作る。モックは使わず実ファイルシステムに書く。
-async function makeWorkspace(): Promise<string> {
-  return fs.mkdtemp(path.join(os.tmpdir(), 'tally-test-'));
-}
+let projectDir: string;
 
-async function rmrf(p: string): Promise<void> {
-  await fs.rm(p, { recursive: true, force: true });
-}
+beforeEach(async () => {
+  projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-proj-'));
+  const paths = resolveProjectPaths(projectDir);
+  await fs.mkdir(paths.nodesDir, { recursive: true });
+  await fs.mkdir(paths.edgesDir, { recursive: true });
+  await fs.writeFile(paths.edgesFile, 'edges: []\n');
+});
+
+afterEach(async () => {
+  await fs.rm(projectDir, { recursive: true, force: true });
+});
 
 describe('FileSystemProjectStore', () => {
-  let workspace: string;
-  let store: FileSystemProjectStore;
-
-  beforeEach(async () => {
-    workspace = await makeWorkspace();
-    store = new FileSystemProjectStore(workspace);
-  });
-
-  afterEach(async () => {
-    await rmrf(workspace);
-  });
-
   describe('project meta', () => {
     it('未初期化なら null を返す', async () => {
+      const store = new FileSystemProjectStore(projectDir);
       expect(await store.getProjectMeta()).toBeNull();
       expect(await store.loadProject()).toBeNull();
     });
 
     it('saveProjectMeta → getProjectMeta で往復できる', async () => {
+      const store = new FileSystemProjectStore(projectDir);
       await store.saveProjectMeta({
         id: 'proj-test',
         name: 'テストプロジェクト',
         description: '説明',
-        codebasePath: '../backend',
+        codebases: [],
         createdAt: '2026-04-18T10:00:00Z',
         updatedAt: '2026-04-18T10:00:00Z',
       });
       const meta = await store.getProjectMeta();
       expect(meta?.name).toBe('テストプロジェクト');
-      expect(meta?.codebasePath).toBe('../backend');
+      expect(meta?.codebases).toEqual([]);
     });
   });
 
   describe('nodes CRUD', () => {
     it('addNode で ID が採番され、getNode / listNodes に反映される', async () => {
+      const store = new FileSystemProjectStore(projectDir);
       const created = await store.addNode({
         type: 'requirement',
         x: 10,
@@ -70,6 +68,7 @@ describe('FileSystemProjectStore', () => {
     });
 
     it('updateNode でフィールドが上書きされる', async () => {
+      const store = new FileSystemProjectStore(projectDir);
       const created = await store.addNode({
         type: 'question',
         x: 0,
@@ -93,6 +92,7 @@ describe('FileSystemProjectStore', () => {
     });
 
     it('deleteNode は該当ファイルを消し、付随エッジも削除する', async () => {
+      const store = new FileSystemProjectStore(projectDir);
       const a = await store.addNode({ type: 'usecase', x: 0, y: 0, title: 'A', body: '' });
       const b = await store.addNode({ type: 'userstory', x: 0, y: 0, title: 'B', body: '' });
       await store.addEdge({ from: a.id, to: b.id, type: 'contain' });
@@ -104,12 +104,14 @@ describe('FileSystemProjectStore', () => {
     });
 
     it('存在しないノードの update はエラー', async () => {
+      const store = new FileSystemProjectStore(projectDir);
       await expect(store.updateNode('req-missing', { title: 'x' })).rejects.toThrow(
         /存在しないノード/,
       );
     });
 
     it('updateNode は patch に null を渡すと該当フィールドを削除する', async () => {
+      const store = new FileSystemProjectStore(projectDir);
       const created = await store.addNode({
         type: 'requirement',
         x: 0,
@@ -137,6 +139,7 @@ describe('FileSystemProjectStore', () => {
     });
 
     it('findNodesByType で型による絞り込みができる', async () => {
+      const store = new FileSystemProjectStore(projectDir);
       await store.addNode({ type: 'requirement', x: 0, y: 0, title: 'r', body: '' });
       await store.addNode({ type: 'question', x: 0, y: 0, title: 'q', body: '' });
       await store.addNode({ type: 'question', x: 0, y: 0, title: 'q2', body: '' });
@@ -149,6 +152,7 @@ describe('FileSystemProjectStore', () => {
 
   describe('edges CRUD', () => {
     it('addEdge で追加し、listEdges で取り出せる', async () => {
+      const store = new FileSystemProjectStore(projectDir);
       const a = await store.addNode({ type: 'requirement', x: 0, y: 0, title: 'r', body: '' });
       const b = await store.addNode({ type: 'usecase', x: 0, y: 0, title: 'u', body: '' });
       const edge = await store.addEdge({ from: a.id, to: b.id, type: 'satisfy' });
@@ -160,6 +164,7 @@ describe('FileSystemProjectStore', () => {
     });
 
     it('deleteEdge で消える', async () => {
+      const store = new FileSystemProjectStore(projectDir);
       const a = await store.addNode({ type: 'requirement', x: 0, y: 0, title: 'r', body: '' });
       const b = await store.addNode({ type: 'usecase', x: 0, y: 0, title: 'u', body: '' });
       const e = await store.addEdge({ from: a.id, to: b.id, type: 'satisfy' });
@@ -168,6 +173,7 @@ describe('FileSystemProjectStore', () => {
     });
 
     it('updateEdge は id を変えずに type を差し替える', async () => {
+      const store = new FileSystemProjectStore(projectDir);
       const a = await store.addNode({ type: 'requirement', x: 0, y: 0, title: 'a', body: '' });
       const b = await store.addNode({ type: 'usecase', x: 0, y: 0, title: 'b', body: '' });
       const edge = await store.addEdge({ from: a.id, to: b.id, type: 'satisfy' });
@@ -184,6 +190,7 @@ describe('FileSystemProjectStore', () => {
     });
 
     it('updateEdge は存在しない id で Error を投げる', async () => {
+      const store = new FileSystemProjectStore(projectDir);
       await expect(store.updateEdge('e-unknown', { type: 'refine' })).rejects.toThrow(
         /存在しないエッジ/,
       );
@@ -192,6 +199,7 @@ describe('FileSystemProjectStore', () => {
 
   describe('findRelatedNodes', () => {
     it('双方向の関連ノードを返す', async () => {
+      const store = new FileSystemProjectStore(projectDir);
       const req = await store.addNode({ type: 'requirement', x: 0, y: 0, title: 'r', body: '' });
       const uc = await store.addNode({ type: 'usecase', x: 0, y: 0, title: 'u', body: '' });
       const q = await store.addNode({ type: 'question', x: 0, y: 0, title: 'q', body: '' });
@@ -207,6 +215,7 @@ describe('FileSystemProjectStore', () => {
     });
 
     it('関連ノードが無いとき空配列を返す', async () => {
+      const store = new FileSystemProjectStore(projectDir);
       const a = await store.addNode({ type: 'issue', x: 0, y: 0, title: 'a', body: '' });
       expect(await store.findRelatedNodes(a.id)).toEqual([]);
     });
@@ -214,10 +223,10 @@ describe('FileSystemProjectStore', () => {
 
   describe('YAML 往復', () => {
     it('手編集の YAML を読み直せる (外部編集許容)', async () => {
-      const dir = path.join(workspace, '.tally', 'nodes');
-      await fs.mkdir(dir, { recursive: true });
+      const store = new FileSystemProjectStore(projectDir);
+      const paths = resolveProjectPaths(projectDir);
       await fs.writeFile(
-        path.join(dir, 'req-manual.yaml'),
+        path.join(paths.nodesDir, 'req-manual.yaml'),
         'id: req-manual\ntype: requirement\nx: 0\ny: 0\ntitle: 手書き要求\nbody: 本文\nkind: functional\npriority: must\n',
         'utf8',
       );
@@ -227,10 +236,10 @@ describe('FileSystemProjectStore', () => {
     });
 
     it('不正な YAML は例外にする', async () => {
-      const dir = path.join(workspace, '.tally', 'nodes');
-      await fs.mkdir(dir, { recursive: true });
+      const store = new FileSystemProjectStore(projectDir);
+      const paths = resolveProjectPaths(projectDir);
       await fs.writeFile(
-        path.join(dir, 'broken.yaml'),
+        path.join(paths.nodesDir, 'broken.yaml'),
         'id: broken\ntype: invalidtype\nx: 0\ny: 0\ntitle: x\nbody: x\n',
         'utf8',
       );
@@ -239,7 +248,10 @@ describe('FileSystemProjectStore', () => {
   });
 
   describe('transmuteNode (proposal 採用)', () => {
-    async function addProposal(extras: Partial<{ adoptAs: string }> = {}) {
+    async function addProposal(
+      store: FileSystemProjectStore,
+      extras: Partial<{ adoptAs: string }> = {},
+    ) {
       return store.addNode({
         type: 'proposal',
         x: 10,
@@ -258,7 +270,8 @@ describe('FileSystemProjectStore', () => {
     }
 
     it('userstory に採用すると type が変わり [AI] と proposal 固有属性が落ちる', async () => {
-      const p = await addProposal();
+      const store = new FileSystemProjectStore(projectDir);
+      const p = await addProposal(store);
       const adopted = await store.transmuteNode(p.id, 'userstory');
       expect(adopted.id).toBe(p.id);
       expect(adopted.type).toBe('userstory');
@@ -271,7 +284,8 @@ describe('FileSystemProjectStore', () => {
     });
 
     it('requirement に採用し additional を受け取る', async () => {
-      const p = await addProposal({ adoptAs: 'requirement' });
+      const store = new FileSystemProjectStore(projectDir);
+      const p = await addProposal(store, { adoptAs: 'requirement' });
       const adopted = await store.transmuteNode(p.id, 'requirement', {
         kind: 'functional',
         priority: 'must',
@@ -284,7 +298,8 @@ describe('FileSystemProjectStore', () => {
     });
 
     it('userstory に採用し additional.acceptanceCriteria を受け取る', async () => {
-      const p = await addProposal();
+      const store = new FileSystemProjectStore(projectDir);
+      const p = await addProposal(store);
       const adopted = await store.transmuteNode(p.id, 'userstory', {
         acceptanceCriteria: [{ id: 'ac1', text: '動く', done: false }],
         points: 3,
@@ -297,12 +312,14 @@ describe('FileSystemProjectStore', () => {
     });
 
     it('存在しない id は Error を投げる', async () => {
+      const store = new FileSystemProjectStore(projectDir);
       await expect(store.transmuteNode('prop-missing', 'userstory')).rejects.toThrow(
         /存在しないノード/,
       );
     });
 
     it('proposal 以外は Error を投げる', async () => {
+      const store = new FileSystemProjectStore(projectDir);
       const req = await store.addNode({
         type: 'requirement',
         x: 0,
@@ -316,8 +333,9 @@ describe('FileSystemProjectStore', () => {
     });
 
     it('採用前に張られたエッジが採用後も残る', async () => {
+      const store = new FileSystemProjectStore(projectDir);
       const uc = await store.addNode({ type: 'usecase', x: 0, y: 0, title: 'uc', body: '' });
-      const p = await addProposal();
+      const p = await addProposal(store);
       const edge = await store.addEdge({ from: uc.id, to: p.id, type: 'derive' });
 
       await store.transmuteNode(p.id, 'userstory');
@@ -327,6 +345,80 @@ describe('FileSystemProjectStore', () => {
       expect(edges[0]?.id).toBe(edge.id);
       expect(edges[0]?.from).toBe(uc.id);
       expect(edges[0]?.to).toBe(p.id);
+    });
+  });
+
+  describe('codebases roundtrip', () => {
+    it('0 件の codebases を save/load', async () => {
+      const store = new FileSystemProjectStore(projectDir);
+      await store.saveProjectMeta({
+        id: 'proj-a',
+        name: 'a',
+        codebases: [],
+        createdAt: '2026-04-21T00:00:00Z',
+        updatedAt: '2026-04-21T00:00:00Z',
+      });
+      const loaded = await store.getProjectMeta();
+      expect(loaded?.codebases).toEqual([]);
+    });
+
+    it('複数 codebases を save/load', async () => {
+      const store = new FileSystemProjectStore(projectDir);
+      const codebases = [
+        { id: 'frontend', label: 'Web', path: '/a' },
+        { id: 'backend', label: 'API', path: '/b' },
+      ];
+      await store.saveProjectMeta({
+        id: 'proj-a',
+        name: 'a',
+        codebases,
+        createdAt: '2026-04-21T00:00:00Z',
+        updatedAt: '2026-04-21T00:00:00Z',
+      });
+      expect((await store.getProjectMeta())?.codebases).toEqual(codebases);
+    });
+  });
+
+  describe('coderef codebaseId 整合性', () => {
+    it('存在しない codebaseId の coderef 追加は拒否', async () => {
+      const store = new FileSystemProjectStore(projectDir);
+      await store.saveProjectMeta({
+        id: 'proj-a',
+        name: 'a',
+        codebases: [{ id: 'frontend', label: 'W', path: '/a' }],
+        createdAt: '2026-04-21T00:00:00Z',
+        updatedAt: '2026-04-21T00:00:00Z',
+      });
+      await expect(
+        store.addNode({
+          type: 'coderef',
+          x: 0,
+          y: 0,
+          title: 't',
+          body: 'b',
+          codebaseId: 'unknown',
+        }),
+      ).rejects.toThrow(/codebaseId/);
+    });
+
+    it('存在する codebaseId なら合格', async () => {
+      const store = new FileSystemProjectStore(projectDir);
+      await store.saveProjectMeta({
+        id: 'proj-a',
+        name: 'a',
+        codebases: [{ id: 'frontend', label: 'W', path: '/a' }],
+        createdAt: '2026-04-21T00:00:00Z',
+        updatedAt: '2026-04-21T00:00:00Z',
+      });
+      const node = await store.addNode({
+        type: 'coderef',
+        x: 0,
+        y: 0,
+        title: 't',
+        body: 'b',
+        codebaseId: 'frontend',
+      });
+      expect(node.codebaseId).toBe('frontend');
     });
   });
 });

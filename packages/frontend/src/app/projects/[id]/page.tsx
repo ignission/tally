@@ -2,9 +2,19 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 import { ProjectHeaderActions } from '@/components/header/project-header-actions';
-import { loadProjectById } from '@/lib/project-resolver';
+import { FileSystemProjectStore, listProjects, touchProject } from '@tally/storage';
 
 import { CanvasClient } from './canvas-client';
+
+async function loadProjectById(id: string) {
+  const list = await listProjects();
+  const entry = list.find((p) => p.id === id);
+  if (!entry) return null;
+  const store = new FileSystemProjectStore(entry.path);
+  const project = await store.loadProject();
+  if (project) await touchProject(id);
+  return project;
+}
 
 export const dynamic = 'force-dynamic';
 

@@ -3,9 +3,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createEdge,
   createNode,
+  createProject,
   deleteEdge,
   deleteNode,
+  fetchDefaultProjectPath,
+  fetchRegistryProjects,
+  importProject,
+  listDirectory,
+  mkdir,
   patchProjectMeta,
+  unregisterProjectApi,
   updateEdge,
   updateNode,
 } from './api';
@@ -64,7 +71,7 @@ describe('lib/api', () => {
 
   it('updateNode は PATCH /api/projects/:id/nodes/:nid', async () => {
     okJson({ ok: true });
-    await updateNode(PID, 'req-xxxxx', { title: 'new' });
+    await updateNode<'requirement'>(PID, 'req-xxxxx', { title: 'new' });
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe(`/api/projects/${PID}/nodes/req-xxxxx`);
     expect(init.method).toBe('PATCH');
@@ -108,36 +115,43 @@ describe('lib/api', () => {
 
   it('4xx はエラーとして throw する', async () => {
     fetchMock.mockResolvedValueOnce(new Response('bad', { status: 400 }));
-    await expect(updateNode(PID, 'req-xxxxx', { title: 'x' })).rejects.toThrow(/400/);
+    await expect(updateNode<'requirement'>(PID, 'req-xxxxx', { title: 'x' })).rejects.toThrow(
+      /400/,
+    );
   });
 
   it('patchProjectMeta は PATCH /api/projects/:id', async () => {
     const updated = {
       id: PID,
       name: 'P',
-      codebasePath: '../backend',
+      codebases: [{ id: 'backend', label: 'Backend', path: '../backend' }],
       createdAt: '2026-04-18T00:00:00Z',
       updatedAt: '2026-04-19T00:00:00Z',
     };
     okJson(updated);
-    const result = await patchProjectMeta(PID, { codebasePath: '../backend' });
+    const result = await patchProjectMeta(PID, {
+      codebases: [{ id: 'backend', label: 'Backend', path: '../backend' }],
+    });
     expect(result).toEqual(updated);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe(`/api/projects/${PID}`);
     expect(init.method).toBe('PATCH');
-    expect(JSON.parse(init.body as string)).toEqual({ codebasePath: '../backend' });
+    expect(JSON.parse(init.body as string)).toEqual({
+      codebases: [{ id: 'backend', label: 'Backend', path: '../backend' }],
+    });
   });
 
-  it('patchProjectMeta は null で codebasePath 削除シグナル', async () => {
+  it('patchProjectMeta は null で codebases 削除シグナル', async () => {
     okJson({
       id: PID,
       name: 'P',
+      codebases: [],
       createdAt: '2026-04-18T00:00:00Z',
       updatedAt: '2026-04-19T00:00:00Z',
     });
-    await patchProjectMeta(PID, { codebasePath: null });
+    await patchProjectMeta(PID, { codebases: [] });
     const [, init] = fetchMock.mock.calls[0] as [unknown, RequestInit];
-    expect(JSON.parse(init.body as string)).toEqual({ codebasePath: null });
+    expect(JSON.parse(init.body as string)).toEqual({ codebases: [] });
   });
 
   it('updateNode は undefined 値を null に変換して送信する', async () => {
@@ -151,5 +165,149 @@ describe('lib/api', () => {
     const body = JSON.parse(init.body as string) as Record<string, unknown>;
     expect(body.kind).toBeNull();
     expect(body.priority).toBe('must');
+  });
+});
+
+describe('fetchRegistryProjects', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it('GET /api/projects を叩いて projects を返す', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ projects: [{ id: 'a', name: 'A', codebases: [] }] }), {
+          status: 200,
+        }),
+      ) as typeof fetch;
+    const list = await fetchRegistryProjects();
+    expect(list[0]?.id).toBe('a');
+  });
+});
+
+describe('createProject', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it('POST /api/projects に projectDir + codebases を渡す', async () => {
+    const spy = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ id: 'new', projectDir: '/x' }), { status: 201 }),
+      );
+    globalThis.fetch = spy as typeof fetch;
+    const res = await createProject({
+      projectDir: '/some/dir',
+      name: 'n',
+      codebases: [{ id: 'web', label: 'Web', path: '/w' }],
+    });
+    expect(res.id).toBe('new');
+    const call = spy.mock.calls[0];
+    expect(call?.[0]).toBe('/api/projects');
+    const body = JSON.parse((call?.[1] as RequestInit).body as string) as Record<string, unknown>;
+    expect(body.projectDir).toBe('/some/dir');
+    const codebases = body.codebases as Array<{ id: string }>;
+    expect(codebases[0]?.id).toBe('web');
+  });
+});
+
+describe('importProject', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it('POST /api/projects/import を叩く', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ id: 'x', projectDir: '/x' }), { status: 201 }),
+      ) as typeof fetch;
+    const res = await importProject('/some/dir');
+    expect(res.id).toBe('x');
+  });
+});
+
+describe('unregisterProjectApi', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it('POST /api/projects/:id/unregister を叩く', async () => {
+    const spy = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    globalThis.fetch = spy as typeof fetch;
+    await unregisterProjectApi('proj-a');
+    expect(spy.mock.calls[0]?.[0]).toBe('/api/projects/proj-a/unregister');
+  });
+});
+
+describe('listDirectory', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it('/api/fs/ls を叩く', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          path: '/a',
+          parent: null,
+          entries: [],
+          containsProjectYaml: false,
+        }),
+        { status: 200 },
+      ),
+    ) as typeof fetch;
+    const res = await listDirectory('/a');
+    expect(res.path).toBe('/a');
+  });
+
+  it('path 省略時は path パラメータを付けない', async () => {
+    const spy = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ path: '/home', parent: null, entries: [], containsProjectYaml: false }),
+          { status: 200 },
+        ),
+      );
+    globalThis.fetch = spy as typeof fetch;
+    await listDirectory();
+    const url = spy.mock.calls[0]?.[0] as string;
+    expect(url).not.toContain('?path=');
+  });
+});
+
+describe('mkdir', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it('POST /api/fs/mkdir に path / name を渡す', async () => {
+    const spy = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ path: '/a/b' }), { status: 201 }));
+    globalThis.fetch = spy as typeof fetch;
+    const res = await mkdir('/a', 'b');
+    expect(res.path).toBe('/a/b');
+    const body = JSON.parse((spy.mock.calls[0]?.[1] as RequestInit).body as string) as unknown;
+    expect(body).toEqual({ path: '/a', name: 'b' });
+  });
+});
+
+describe('fetchDefaultProjectPath', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it('/api/projects/default-path?name= を叩いて path を返す', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ path: '/home/you/.local/share/tally/projects/my-proj' }), {
+        status: 200,
+      }),
+    ) as typeof fetch;
+    const p = await fetchDefaultProjectPath('My Proj');
+    expect(p).toContain('/my-proj');
   });
 });

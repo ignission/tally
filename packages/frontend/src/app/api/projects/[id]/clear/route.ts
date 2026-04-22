@@ -1,7 +1,7 @@
-import { clearProject } from '@tally/storage';
+import { clearProject, listProjects } from '@tally/storage';
 import { NextResponse } from 'next/server';
 
-import { resolveProjectById } from '@/lib/project-resolver';
+export const dynamic = 'force-dynamic';
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -12,8 +12,9 @@ interface RouteContext {
 // フロント側で確認ダイアログを経てから叩く前提。
 export async function POST(_req: Request, context: RouteContext): Promise<NextResponse> {
   const { id } = await context.params;
-  const handle = await resolveProjectById(id);
-  if (!handle) return NextResponse.json({ error: 'project not found' }, { status: 404 });
-  const result = await clearProject(handle.workspaceRoot);
+  const list = await listProjects();
+  const entry = list.find((p) => p.id === id);
+  if (!entry) return NextResponse.json({ error: 'project not found' }, { status: 404 });
+  const result = await clearProject(entry.path);
   return NextResponse.json(result);
 }

@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useId, useState } from 'react';
+import type { Codebase } from '@tally/core';
+import { useEffect, useMemo, useState } from 'react';
 
 import { useCanvasStore } from '@/lib/store';
+import { FolderBrowserDialog } from './folder-browser-dialog';
 
-// プロジェクトの ProjectMeta を編集するモーダルダイアログ。
-// codebasePath (primary) と additionalCodebasePaths (横断機能用) を扱う。
 export function ProjectSettingsDialog({
   open,
   onClose,
@@ -15,162 +15,259 @@ export function ProjectSettingsDialog({
 }) {
   const projectMeta = useCanvasStore((s) => s.projectMeta);
   const patchProjectMeta = useCanvasStore((s) => s.patchProjectMeta);
-  const [value, setValue] = useState<string>(projectMeta?.codebasePath ?? '');
-  // 複数行テキストで編集。1 行 = 1 パス、空行は無視。
-  const [additional, setAdditional] = useState<string>(
-    (projectMeta?.additionalCodebasePaths ?? []).join('\n'),
-  );
+
+  const [codebases, setCodebases] = useState<Codebase[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const inputId = useId();
-  const additionalId = useId();
 
-  // open が true になった瞬間、ストアの最新値でフォームをリセットする。
   useEffect(() => {
-    if (open) {
-      setValue(projectMeta?.codebasePath ?? '');
-      setAdditional((projectMeta?.additionalCodebasePaths ?? []).join('\n'));
-      setError(null);
+    if (open && projectMeta) setCodebases(projectMeta.codebases);
+  }, [open, projectMeta]);
+
+  const duplicateIds = useMemo(() => {
+    const seen = new Set<string>();
+    const dup = new Set<string>();
+    for (const c of codebases) {
+      if (seen.has(c.id)) dup.add(c.id);
+      seen.add(c.id);
     }
-  }, [open, projectMeta?.codebasePath, projectMeta?.additionalCodebasePaths]);
+    return dup;
+  }, [codebases]);
+
+  const invalidIds = useMemo(
+    () => new Set(codebases.filter((c) => !/^[a-z][a-z0-9-]{0,31}$/u.test(c.id)).map((c) => c.id)),
+    [codebases],
+  );
 
   if (!open) return null;
+
+  const saveDisabled = busy || duplicateIds.size > 0 || invalidIds.size > 0;
+
+  const onPickCodebase = (p: string) => {
+    const baseSlug =
+      p
+        .split('/')
+        .pop()
+        ?.toLowerCase()
+        .replace(/[^a-z0-9-]/g, '-') ?? 'cb';
+    let id = baseSlug.slice(0, 32) || 'cb';
+    while (codebases.some((c) => c.id === id)) {
+      id = `${id.slice(0, 28)}-${Math.random().toString(36).slice(2, 4)}`;
+    }
+    setCodebases([...codebases, { id, label: p.split('/').pop() ?? id, path: p }]);
+    setPickerOpen(false);
+  };
 
   const onSave = async () => {
     setBusy(true);
     setError(null);
     try {
-      const trimmed = value.trim();
-      const additionalList = additional
-        .split('\n')
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
-      await patchProjectMeta({
-        codebasePath: trimmed === '' ? null : trimmed,
-        additionalCodebasePaths: additionalList,
-      });
+      await patchProjectMeta({ codebases });
       onClose();
-    } catch (err) {
-      setError(String(err));
-    } finally {
+    } catch (e) {
+      setError(String((e as Error).message ?? e));
       setBusy(false);
     }
   };
 
   return (
-    <div style={CONTAINER_STYLE}>
-      <button type="button" aria-label="閉じる" onClick={onClose} style={BACKDROP_STYLE} />
-      <dialog open aria-modal="true" aria-labelledby="project-settings-title" style={DIALOG_STYLE}>
-        <h2 id="project-settings-title" style={TITLE_STYLE}>
-          プロジェクト設定
-        </h2>
-        <div style={FIELD_STYLE}>
-          <label htmlFor={inputId} style={LABEL_STYLE}>
-            codebasePath (primary)
-          </label>
-          <input
-            id={inputId}
-            type="text"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            placeholder="../backend"
-            style={INPUT_STYLE}
-          />
-          <div style={HINT_STYLE}>
-            AI エージェントの cwd になるメインリポジトリ。.tally の親からの相対パス。空欄で設定解除。
+    <div role="dialog" style={BACKDROP}>
+      <div style={DIALOG}>
+        <h2 style={TITLE}>プロジェクト設定</h2>
+
+        <div style={SECTION}>
+          <div style={SECTION_HEADER}>
+            コードベース ({codebases.length})
+            <button type="button" onClick={() => setPickerOpen(true)} disabled={busy} style={LINK}>
+              + コードベースを追加
+            </button>
           </div>
+          {codebases.length === 0 && <div style={MUTED}>コードベース未設定</div>}
+          <ul style={CB_LIST}>
+            {codebases.map((c, i) => (
+              <li key={`${c.path}-${i}`} style={CB_ITEM}>
+                <input
+                  type="text"
+                  value={c.id}
+                  onChange={(e) => {
+                    const next = [...codebases];
+                    next[i] = { ...c, id: e.target.value };
+                    setCodebases(next);
+                  }}
+                  disabled={busy}
+                  aria-label={`codebase-${i}-id`}
+                  style={{ ...INPUT, width: 140 }}
+                />
+                <input
+                  type="text"
+                  value={c.label}
+                  onChange={(e) => {
+                    const next = [...codebases];
+                    next[i] = { ...c, label: e.target.value };
+                    setCodebases(next);
+                  }}
+                  disabled={busy}
+                  aria-label={`codebase-${i}-label`}
+                  style={{ ...INPUT, flex: 1 }}
+                />
+                <span style={CB_PATH}>{c.path}</span>
+                {duplicateIds.has(c.id) && (
+                  <span role="alert" style={ERROR_INLINE}>
+                    id 重複
+                  </span>
+                )}
+                {invalidIds.has(c.id) && (
+                  <span role="alert" style={ERROR_INLINE}>
+                    id 形式不正
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setCodebases(codebases.filter((_, j) => j !== i))}
+                  disabled={busy}
+                  style={LINK}
+                >
+                  削除
+                </button>
+              </li>
+            ))}
+          </ul>
         </div>
-        <div style={FIELD_STYLE}>
-          <label htmlFor={additionalId} style={LABEL_STYLE}>
-            追加リポジトリ (横断機能用)
-          </label>
-          <textarea
-            id={additionalId}
-            value={additional}
-            onChange={(e) => setAdditional(e.target.value)}
-            placeholder={'../other-repo\n../another-repo'}
-            rows={3}
-            style={{ ...INPUT_STYLE, fontFamily: 'monospace', resize: 'vertical' }}
-          />
-          <div style={HINT_STYLE}>
-            1 行 1 パス。primary に加え、AI が参照してよいリポジトリを列挙する (読み取り専用)。
+
+        {error && (
+          <div role="alert" style={ERROR}>
+            {error}
           </div>
-        </div>
-        {error && <div style={ERROR_STYLE}>{error}</div>}
-        <div style={BUTTONS_STYLE}>
-          <button type="button" onClick={onClose} disabled={busy} style={CANCEL_BUTTON_STYLE}>
+        )}
+
+        <div style={FOOTER}>
+          <button type="button" onClick={onClose} disabled={busy} style={CANCEL_BTN}>
             キャンセル
           </button>
-          <button type="button" onClick={onSave} disabled={busy} style={SAVE_BUTTON_STYLE}>
+          <button
+            type="button"
+            disabled={saveDisabled}
+            onClick={() => void onSave()}
+            style={PRIMARY_BTN}
+          >
             {busy ? '保存中…' : '保存'}
           </button>
         </div>
-      </dialog>
+
+        {pickerOpen && (
+          <FolderBrowserDialog
+            open
+            purpose="add-codebase"
+            onConfirm={onPickCodebase}
+            onClose={() => setPickerOpen(false)}
+          />
+        )}
+      </div>
     </div>
   );
 }
 
-// 画面全体を覆うラッパ。backdrop ボタンと dialog を重ねるための position:fixed レイヤ。
-const CONTAINER_STYLE = {
+// スタイル定数（NewProjectDialog と同じパレット）
+const BACKDROP = {
   position: 'fixed' as const,
   inset: 0,
+  background: 'rgba(0, 0, 0, 0.5)',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
   zIndex: 1000,
 };
-
-// 背景クリックで閉じるための透過ボタン。
-const BACKDROP_STYLE = {
-  position: 'absolute' as const,
-  inset: 0,
-  background: 'rgba(0,0,0,0.5)',
-  border: 'none',
-  padding: 0,
-  cursor: 'default',
-};
-
-const DIALOG_STYLE = {
-  position: 'relative' as const,
-  background: '#0d1117',
+const DIALOG = {
+  background: '#161b22',
   border: '1px solid #30363d',
   borderRadius: 8,
   padding: 20,
-  width: 420,
-  color: '#e6edf3',
+  width: 720,
+  maxWidth: '92vw',
+  maxHeight: '85vh',
+  overflow: 'auto' as const,
   display: 'flex',
   flexDirection: 'column' as const,
-  gap: 16,
+  gap: 12,
 };
-const TITLE_STYLE = { fontSize: 15, margin: 0, fontWeight: 700 };
-const FIELD_STYLE = { display: 'flex', flexDirection: 'column' as const, gap: 4 };
-const LABEL_STYLE = { fontSize: 11, color: '#8b949e' };
-const INPUT_STYLE = {
+const TITLE = { margin: 0, fontSize: 16, color: '#e6edf3' };
+const SECTION = {
+  display: 'flex',
+  flexDirection: 'column' as const,
+  gap: 4,
+  padding: 10,
+  border: '1px solid #30363d',
+  borderRadius: 6,
+};
+const SECTION_HEADER = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  fontSize: 12,
+  color: '#8b949e',
+};
+const INPUT = {
   background: '#0d1117',
   border: '1px solid #30363d',
   color: '#e6edf3',
   borderRadius: 6,
-  padding: '6px 10px',
-  fontSize: 13,
+  padding: '6px 8px',
+  fontSize: 12,
+  fontFamily: 'ui-monospace, SFMono-Regular, monospace',
 };
-const HINT_STYLE = { fontSize: 11, color: '#6e7681' };
-const ERROR_STYLE = { color: '#f85149', fontSize: 12 };
-const BUTTONS_STYLE = { display: 'flex', justifyContent: 'flex-end' as const, gap: 8 };
-const CANCEL_BUTTON_STYLE = {
+const MUTED = { fontSize: 12, color: '#8b949e' };
+const CB_LIST = {
+  listStyle: 'none',
+  margin: 0,
+  padding: 0,
+  display: 'flex',
+  flexDirection: 'column' as const,
+  gap: 6,
+};
+const CB_ITEM = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+  flexWrap: 'wrap' as const,
+};
+const CB_PATH = {
+  flex: 1,
+  fontSize: 11,
+  color: '#8b949e',
+  fontFamily: 'ui-monospace, monospace',
+};
+const ERROR_INLINE = { color: '#f85149', fontSize: 10 };
+const LINK = {
   background: 'transparent',
-  border: '1px solid #30363d',
+  border: 'none',
+  color: '#58a6ff',
+  fontSize: 12,
+  cursor: 'pointer',
+  textDecoration: 'underline' as const,
+  padding: 0,
+};
+const FOOTER = { display: 'flex', justifyContent: 'flex-end', gap: 8 };
+const CANCEL_BTN = {
+  background: '#21262d',
   color: '#e6edf3',
+  border: '1px solid #30363d',
   borderRadius: 6,
   padding: '6px 12px',
   fontSize: 12,
   cursor: 'pointer',
 };
-const SAVE_BUTTON_STYLE = {
+const PRIMARY_BTN = {
+  ...CANCEL_BTN,
   background: '#238636',
-  border: '1px solid #2ea043',
   color: '#fff',
-  borderRadius: 6,
-  padding: '6px 12px',
+  border: '1px solid #2ea043',
+};
+const ERROR = {
+  color: '#f85149',
   fontSize: 12,
-  cursor: 'pointer',
+  padding: '6px 8px',
+  border: '1px solid #6e2130',
+  borderRadius: 6,
+  background: '#2b1419',
 };

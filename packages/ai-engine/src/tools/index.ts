@@ -18,13 +18,23 @@ export interface TallyToolDeps {
   // 誰 (どの AI エージェント) が生成した proposal かを刻むため、
   // create_node に agentName を受け渡す。
   agentName: AgentName;
+  // agent が探索対象とした codebase の id。coderef proposal 生成時に additional へ注入し、
+  // 後の adopt で codebaseId 整合性検証が通るようにする。codebase を読まない agent は省略。
+  codebaseId?: string;
 }
 
 // Agent SDK の in-process MCP サーバとして Tally ツールを束ねる。
 // SDK が tool input を zod スキーマで検証してからハンドラに渡す。
 // ハンドラの戻り値は MCP の CallToolResult 形式 (content + isError) に変換する。
 export function buildTallyMcpServer(deps: TallyToolDeps) {
-  const createNode = createNodeHandler(deps);
+  const createNode = createNodeHandler({
+    store: deps.store,
+    emit: deps.emit,
+    anchor: deps.anchor,
+    anchorId: deps.anchorId,
+    agentName: deps.agentName,
+    ...(deps.codebaseId !== undefined ? { codebaseId: deps.codebaseId } : {}),
+  });
   const createEdge = createEdgeHandler(deps);
   const findRelated = findRelatedHandler({ store: deps.store });
   const listByType = listByTypeHandler({ store: deps.store });

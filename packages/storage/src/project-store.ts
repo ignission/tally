@@ -12,7 +12,7 @@ import {
 import type { AdoptableType, Edge, Node, NodeType, Project, ProjectMeta } from '@tally/core';
 import { z } from 'zod';
 
-import { nodeFileName, resolveTallyPaths } from './paths';
+import { nodeFileName, resolveProjectPaths } from './project-dir';
 import { readYaml, writeYaml } from './yaml';
 
 // edges.yaml は「複数エッジを1ファイル」(ADR-0003)。ルートキー edges: の下に配列を置く。
@@ -57,12 +57,12 @@ export interface ProjectStore {
   deleteEdge(id: string): Promise<void>;
 }
 
-// .tally/ ディレクトリ配下のファイルシステム実装。
+// プロジェクトディレクトリ直下のファイルシステム実装。
 export class FileSystemProjectStore implements ProjectStore {
-  private readonly paths: ReturnType<typeof resolveTallyPaths>;
+  private readonly paths: ReturnType<typeof resolveProjectPaths>;
 
-  constructor(workspaceRoot: string) {
-    this.paths = resolveTallyPaths(workspaceRoot);
+  constructor(projectDir: string) {
+    this.paths = resolveProjectPaths(projectDir);
   }
 
   async getProjectMeta(): Promise<ProjectMeta | null> {
@@ -105,6 +105,16 @@ export class FileSystemProjectStore implements ProjectStore {
   }
 
   async addNode<D extends NodeDraft>(draft: D): Promise<Extract<Node, { type: D['type'] }>> {
+    if (draft.type === 'coderef') {
+      const meta = await this.getProjectMeta();
+      const cbIds = new Set(meta?.codebases.map((c) => c.id) ?? []);
+      const draftWithCb = draft as unknown as { codebaseId: string };
+      if (!cbIds.has(draftWithCb.codebaseId)) {
+        throw new Error(
+          `coderef.codebaseId が projectMeta.codebases に存在しない: ${draftWithCb.codebaseId}`,
+        );
+      }
+    }
     const candidate = {
       // ProposalNodeSchema の passthrough により NodeDraft['type'] の union narrowing が崩れるため、NodeType へ明示キャストする
       id: newNodeId(draft.type as NodeType),
@@ -121,6 +131,16 @@ export class FileSystemProjectStore implements ProjectStore {
   ): Promise<Extract<Node, { type: T }>> {
     const current = await this.getNode(id);
     if (!current) throw new Error(`存在しないノード: ${id}`);
+    // coderef ノードで codebaseId を変更する場合は整合性を検証する。
+    if (current.type === 'coderef' && 'codebaseId' in patch && patch.codebaseId != null) {
+      const meta = await this.getProjectMeta();
+      const cbIds = new Set(meta?.codebases.map((c) => c.id) ?? []);
+      if (!cbIds.has(patch.codebaseId as string)) {
+        throw new Error(
+          `coderef.codebaseId が projectMeta.codebases に存在しない: ${patch.codebaseId}`,
+        );
+      }
+    }
     // null は optional フィールドの「削除」シグナル。
     // これ以外は通常のマージ。id / type は不変。
     const next: Record<string, unknown> = { ...current };
@@ -167,6 +187,18 @@ export class FileSystemProjectStore implements ProjectStore {
     const reread = await this.getNode(id);
     if (!reread || reread.type !== 'proposal') {
       throw new Error(`proposal 以外は採用対象外: ${reread?.type ?? 'deleted'}`);
+    }
+    // coderef への変換時は codebaseId の整合性を検証する。
+    if (newType === 'coderef') {
+      const cbId = additional?.codebaseId;
+      if (typeof cbId !== 'string' || cbId === '') {
+        throw new Error('coderef への変換には codebaseId が必要');
+      }
+      const meta = await this.getProjectMeta();
+      const cbIds = new Set(meta?.codebases.map((c) => c.id) ?? []);
+      if (!cbIds.has(cbId)) {
+        throw new Error(`coderef.codebaseId が projectMeta.codebases に存在しない: ${cbId}`);
+      }
     }
     const common = {
       id: reread.id,

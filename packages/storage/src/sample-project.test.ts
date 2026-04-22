@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import { FileSystemProjectStore } from './project-store';
 
-// examples/sample-project/.tally/ を実ストアとして読み込めることを検証する。
+// examples/sample-project/ を実ストアとして読み込めることを検証する。
 // Phase 2 で UI がこの YAML を表示するため、Phase 1 の時点で読み込みの互換性を担保しておく。
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SAMPLE_ROOT = path.resolve(here, '../../../examples/sample-project');

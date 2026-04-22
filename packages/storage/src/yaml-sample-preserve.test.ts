@@ -39,7 +39,7 @@ describe('examples/sample-project コメント保存の実動作', () => {
   });
 
   it('updateEdge 後も edges.yaml のグループコメントが残る', async () => {
-    const edgesPath = path.join(workspace, '.tally', 'edges', 'edges.yaml');
+    const edgesPath = path.join(workspace, 'edges', 'edges.yaml');
     const before = await fs.readFile(edgesPath, 'utf8');
     expect(before).toContain('# 要求 → 論点 (derive)');
     expect(before).toContain('# 要求 → AI提案 UC (satisfy)');

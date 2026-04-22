@@ -2,71 +2,81 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
 import { newProjectId } from '@tally/core';
+import type { Codebase } from '@tally/core';
 
-import { resolveTallyPaths } from './paths';
+import { resolveProjectPaths } from './project-dir';
 import { FileSystemProjectStore } from './project-store';
+import { registerProject } from './registry';
 
 export interface InitProjectInput {
-  // 初期化先のディレクトリ (絶対パス、既存)。ここに .tally/ を掘る。
-  workspaceRoot: string;
+  projectDir: string;
   name: string;
   description?: string;
+  codebases: Codebase[];
 }
 
 export interface InitProjectResult {
   id: string;
-  workspaceRoot: string;
+  projectDir: string;
 }
 
-// UI / CLI から呼ぶプロジェクト初期化。workspaceRoot 配下に .tally/ 一式を作る。
-// 失敗条件: workspaceRoot 非存在 / ディレクトリではない / 既に .tally/ がある。
 export async function initProject(input: InitProjectInput): Promise<InitProjectResult> {
-  const absWorkspaceRoot = path.resolve(input.workspaceRoot);
+  const absDir = path.resolve(input.projectDir);
 
-  // 1. workspaceRoot の存在・ディレクトリ確認
-  let stat: Awaited<ReturnType<typeof fs.stat>>;
-  try {
-    stat = await fs.stat(absWorkspaceRoot);
-  } catch {
-    throw new Error(`workspaceRoot が存在しない: ${absWorkspaceRoot}`);
-  }
-  if (!stat.isDirectory()) {
-    throw new Error(`workspaceRoot がディレクトリではない: ${absWorkspaceRoot}`);
-  }
-
-  // 2. 既存 .tally/ 重複ガード
-  const paths = resolveTallyPaths(absWorkspaceRoot);
-  try {
-    await fs.stat(paths.root);
-    throw new Error(`既に .tally/ が存在: ${paths.root}`);
-  } catch (err) {
-    // ENOENT 以外は投げる (権限エラー等)
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code !== 'ENOENT') throw err;
-  }
-
-  // 3. 名前バリデーション (空文字禁止)
   const name = input.name.trim();
-  if (name.length === 0) {
-    throw new Error('name が空');
+  if (name.length === 0) throw new Error('name が空');
+
+  // 親ディレクトリが存在するか
+  const parent = path.dirname(absDir);
+  try {
+    const st = await fs.stat(parent);
+    if (!st.isDirectory()) throw new Error(`親ディレクトリがディレクトリではない: ${parent}`);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') throw new Error(`親ディレクトリが存在しない: ${parent}`);
+    throw err;
   }
 
-  // 4. ディレクトリ作成 + ファイル書き込み
+  // projectDir 自身の状態判定
+  let exists = false;
+  try {
+    const st = await fs.stat(absDir);
+    if (!st.isDirectory()) throw new Error(`projectDir がディレクトリではない: ${absDir}`);
+    exists = true;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  }
+
+  if (exists) {
+    const entries = await fs.readdir(absDir);
+    if (entries.includes('project.yaml')) {
+      throw new Error(`既存の project.yaml が存在: ${absDir}`);
+    }
+    if (entries.length > 0) {
+      throw new Error(`ディレクトリが空ではありません: ${absDir}`);
+    }
+  } else {
+    await fs.mkdir(absDir);
+  }
+
+  const paths = resolveProjectPaths(absDir);
   await fs.mkdir(paths.nodesDir, { recursive: true });
   await fs.mkdir(paths.edgesDir, { recursive: true });
+  await fs.writeFile(paths.edgesFile, 'edges: []\n', 'utf8');
 
   const id = newProjectId();
   const now = new Date().toISOString();
-  const store = new FileSystemProjectStore(absWorkspaceRoot);
+  const store = new FileSystemProjectStore(absDir);
   await store.saveProjectMeta({
     id,
     name,
     ...(input.description ? { description: input.description } : {}),
+    codebases: input.codebases,
     createdAt: now,
     updatedAt: now,
   });
-  // edges.yaml は ProjectStore 経由で空配列を書く (listEdges が最初から読める)。
-  await fs.writeFile(paths.edgesFile, 'edges: []\n', 'utf8');
 
-  return { id, workspaceRoot: absWorkspaceRoot };
+  await registerProject({ id, path: absDir });
+
+  return { id, projectDir: absDir };
 }

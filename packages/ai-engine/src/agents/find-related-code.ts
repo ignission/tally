@@ -7,6 +7,9 @@ import type { AgentDefinition } from './registry';
 export interface FindRelatedCodePromptInput {
   anchor: Node;
   additionalCwds?: string[];
+  // validateInput が解決した対象 codebase の ID。
+  // プロンプト内で AI に明示し、coderef proposal の additional に必ず含めさせる。
+  codebaseId?: string;
 }
 
 // find-related-code のプロンプトを組み立てる。エージェントは allowedTools の whitelist で
@@ -26,7 +29,7 @@ export function buildFindRelatedCodePrompt(input: FindRelatedCodePromptInput): {
     '- 探索は Glob / Grep / Read ツールを使うこと。Edit / Write / Bash は使わない。',
     '- 関連コードを見つけたら create_node ツールで type="proposal", adoptAs="coderef" として作成する。',
     '  タイトルは "[AI] <filePath>:<startLine>" の形式、body にはその範囲で該当コードが何をしているかの要約を書く。',
-    '  additional に { filePath, startLine, endLine } を入れる (filePath は primary リポからの相対パス、横断リポから見つけた場合は絶対パス)。',
+    '  additional に { codebaseId, filePath, startLine, endLine } を入れる (codebaseId は必須、filePath は primary リポからの相対パス、横断リポから見つけた場合は絶対パス)。',
     '- 各 coderef proposal に対して create_edge ツールで from=<元ノード>, to=<coderef>, type="derive" のエッジを張る。',
     '- list_by_type("coderef") で既存の coderef を事前確認し、同じ範囲の重複を避ける。',
     '- 個数は対象ノードの関連性に応じて 1〜8 件を目安とし、薄い関連まで拾いすぎないこと。',
@@ -41,6 +44,7 @@ export function buildFindRelatedCodePrompt(input: FindRelatedCodePromptInput): {
     `type: ${input.anchor.type}`,
     `タイトル: ${input.anchor.title}`,
     `本文:\n${input.anchor.body}`,
+    ...(input.codebaseId ? [`\n対象 codebaseId: ${input.codebaseId}`] : []),
     '',
     '上記ノードの意図に関連する既存コードを primary codebase (必要なら横断リポも) から探し、coderef proposal として記録してください。',
   ].join('\n');
@@ -48,7 +52,11 @@ export function buildFindRelatedCodePrompt(input: FindRelatedCodePromptInput): {
   return { systemPrompt, userPrompt };
 }
 
-const FindRelatedCodeInputSchema = z.object({ nodeId: z.string().min(1) });
+const FindRelatedCodeInputSchema = z.object({
+  nodeId: z.string().min(1),
+  // フロントから選択された codebase の ID。省略時は codebases[0] を使う (後方互換)。
+  codebaseId: z.string().optional(),
+});
 type FindRelatedCodeInput = z.infer<typeof FindRelatedCodeInputSchema>;
 
 // 対象ノード type: find-related-code はユーザーの「意図」を起点にコード探索するため、
@@ -59,19 +67,21 @@ const ALLOWED_ANCHOR_TYPES = ['usecase', 'requirement', 'userstory'] as const;
 export const findRelatedCodeAgent: AgentDefinition<FindRelatedCodeInput> = {
   name: 'find-related-code',
   inputSchema: FindRelatedCodeInputSchema,
-  async validateInput({ store, workspaceRoot }, input) {
+  async validateInput({ store, projectDir }, input) {
     return validateCodebaseAnchor(
-      { store, workspaceRoot },
+      { store, projectDir },
       input.nodeId,
       ALLOWED_ANCHOR_TYPES,
       'find-related-code',
+      { ...(input.codebaseId !== undefined ? { codebaseId: input.codebaseId } : {}) },
     );
   },
   // anchor 必須エージェント: validateInput が通過した時点で anchor は必ず存在する。
-  buildPrompt: ({ anchor, additionalCwds }) =>
+  buildPrompt: ({ anchor, additionalCwds, codebaseId }) =>
     buildFindRelatedCodePrompt({
       anchor: anchor!,
       ...(additionalCwds ? { additionalCwds } : {}),
+      ...(codebaseId ? { codebaseId } : {}),
     }),
   allowedTools: [
     'mcp__tally__create_node',

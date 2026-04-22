@@ -6,7 +6,7 @@ import type { UseCaseNode } from '@tally/core';
 import { FileSystemProjectStore, type ProjectStore } from '@tally/storage';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { runAgent, type SdkLike } from './agent-runner';
+import { type SdkLike, runAgent } from './agent-runner';
 import type { AgentEvent, SdkMessageLike } from './stream';
 
 describe('runAgent', () => {
@@ -75,7 +75,7 @@ describe('runAgent', () => {
     for await (const e of runAgent({
       sdk: mockSdk as never,
       store,
-      workspaceRoot: root,
+      projectDir: root,
       req: {
         type: 'start',
         agent: 'decompose-to-stories',
@@ -116,7 +116,7 @@ describe('runAgent', () => {
     for await (const e of runAgent({
       sdk: mockSdk as never,
       store,
-      workspaceRoot: root,
+      projectDir: root,
       req: {
         type: 'start',
         agent: 'decompose-to-stories',
@@ -148,7 +148,7 @@ describe('runAgent', () => {
     for await (const e of runAgent({
       sdk: mockSdk as never,
       store,
-      workspaceRoot: root,
+      projectDir: root,
       req: {
         type: 'start',
         agent: 'decompose-to-stories',
@@ -173,7 +173,7 @@ describe('runAgent', () => {
     for await (const e of runAgent({
       sdk: mockSdk as never,
       store,
-      workspaceRoot: root,
+      projectDir: root,
       req: {
         type: 'start',
         // biome-ignore lint/suspicious/noExplicitAny: 未知 agent を注入するための意図的キャスト
@@ -202,7 +202,7 @@ describe('runAgent', () => {
     for await (const e of runAgent({
       sdk: mockSdk as never,
       store,
-      workspaceRoot: root,
+      projectDir: root,
       req: {
         type: 'start',
         agent: 'decompose-to-stories',
@@ -221,13 +221,13 @@ describe('runAgent', () => {
   });
 
   it('find-related-code では built-in ツールが Read/Glob/Grep のみに絞られ Bash/Edit/Write は含まない', async () => {
-    // codebasePath を解決可能にするため、workspaceRoot に meta と codebase dir を仕立てる。
+    // codebasePath を解決可能にするため、projectDir に meta と codebase dir を仕立てる。
     const codebaseDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-codebase-'));
     try {
       await store.saveProjectMeta({
         id: 'proj-test',
         name: 'FRC integration',
-        codebasePath: codebaseDir,
+        codebases: [{ id: 'main', label: 'Main', path: codebaseDir }],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       });
@@ -256,7 +256,7 @@ describe('runAgent', () => {
       for await (const e of runAgent({
         sdk: mockSdk as never,
         store,
-        workspaceRoot: root,
+        projectDir: root,
         req: {
           type: 'start',
           agent: 'find-related-code',
@@ -287,7 +287,7 @@ describe('runAgent', () => {
     await store.saveProjectMeta({
       id: 'proj-test',
       name: 'P',
-      codebasePath: codebaseDir,
+      codebases: [{ id: 'main', label: 'Main', path: codebaseDir }],
       createdAt: '2026-04-18T00:00:00Z',
       updatedAt: '2026-04-18T00:00:00Z',
     });
@@ -315,7 +315,7 @@ describe('runAgent', () => {
     for await (const e of runAgent({
       sdk: mockSdk as never,
       store,
-      workspaceRoot: root,
+      projectDir: root,
       req: {
         type: 'start',
         agent: 'analyze-impact',
@@ -354,7 +354,7 @@ describe('runAgent', () => {
   });
 
   it('extract-questions: codebasePath 無しで start + tool_use イベントを流す', async () => {
-    const workspaceRoot = '/ws';
+    const projectDir = '/ws';
     const anchor = {
       id: 'uc-1',
       type: 'usecase' as const,
@@ -409,7 +409,7 @@ describe('runAgent', () => {
     for await (const e of runAgent({
       sdk,
       store,
-      workspaceRoot,
+      projectDir,
       req: {
         type: 'start',
         agent: 'extract-questions',
@@ -421,7 +421,11 @@ describe('runAgent', () => {
     }
 
     // start イベントが最初に発火し、codebasePath 未設定でも validateInput を通り抜ける
-    expect(events[0]).toEqual({ type: 'start', agent: 'extract-questions', input: { nodeId: 'uc-1' } });
+    expect(events[0]).toEqual({
+      type: 'start',
+      agent: 'extract-questions',
+      input: { nodeId: 'uc-1' },
+    });
     // validateInput が通っていれば agent_failed / error は出ない
     expect(events.some((e) => e.type === 'error')).toBe(false);
     // SDK が流した tool_use が AgentEvent として素通しされる
@@ -466,7 +470,7 @@ describe('runAgent', () => {
     for await (const e of runAgent({
       sdk,
       store,
-      workspaceRoot: '/ws',
+      projectDir: '/ws',
       req: {
         type: 'start',
         agent: 'ingest-document',
