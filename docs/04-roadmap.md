@@ -40,7 +40,7 @@
 - [ ] `packages/storage/src/project-store.ts`：YAML 読み書き実装
 - [ ] `packages/storage/src/yaml.ts`：YAML ユーティリティ
 - [ ] ユニットテスト：各ストアの CRUD がファイルシステムに反映されること
-- [ ] ADR-0003 の形式に従った `.tally/` ディレクトリ構造の実装
+- [ ] ADR-0008 の形式に従ったプロジェクトディレクトリ構造の実装（プロジェクト直下に `project.yaml` / `nodes/` / `edges/`）
 
 ### 完了条件
 
@@ -141,7 +141,7 @@ Claude Agent SDK を使った最小限の AI アクションが動く。
 ### Phase 5a (完了)
 
 - [x] `find-related-code.ts`：既存コード探索（Glob/Grep/Read 使用）
-- [x] プロジェクト設定で `codebasePath` を指定する UI（ヘッダ歯車ボタン）
+- [x] プロジェクト設定で `codebases[]` を指定する UI（ヘッダ歯車ボタン）
 - [x] ツール使用の権限制御（読み取り専用モード基盤 — エージェントごとの allowedTools ホワイトリスト）
 - [x] ProposalDetail の additional 引き継ぎ（coderef 採用時に filePath 等を保持）
 - [x] agent registry 化（decompose-to-stories も移行）
@@ -159,7 +159,7 @@ Claude Agent SDK を使った最小限の AI アクションが動く。
 
 ### Phase 5c (完了)
 
-- [x] `extract-questions.ts`：論点抽出 (anchor グラフ文脈のみ、codebasePath 不要)
+- [x] `extract-questions.ts`：論点抽出 (anchor グラフ文脈のみ、コードベース参照不要)
 - [x] `create_node` で `adoptAs='question'` の options ID 補完 + anchor+同タイトル重複ガード
 - [x] `GraphAgentButton` 共通抽出 + `ExtractQuestionsButton` thin wrapper
 - [x] 3 detail (UC / requirement / userstory) に配置
@@ -172,7 +172,20 @@ Claude Agent SDK を使った最小限の AI アクションが動く。
 
 ### Phase 5e (完了)
 
-- [x] `ingest-document` にディレクトリ入力を追加 (docs-dir モード): workspaceRoot 配下の Markdown 群を AI が Glob + Read で読み requirement + usecase を生成
+- [x] `ingest-document` にディレクトリ入力を追加 (docs-dir モード): 指定ディレクトリ配下の Markdown 群を AI が Glob + Read で読み requirement + usecase を生成
+
+
+### Phase 5f: プロジェクトストレージ再設計 (完了)
+
+- [x] ADR-0008: プロジェクトをリポジトリから独立させる（プロジェクト = 任意のディレクトリ、`.tally/` サブディレクトリ規約廃止）
+- [x] ADR-0009: レジストリ導入（`TALLY_HOME`、`$TALLY_HOME/registry.yaml`、フォルダピッカー経由での発見）
+- [x] ADR-0010: `codebases[]` 配列に統一（旧 `codebasePath` / `additionalCodebasePaths` 廃止）
+- [x] `packages/core/src/schema.ts` の `Project`/`ProjectMeta`/`Codebase` 型刷新
+- [x] `packages/storage` を projectDir ベースに全面移行（`resolveTallyPaths` → `resolveProjectPaths`）
+- [x] `packages/storage` にレジストリストア追加
+- [x] `packages/ai-engine` の各エージェントを `codebases[]` 対応に移行
+- [x] `packages/frontend` の設定 UI を `codebases[]` 多件対応に更新
+- [x] `examples/sample-project/` を新スキーマに移行
 
 
 ---
@@ -186,7 +199,7 @@ Claude Agent SDK を使った最小限の AI アクションが動く。
 ### タスク
 
 - [x] `ChatThread` / `ChatMessage` / `ChatBlock` schema (core)
-- [x] `FileSystemChatStore` (.tally/chats/<id>.yaml)
+- [x] `FileSystemChatStore` (projectDir/chats/<id>.yaml)
 - [x] チャット API routes (GET list, POST create, GET by id)
 - [x] `ChatRunner` (multi-turn + tool 承認 intercept、MCP 登録)
 - [x] WS `/chat` エンドポイント
@@ -198,20 +211,14 @@ Claude Agent SDK を使った最小限の AI アクションが動く。
 
 - 右サイドバーに Chat タブ、新規スレッド / 切替 / 継続会話が動く
 - AI の create_node/create_edge は tool_use pending → 承認 UI → 実行 の流れ
-- `.tally/chats/<id>.yaml` に永続化、リロードで復元
+- `<projectDir>/chats/<id>.yaml` に永続化、リロードで復元
 - 承認フロー: 個別承認 (tool 毎)、read-only tool (find_related / list_by_type) は承認不要
 - マルチスレッド: プロジェクトごと複数、独立コンテキスト
 
 
-### 完了条件
-
-- 既存コードを指定したプロジェクトで「関連コード」アクションがコードベースを実際に読む（Phase 5a）
-- 生成された coderef ノードが実ファイルパスを指している（Phase 5a）
-- 論点ノードが選択肢候補付きで正しく生成される（Phase 5c）
-
 ---
 
-## Phase 6: 書き出し
+## Phase 7: 書き出し
 
 ### ゴール
 
@@ -231,7 +238,7 @@ Claude Agent SDK を使った最小限の AI アクションが動く。
 
 ---
 
-## Phase 7: Jira 連携（片方向）
+## Phase 8: Jira 連携（片方向）
 
 ### ゴール
 
@@ -251,7 +258,7 @@ Claude Agent SDK を使った最小限の AI アクションが動く。
 
 ---
 
-## Phase 8 以降（将来）
+## Phase 9 以降（将来）
 
 - GitHub Issues / Linear 対応
 - Yjs によるリアルタイム協調編集
