@@ -50,7 +50,7 @@ describe('NewProjectDialog', () => {
     expect(screen.getByRole('button', { name: /作成/ })).toBeDisabled();
     // FolderBrowser を開いて選択
     await userEvent.click(
-      screen.getByRole('button', { name: /保存先.*選択|フォルダを選ぶ|フォルダを変更/ }),
+      screen.getByRole('button', { name: /別のフォルダにする/ }),
     );
     await screen.findByText('repo1');
     await userEvent.click(screen.getByRole('button', { name: '選択' }));
@@ -62,7 +62,7 @@ describe('NewProjectDialog', () => {
     render(<NewProjectDialog open onClose={() => {}} />);
     await userEvent.type(screen.getByLabelText('プロジェクト名'), '思考ログ');
     await userEvent.click(
-      screen.getByRole('button', { name: /保存先.*選択|フォルダを選ぶ|フォルダを変更/ }),
+      screen.getByRole('button', { name: /別のフォルダにする/ }),
     );
     await screen.findByText('repo1');
     await userEvent.click(screen.getByRole('button', { name: '選択' }));
@@ -75,7 +75,7 @@ describe('NewProjectDialog', () => {
     render(<NewProjectDialog open onClose={() => {}} />);
     await userEvent.type(screen.getByLabelText('プロジェクト名'), 'p');
     await userEvent.click(
-      screen.getByRole('button', { name: /保存先.*選択|フォルダを選ぶ|フォルダを変更/ }),
+      screen.getByRole('button', { name: /別のフォルダにする/ }),
     );
     await screen.findByText('repo1');
     await userEvent.click(screen.getByRole('button', { name: '選択' }));
