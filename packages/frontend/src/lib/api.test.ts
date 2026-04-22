@@ -174,13 +174,11 @@ describe('fetchRegistryProjects', () => {
   });
 
   it('GET /api/projects を叩いて projects を返す', async () => {
-    globalThis.fetch = vi
-      .fn()
-      .mockResolvedValue(
-        new Response(JSON.stringify({ projects: [{ id: 'a', name: 'A', codebases: [] }] }), {
-          status: 200,
-        }),
-      ) as typeof fetch;
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ projects: [{ id: 'a', name: 'A', codebases: [] }] }), {
+        status: 200,
+      }),
+    ) as typeof fetch;
     const list = await fetchRegistryProjects();
     expect(list[0]?.id).toBe('a');
   });

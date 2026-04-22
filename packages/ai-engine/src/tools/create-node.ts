@@ -27,7 +27,7 @@ export const CreateNodeInputSchema = z.object({
   body: z.string(),
   x: z.number().optional(),
   y: z.number().optional(),
-  additional: z.record(z.unknown()).optional(),
+  additional: z.record(z.string(), z.unknown()).optional(),
 });
 
 export type CreateNodeInput = z.infer<typeof CreateNodeInputSchema>;

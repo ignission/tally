@@ -1,5 +1,5 @@
-import { NODE_META, getSelectedOption, isDecided } from '@tally/core';
 import type { QuestionNode } from '@tally/core';
+import { getSelectedOption, isDecided, NODE_META } from '@tally/core';
 import type { NodeProps } from '@xyflow/react';
 
 import { NodeBadge, NodeCard } from './node-card';

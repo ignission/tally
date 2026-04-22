@@ -1,8 +1,7 @@
 'use client';
 
-import { useId } from 'react';
-
 import type { CodeRefNode } from '@tally/core';
+import { useId } from 'react';
 
 import { useCanvasStore } from '@/lib/store';
 

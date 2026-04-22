@@ -1,10 +1,9 @@
 'use client';
 
+import type { Codebase } from '@tally/core';
 import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
-
 import { createProject, fetchDefaultProjectPath } from '@/lib/api';
-import type { Codebase } from '@tally/core';
 import { FolderBrowserDialog } from './folder-browser-dialog';
 
 interface Props {
@@ -61,7 +60,8 @@ export function NewProjectDialog({ open, onClose }: Props) {
     const normalized = segment.toLowerCase().replace(/[^a-z0-9-]/g, '-');
     // CodebaseSchema の正規表現 /^[a-z][a-z0-9-]{0,31}$/ に合わせ先頭非英字を除去する
     const stripped = normalized.replace(/^[^a-z]+/, '');
-    const rawSlug = stripped.length > 0 ? stripped : `cb-${normalized.replace(/^[^a-z0-9]+/, '') || 'dir'}`;
+    const rawSlug =
+      stripped.length > 0 ? stripped : `cb-${normalized.replace(/^[^a-z0-9]+/, '') || 'dir'}`;
     let id = rawSlug.slice(0, 32) || 'cb';
     while (codebases.some((c) => c.id === id)) {
       id = `${id.slice(0, 28)}-${Math.random().toString(36).slice(2, 4)}`;
@@ -146,6 +146,7 @@ export function NewProjectDialog({ open, onClose }: Props) {
           )}
           <ul style={CB_LIST}>
             {codebases.map((c, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: path が空の初期行でも一意にするため index を組み合わせる
               <li key={`${c.path}-${i}`} style={CB_ITEM}>
                 <input
                   type="text"

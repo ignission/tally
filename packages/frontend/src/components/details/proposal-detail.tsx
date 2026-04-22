@@ -1,8 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-
 import type { AdoptableType, ProposalNode } from '@tally/core';
+import { useState } from 'react';
 
 import { useCanvasStore } from '@/lib/store';
 

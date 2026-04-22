@@ -1,8 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-
-import { newProjectId } from '@tally/core';
 import type { Codebase } from '@tally/core';
+import { newProjectId } from '@tally/core';
 
 import { resolveProjectPaths } from './project-dir';
 import { FileSystemProjectStore } from './project-store';

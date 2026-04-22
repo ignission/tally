@@ -153,7 +153,6 @@ export function MermaidExportDialog({ open, onClose }: Props) {
               <div
                 ref={previewRef}
                 // biome-ignore lint/security/noDangerouslySetInnerHtml: mermaid が securityLevel='strict' でサニタイズした SVG を更に DOMPurify で sanitize 済み
-                // eslint-disable-next-line react/no-danger
                 dangerouslySetInnerHTML={{ __html: renderedSvg }}
                 style={SVG_CONTAINER_STYLE}
               />

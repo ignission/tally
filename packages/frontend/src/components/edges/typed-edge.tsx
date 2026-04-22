@@ -1,5 +1,5 @@
-import { EDGE_META } from '@tally/core';
 import type { EdgeType } from '@tally/core';
+import { EDGE_META } from '@tally/core';
 import {
   BaseEdge,
   EdgeLabelRenderer,

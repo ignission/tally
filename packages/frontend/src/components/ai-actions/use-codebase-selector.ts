@@ -1,8 +1,7 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-
 import type { Codebase } from '@tally/core';
+import { useMemo, useState } from 'react';
 
 import { useCanvasStore } from '@/lib/store';
 

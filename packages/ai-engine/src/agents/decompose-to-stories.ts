@@ -1,6 +1,5 @@
-import { z } from 'zod';
-
 import type { UseCaseNode } from '@tally/core';
+import { z } from 'zod';
 
 import type { AgentDefinition } from './registry';
 

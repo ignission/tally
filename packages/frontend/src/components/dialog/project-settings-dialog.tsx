@@ -6,13 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useCanvasStore } from '@/lib/store';
 import { FolderBrowserDialog } from './folder-browser-dialog';
 
-export function ProjectSettingsDialog({
-  open,
-  onClose,
-}: {
-  open: boolean;
-  onClose: () => void;
-}) {
+export function ProjectSettingsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const projectMeta = useCanvasStore((s) => s.projectMeta);
   const patchProjectMeta = useCanvasStore((s) => s.patchProjectMeta);
 
@@ -86,6 +80,7 @@ export function ProjectSettingsDialog({
           {codebases.length === 0 && <div style={MUTED}>コードベース未設定</div>}
           <ul style={CB_LIST}>
             {codebases.map((c, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: path が空の初期行でも一意にするため index を組み合わせる
               <li key={`${c.path}-${i}`} style={CB_ITEM}>
                 <input
                   type="text"

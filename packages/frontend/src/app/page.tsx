@@ -1,11 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { NewProjectDialog } from '@/components/dialog/new-project-dialog';
 import { ProjectImportDialog } from '@/components/dialog/project-import-dialog';
-import { type RegistryProjectDto, fetchRegistryProjects, unregisterProjectApi } from '@/lib/api';
+import { fetchRegistryProjects, type RegistryProjectDto, unregisterProjectApi } from '@/lib/api';
 
 export default function Page() {
   const [projects, setProjects] = useState<RegistryProjectDto[] | null>(null);
@@ -13,7 +13,7 @@ export default function Page() {
   const [showNew, setShowNew] = useState(false);
   const [showImport, setShowImport] = useState(false);
 
-  const reload = async () => {
+  const reload = useCallback(async () => {
     setError(null);
     try {
       const list = await fetchRegistryProjects();
@@ -21,11 +21,11 @@ export default function Page() {
     } catch (err) {
       setError(String((err as Error).message ?? err));
     }
-  };
+  }, []);
 
   useEffect(() => {
     void reload();
-  }, []);
+  }, [reload]);
 
   const onUnregister = async (id: string) => {
     try {
@@ -110,8 +110,7 @@ const MAIN: React.CSSProperties = {
   minHeight: '100vh',
   background: '#0d1117',
   color: '#e6edf3',
-  fontFamily:
-    "system-ui, -apple-system, 'Segoe UI', 'Hiragino Sans', 'Yu Gothic UI', sans-serif",
+  fontFamily: "system-ui, -apple-system, 'Segoe UI', 'Hiragino Sans', 'Yu Gothic UI', sans-serif",
   padding: 24,
 };
 const CONTAINER: React.CSSProperties = {

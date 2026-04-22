@@ -1,5 +1,5 @@
-import { NODE_META } from '@tally/core';
 import type { ProposalNode } from '@tally/core';
+import { NODE_META } from '@tally/core';
 import type { NodeProps } from '@xyflow/react';
 
 import { NodeBadge, NodeCard } from './node-card';

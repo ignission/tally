@@ -1,9 +1,8 @@
 'use client';
 
+import type { QuestionNode, QuestionOption } from '@tally/core';
 import { nanoid } from 'nanoid';
 import { useState } from 'react';
-
-import type { QuestionNode, QuestionOption } from '@tally/core';
 
 import { useCanvasStore } from '@/lib/store';
 

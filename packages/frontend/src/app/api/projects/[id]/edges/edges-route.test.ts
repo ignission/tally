@@ -5,7 +5,7 @@ import path from 'node:path';
 import { FileSystemProjectStore, registerProject } from '@tally/storage';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { PATCH, DELETE as deleteHandler } from './[edgeId]/route';
+import { DELETE as deleteHandler, PATCH } from './[edgeId]/route';
 import { POST } from './route';
 
 describe('POST /api/projects/[id]/edges', () => {

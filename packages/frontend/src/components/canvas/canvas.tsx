@@ -1,7 +1,5 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-
 import {
   Background,
   Controls,
@@ -9,12 +7,13 @@ import {
   type NodeChange,
   type OnConnect,
   Panel,
-  type Edge as RFEdge,
-  type Node as RFNode,
   ReactFlow,
   ReactFlowProvider,
+  type Edge as RFEdge,
+  type Node as RFNode,
   useReactFlow,
 } from '@xyflow/react';
+import { useMemo, useState } from 'react';
 
 import '@xyflow/react/dist/style.css';
 

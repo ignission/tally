@@ -1,8 +1,7 @@
 'use client';
 
-import { useEffect } from 'react';
-
 import type { Project } from '@tally/core';
+import { useEffect } from 'react';
 
 import { Canvas } from '@/components/canvas/canvas';
 import { DetailSheet } from '@/components/details/detail-sheet';

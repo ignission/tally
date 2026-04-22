@@ -49,9 +49,7 @@ describe('NewProjectDialog', () => {
     // 保存先未指定なので disabled のまま
     expect(screen.getByRole('button', { name: /作成/ })).toBeDisabled();
     // FolderBrowser を開いて選択
-    await userEvent.click(
-      screen.getByRole('button', { name: /別のフォルダにする/ }),
-    );
+    await userEvent.click(screen.getByRole('button', { name: /別のフォルダにする/ }));
     await screen.findByText('repo1');
     await userEvent.click(screen.getByRole('button', { name: '選択' }));
     // 保存先が設定され、作成可能に
@@ -61,9 +59,7 @@ describe('NewProjectDialog', () => {
   it('作成成功時に /projects/:id へ遷移', async () => {
     render(<NewProjectDialog open onClose={() => {}} />);
     await userEvent.type(screen.getByLabelText('プロジェクト名'), '思考ログ');
-    await userEvent.click(
-      screen.getByRole('button', { name: /別のフォルダにする/ }),
-    );
+    await userEvent.click(screen.getByRole('button', { name: /別のフォルダにする/ }));
     await screen.findByText('repo1');
     await userEvent.click(screen.getByRole('button', { name: '選択' }));
     await waitFor(() => expect(screen.getByRole('button', { name: /作成/ })).toBeEnabled());
@@ -74,9 +70,7 @@ describe('NewProjectDialog', () => {
   it('codebases は 0 件で作成可（初期思考用）', async () => {
     render(<NewProjectDialog open onClose={() => {}} />);
     await userEvent.type(screen.getByLabelText('プロジェクト名'), 'p');
-    await userEvent.click(
-      screen.getByRole('button', { name: /別のフォルダにする/ }),
-    );
+    await userEvent.click(screen.getByRole('button', { name: /別のフォルダにする/ }));
     await screen.findByText('repo1');
     await userEvent.click(screen.getByRole('button', { name: '選択' }));
     await waitFor(() => expect(screen.getByRole('button', { name: /作成/ })).toBeEnabled());
@@ -94,7 +88,9 @@ describe('NewProjectDialog — codebase slug 生成', () => {
           JSON.stringify({
             path: '/tmp',
             parent: null,
-            entries: [{ name: '123-repo', path: '/tmp/123-repo', isHidden: false, hasProjectYaml: false }],
+            entries: [
+              { name: '123-repo', path: '/tmp/123-repo', isHidden: false, hasProjectYaml: false },
+            ],
             containsProjectYaml: false,
           }),
           { status: 200 },
@@ -128,7 +124,9 @@ describe('NewProjectDialog — codebase slug 生成', () => {
           JSON.stringify({
             path: '/tmp',
             parent: null,
-            entries: [{ name: '--my-lib', path: '/tmp/--my-lib', isHidden: false, hasProjectYaml: false }],
+            entries: [
+              { name: '--my-lib', path: '/tmp/--my-lib', isHidden: false, hasProjectYaml: false },
+            ],
             containsProjectYaml: false,
           }),
           { status: 200 },

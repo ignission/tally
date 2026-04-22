@@ -1,8 +1,7 @@
 'use client';
 
-import { useId, useState } from 'react';
-
 import type { Node } from '@tally/core';
+import { useId, useState } from 'react';
 
 import { useCanvasStore } from '@/lib/store';
 

@@ -1,8 +1,7 @@
+import { FileSystemProjectStore, listProjects, touchProject } from '@tally/storage';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-
 import { ProjectHeaderActions } from '@/components/header/project-header-actions';
-import { FileSystemProjectStore, listProjects, touchProject } from '@tally/storage';
 
 import { CanvasClient } from './canvas-client';
 

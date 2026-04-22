@@ -1,5 +1,5 @@
-import { NODE_META, computeStoryProgress } from '@tally/core';
 import type { UserStoryNode } from '@tally/core';
+import { computeStoryProgress, NODE_META } from '@tally/core';
 import type { NodeProps } from '@xyflow/react';
 
 import { NodeBadge, NodeCard } from './node-card';

@@ -1,5 +1,5 @@
-import { ProjectMetaPatchSchema } from '@tally/core';
 import type { ProjectMeta } from '@tally/core';
+import { ProjectMetaPatchSchema } from '@tally/core';
 import { FileSystemProjectStore, listProjects, touchProject } from '@tally/storage';
 import { NextResponse } from 'next/server';
 

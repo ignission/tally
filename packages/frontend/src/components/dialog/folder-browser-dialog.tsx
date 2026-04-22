@@ -146,8 +146,8 @@ export function FolderBrowserDialog(props: FolderBrowserDialogProps) {
         </div>
         {props.purpose === 'import-project' && listing && !listing.containsProjectYaml && (
           <div style={HINT_STYLE}>
-            このフォルダは Tally プロジェクトではありません（project.yaml
-            が無い）。project.yaml を含むフォルダを選んでください。
+            このフォルダは Tally プロジェクトではありません（project.yaml が無い）。project.yaml
+            を含むフォルダを選んでください。
           </div>
         )}
         <div style={FOOTER_STYLE}>

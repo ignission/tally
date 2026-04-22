@@ -1,7 +1,6 @@
+import type { NodeMeta } from '@tally/core';
 import { Handle, Position } from '@xyflow/react';
 import type { CSSProperties, ReactNode } from 'react';
-
-import type { NodeMeta } from '@tally/core';
 
 export interface NodeCardProps {
   meta: NodeMeta;

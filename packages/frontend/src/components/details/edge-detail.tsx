@@ -1,9 +1,8 @@
 'use client';
 
-import { useId } from 'react';
-
 import type { Edge, EdgeType } from '@tally/core';
 import { EDGE_META, EDGE_TYPES } from '@tally/core';
+import { useId } from 'react';
 
 import { useCanvasStore } from '@/lib/store';
 

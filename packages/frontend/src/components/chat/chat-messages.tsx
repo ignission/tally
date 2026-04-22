@@ -16,7 +16,7 @@ export function ChatMessages() {
     const el = scrollRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [messages, streaming]);
+  }, []);
 
   return (
     <div ref={scrollRef} style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: 4 }}>

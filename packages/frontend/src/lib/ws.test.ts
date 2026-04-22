@@ -23,7 +23,11 @@ describe('startAgent', () => {
       }
     }
     const fake = new FakeSocket();
-    const wsCtor = vi.fn(() => fake);
+    // Vitest 4 以降、vi.fn() の実装は function/class でないと `new` で呼び出せない。
+    // biome-ignore lint/complexity/useArrowFunction: `new WebSocket()` に渡すため function 表記が必須
+    const wsCtor = vi.fn(function () {
+      return fake;
+    });
     vi.stubGlobal('WebSocket', wsCtor);
 
     const h = startAgent({

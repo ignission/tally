@@ -1,9 +1,6 @@
-import { promises as fs } from 'node:fs';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { promises as fs, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-
-import type { ProjectStore } from '@tally/storage';
 import { describe, expect, it } from 'vitest';
 
 import { buildIngestDocumentPrompt, ingestDocumentAgent } from './ingest-document';
