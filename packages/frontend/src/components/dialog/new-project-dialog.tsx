@@ -119,10 +119,14 @@ export function NewProjectDialog({ open, onClose }: Props) {
           <div style={SECTION_HEADER}>
             保存先
             <button type="button" onClick={() => setPickerFor('root')} disabled={busy} style={LINK}>
-              {projectDir ? 'フォルダを変更' : '保存先を選択'}
+              別のフォルダにする
             </button>
           </div>
-          <div style={PATH_DISPLAY}>{projectDir || '(未選択)'}</div>
+          {projectDir ? (
+            <div style={PATH_DISPLAY}>{projectDir}</div>
+          ) : (
+            <div style={MUTED}>プロジェクト名を入力すると自動で設定されます</div>
+          )}
         </div>
 
         <div style={SECTION}>

@@ -30,6 +30,9 @@ export async function GET(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'name 必須' }, { status: 400 });
   }
   const root = resolveDefaultProjectsRoot();
+  // デフォルト保存先ルートは TALLY_HOME 配下のアプリ管理領域。
+  // 初回利用時に未作成でも initProject の親存在チェックで落ちないよう先に作る。
+  await fs.mkdir(root, { recursive: true });
   const slug = slugify(name);
   let candidate = path.join(root, slug);
   let i = 2;

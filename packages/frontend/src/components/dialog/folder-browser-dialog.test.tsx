@@ -113,6 +113,21 @@ describe('FolderBrowserDialog', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it('サブフォルダが無いディレクトリでは空状態メッセージを表示', async () => {
+    render(
+      <FolderBrowserDialog
+        open
+        initialPath="/home/you/empty"
+        purpose="import-project"
+        onConfirm={() => {}}
+        onClose={() => {}}
+      />,
+    );
+    expect(
+      await screen.findByText(/このフォルダにサブフォルダはありません/),
+    ).toBeInTheDocument();
+  });
+
   it('エントリをクリックすると潜る', async () => {
     render(
       <FolderBrowserDialog
