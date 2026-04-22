@@ -106,7 +106,9 @@ describe('NewProjectDialog — codebase slug 生成', () => {
     render(<NewProjectDialog open onClose={() => {}} />);
     await userEvent.click(screen.getByRole('button', { name: /コードベース追加/ }));
     await screen.findByText('123-repo');
-    await userEvent.click(screen.getAllByRole('button', { name: '選択' })[0]);
+    const selectButton = screen.getAllByRole('button', { name: '選択' })[0];
+    if (!selectButton) throw new Error('選択ボタンが見つからない');
+    await userEvent.click(selectButton);
 
     // 生成された id が英字始まりであることを確認する
     await waitFor(() => {
@@ -138,7 +140,9 @@ describe('NewProjectDialog — codebase slug 生成', () => {
     render(<NewProjectDialog open onClose={() => {}} />);
     await userEvent.click(screen.getByRole('button', { name: /コードベース追加/ }));
     await screen.findByText('--my-lib');
-    await userEvent.click(screen.getAllByRole('button', { name: '選択' })[0]);
+    const selectButton = screen.getAllByRole('button', { name: '選択' })[0];
+    if (!selectButton) throw new Error('選択ボタンが見つからない');
+    await userEvent.click(selectButton);
 
     await waitFor(() => {
       const inputs = screen.getAllByLabelText(/codebase-\d+-id/);
