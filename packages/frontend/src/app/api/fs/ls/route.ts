@@ -53,15 +53,25 @@ export async function GET(req: Request): Promise<NextResponse> {
     throw err;
   }
 
-  const entries = await Promise.all(
+  // シンボリックリンクも含めてディレクトリエントリを解決する
+  const dirEntries = await Promise.all(
     rawEntries
-      .filter((e) => e.isDirectory())
+      .filter((e) => e.isDirectory() || e.isSymbolicLink())
       .map(async (e) => {
         const childPath = path.join(normalized, e.name);
+        try {
+          // stat でリンク先を辿り、実体がディレクトリか確認する
+          const s = await fs.stat(childPath);
+          if (!s.isDirectory()) return null;
+        } catch {
+          // リンク切れ等はスキップ
+          return null;
+        }
         let hasProjectYaml = false;
         try {
-          await fs.stat(path.join(childPath, 'project.yaml'));
-          hasProjectYaml = true;
+          // project.yaml がファイルであることを検証する
+          const yamlStat = await fs.stat(path.join(childPath, 'project.yaml'));
+          if (yamlStat.isFile()) hasProjectYaml = true;
         } catch {
           /* なし */
         }
@@ -73,11 +83,13 @@ export async function GET(req: Request): Promise<NextResponse> {
         };
       }),
   );
+  const entries = dirEntries.filter((e): e is NonNullable<typeof e> => e !== null);
 
   let containsProjectYaml = false;
   try {
-    await fs.stat(path.join(normalized, 'project.yaml'));
-    containsProjectYaml = true;
+    // project.yaml がファイルであることを検証する
+    const yamlStat = await fs.stat(path.join(normalized, 'project.yaml'));
+    if (yamlStat.isFile()) containsProjectYaml = true;
   } catch {
     /* なし */
   }

@@ -22,6 +22,13 @@ export async function GET(_req: Request, context: RouteContext): Promise<NextRes
   const store = new FileSystemProjectStore(dir);
   const project = await store.loadProject();
   if (!project) return NextResponse.json({ error: 'project not found', id }, { status: 404 });
+  // registry の id と project.yaml の id が不一致の場合は 409 を返す
+  if (project.id !== id) {
+    return NextResponse.json(
+      { error: 'registry id と project.yaml id が不一致', registryId: id, fileId: project.id },
+      { status: 409 },
+    );
+  }
   await touchProject(id);
   return NextResponse.json(project);
 }
@@ -47,6 +54,31 @@ export async function PATCH(req: Request, context: RouteContext): Promise<NextRe
   const store = new FileSystemProjectStore(dir);
   const current = await store.getProjectMeta();
   if (!current) return NextResponse.json({ error: 'project not found', id }, { status: 404 });
+  // registry の id と project.yaml の id が不一致の場合は 409 を返す
+  if (current.id !== id) {
+    return NextResponse.json(
+      { error: 'registry id と project.yaml id が不一致', registryId: id, fileId: current.id },
+      { status: 409 },
+    );
+  }
+
+  // codebase 削除によって coderef ノードが orphan にならないか確認する
+  if (parsed.data.codebases !== undefined) {
+    const newCodebaseIds = new Set(parsed.data.codebases.map((c) => c.id));
+    const nodes = await store.listNodes();
+    const orphanedNodeIds = nodes
+      .filter((n) => n.type === 'coderef' && !newCodebaseIds.has(n.codebaseId))
+      .map((n) => n.id);
+    if (orphanedNodeIds.length > 0) {
+      return NextResponse.json(
+        {
+          error: 'codebase を削除すると参照している coderef ノードが orphan になる',
+          nodeIds: orphanedNodeIds,
+        },
+        { status: 409 },
+      );
+    }
+  }
 
   const next: ProjectMeta = {
     ...current,

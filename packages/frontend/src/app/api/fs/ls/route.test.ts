@@ -93,4 +93,34 @@ describe('GET /api/fs/ls', () => {
     const body = (await res.json()) as { path: string };
     expect(body.path).toBe(path.resolve(weird));
   });
+
+  it('シンボリックリンクのディレクトリが entries に含まれる', async () => {
+    const target = path.join(dir, 'real-dir');
+    const link = path.join(dir, 'link-dir');
+    await fs.mkdir(target);
+    await fs.symlink(target, link);
+    const res = await GET(req(dir));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { entries: { name: string }[] };
+    const names = body.entries.map((e) => e.name).sort();
+    expect(names).toContain('link-dir');
+    expect(names).toContain('real-dir');
+  });
+
+  it('project.yaml という名前のディレクトリは hasProjectYaml: false になる', async () => {
+    const sub = path.join(dir, 'proj');
+    await fs.mkdir(sub);
+    // ファイルではなくディレクトリとして project.yaml を作る
+    await fs.mkdir(path.join(sub, 'project.yaml'));
+    const res = await GET(req(dir));
+    const body = (await res.json()) as { entries: { name: string; hasProjectYaml: boolean }[] };
+    expect(body.entries.find((e) => e.name === 'proj')?.hasProjectYaml).toBe(false);
+  });
+
+  it('現在ディレクトリに project.yaml という名前のディレクトリがあっても containsProjectYaml: false', async () => {
+    await fs.mkdir(path.join(dir, 'project.yaml'));
+    const res = await GET(req(dir));
+    const body = (await res.json()) as { containsProjectYaml: boolean };
+    expect(body.containsProjectYaml).toBe(false);
+  });
 });

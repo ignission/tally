@@ -56,12 +56,12 @@ export function NewProjectDialog({ open, onClose }: Props) {
   };
 
   const onPickCodebase = (p: string) => {
-    const rawSlug =
-      p
-        .split('/')
-        .pop()
-        ?.toLowerCase()
-        .replace(/[^a-z0-9-]/g, '-') ?? 'cb';
+    // 末尾の空セグメント（trailing slash 等）を除いた最後のセグメントを取得する
+    const segment = p.split('/').filter(Boolean).pop() ?? '';
+    const normalized = segment.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+    // CodebaseSchema の正規表現 /^[a-z][a-z0-9-]{0,31}$/ に合わせ先頭非英字を除去する
+    const stripped = normalized.replace(/^[^a-z]+/, '');
+    const rawSlug = stripped.length > 0 ? stripped : `cb-${normalized.replace(/^[^a-z0-9]+/, '') || 'dir'}`;
     let id = rawSlug.slice(0, 32) || 'cb';
     while (codebases.some((c) => c.id === id)) {
       id = `${id.slice(0, 28)}-${Math.random().toString(36).slice(2, 4)}`;

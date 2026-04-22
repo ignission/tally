@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { initProject, listProjects } from '@tally/storage';
+import { FileSystemProjectStore, initProject, listProjects } from '@tally/storage';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { GET, PATCH } from './route';
@@ -129,5 +129,69 @@ describe('PATCH /api/projects/:id', () => {
       { params: Promise.resolve({ id: projectId }) },
     );
     expect(res.status).toBe(400);
+  });
+
+  it('codebase 削除で orphan になる coderef ノードがあれば 409 と nodeIds を返す', async () => {
+    // codebase を追加してから coderef ノードを作成する
+    await PATCH(
+      new Request('http://localhost', {
+        method: 'PATCH',
+        body: JSON.stringify({ codebases: [{ id: 'web', label: 'Web', path: '/w' }] }),
+      }),
+      { params: Promise.resolve({ id: projectId }) },
+    );
+    const store = new FileSystemProjectStore(path.join(ws, 'p'));
+    const node = await store.addNode({
+      type: 'coderef',
+      x: 0,
+      y: 0,
+      title: 'ref',
+      body: '',
+      codebaseId: 'web',
+    });
+    // codebase を空にして coderef が orphan になるリクエストを送る
+    const res = await PATCH(
+      new Request('http://localhost', {
+        method: 'PATCH',
+        body: JSON.stringify({ codebases: [] }),
+      }),
+      { params: Promise.resolve({ id: projectId }) },
+    );
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: string; nodeIds: string[] };
+    expect(body.nodeIds).toContain(node.id);
+  });
+});
+
+describe('GET/PATCH /api/projects/:id — registry id mismatch', () => {
+  it('GET: registry id と project.yaml id が不一致なら 409', async () => {
+    // project.yaml の id を直接書き換えてズレを作る
+    const yamlPath = path.join(ws, 'p', 'project.yaml');
+    const content = await fs.readFile(yamlPath, 'utf-8');
+    await fs.writeFile(yamlPath, content.replace(`id: ${projectId}`, 'id: different-id'));
+    const res = await GET(new Request('http://localhost'), {
+      params: Promise.resolve({ id: projectId }),
+    });
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { registryId: string; fileId: string };
+    expect(body.registryId).toBe(projectId);
+    expect(body.fileId).toBe('different-id');
+  });
+
+  it('PATCH: registry id と project.yaml id が不一致なら 409', async () => {
+    const yamlPath = path.join(ws, 'p', 'project.yaml');
+    const content = await fs.readFile(yamlPath, 'utf-8');
+    await fs.writeFile(yamlPath, content.replace(`id: ${projectId}`, 'id: different-id'));
+    const res = await PATCH(
+      new Request('http://localhost', {
+        method: 'PATCH',
+        body: JSON.stringify({ name: 'new-name' }),
+      }),
+      { params: Promise.resolve({ id: projectId }) },
+    );
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { registryId: string; fileId: string };
+    expect(body.registryId).toBe(projectId);
+    expect(body.fileId).toBe('different-id');
   });
 });

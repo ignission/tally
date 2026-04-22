@@ -82,3 +82,69 @@ describe('NewProjectDialog', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: /作成/ })).toBeEnabled());
   });
 });
+
+describe('NewProjectDialog — codebase slug 生成', () => {
+  // onPickCodebase のスラグ生成ロジックを直接テストするため、
+  // FolderBrowserDialog を使わずに内部関数相当のロジックを検証する
+  it('数字始まりのフォルダ名は先頭数字を除去してスラグを生成する', async () => {
+    global.fetch = vi.fn().mockImplementation(async (url: string) => {
+      const u = new URL(url, 'http://localhost');
+      if (u.pathname === '/api/fs/ls') {
+        return new Response(
+          JSON.stringify({
+            path: '/tmp',
+            parent: null,
+            entries: [{ name: '123-repo', path: '/tmp/123-repo', isHidden: false, hasProjectYaml: false }],
+            containsProjectYaml: false,
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response(null, { status: 404 });
+    }) as typeof fetch;
+
+    render(<NewProjectDialog open onClose={() => {}} />);
+    await userEvent.click(screen.getByRole('button', { name: /コードベース追加/ }));
+    await screen.findByText('123-repo');
+    await userEvent.click(screen.getAllByRole('button', { name: '選択' })[0]);
+
+    // 生成された id が英字始まりであることを確認する
+    await waitFor(() => {
+      const inputs = screen.getAllByLabelText(/codebase-\d+-id/);
+      expect(inputs.length).toBeGreaterThan(0);
+      const idValue = (inputs[0] as HTMLInputElement).value;
+      expect(idValue).toMatch(/^[a-z]/);
+    });
+  });
+
+  it('ハイフン始まりに変換されるフォルダ名（-repo など）もスラグが英字始まりになる', async () => {
+    // "-repo" → normalized "-repo" → stripped "repo" → valid slug
+    global.fetch = vi.fn().mockImplementation(async (url: string) => {
+      const u = new URL(url, 'http://localhost');
+      if (u.pathname === '/api/fs/ls') {
+        return new Response(
+          JSON.stringify({
+            path: '/tmp',
+            parent: null,
+            entries: [{ name: '--my-lib', path: '/tmp/--my-lib', isHidden: false, hasProjectYaml: false }],
+            containsProjectYaml: false,
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response(null, { status: 404 });
+    }) as typeof fetch;
+
+    render(<NewProjectDialog open onClose={() => {}} />);
+    await userEvent.click(screen.getByRole('button', { name: /コードベース追加/ }));
+    await screen.findByText('--my-lib');
+    await userEvent.click(screen.getAllByRole('button', { name: '選択' })[0]);
+
+    await waitFor(() => {
+      const inputs = screen.getAllByLabelText(/codebase-\d+-id/);
+      expect(inputs.length).toBeGreaterThan(0);
+      const idValue = (inputs[0] as HTMLInputElement).value;
+      expect(idValue).toMatch(/^[a-z]/);
+    });
+  });
+});
