@@ -46,9 +46,7 @@ describe('ProjectImportDialog', () => {
     // 'existing' に潜る
     await userEvent.click(screen.getByRole('button', { name: /existing/ }));
     // 潜った先は containsProjectYaml: true なので「選択」ボタンが有効化される
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: '選択' })).toBeEnabled(),
-    );
+    await waitFor(() => expect(screen.getByRole('button', { name: '選択' })).toBeEnabled());
     await userEvent.click(screen.getByRole('button', { name: '選択' }));
     await waitFor(() => expect(push).toHaveBeenCalledWith('/projects/proj-imp'));
   });

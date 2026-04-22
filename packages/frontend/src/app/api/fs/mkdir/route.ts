@@ -18,7 +18,13 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (!path.isAbsolute(parent)) {
     return NextResponse.json({ error: 'path は絶対パスのみ' }, { status: 400 });
   }
-  if (name.length === 0 || name === '.' || name === '..' || name.includes('/') || name.includes('\\')) {
+  if (
+    name.length === 0 ||
+    name === '.' ||
+    name === '..' ||
+    name.includes('/') ||
+    name.includes('\\')
+  ) {
     return NextResponse.json({ error: 'name が不正' }, { status: 400 });
   }
 

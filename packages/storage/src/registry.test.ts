@@ -63,9 +63,7 @@ describe('registry load/save', () => {
   it('save → load ラウンドトリップ', async () => {
     const reg = {
       version: 1 as const,
-      projects: [
-        { id: 'proj-a', path: '/x/y', lastOpenedAt: '2026-04-21T00:00:00Z' },
-      ],
+      projects: [{ id: 'proj-a', path: '/x/y', lastOpenedAt: '2026-04-21T00:00:00Z' }],
     };
     await saveRegistry(reg);
     expect(await loadRegistry()).toEqual(reg);

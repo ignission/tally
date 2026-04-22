@@ -49,24 +49,24 @@ describe('NewProjectDialog', () => {
     // 保存先未指定なので disabled のまま
     expect(screen.getByRole('button', { name: /作成/ })).toBeDisabled();
     // FolderBrowser を開いて選択
-    await userEvent.click(screen.getByRole('button', { name: /保存先.*選択|フォルダを選ぶ|フォルダを変更/ }));
+    await userEvent.click(
+      screen.getByRole('button', { name: /保存先.*選択|フォルダを選ぶ|フォルダを変更/ }),
+    );
     await screen.findByText('repo1');
     await userEvent.click(screen.getByRole('button', { name: '選択' }));
     // 保存先が設定され、作成可能に
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: /作成/ })).toBeEnabled(),
-    );
+    await waitFor(() => expect(screen.getByRole('button', { name: /作成/ })).toBeEnabled());
   });
 
   it('作成成功時に /projects/:id へ遷移', async () => {
     render(<NewProjectDialog open onClose={() => {}} />);
     await userEvent.type(screen.getByLabelText('プロジェクト名'), '思考ログ');
-    await userEvent.click(screen.getByRole('button', { name: /保存先.*選択|フォルダを選ぶ|フォルダを変更/ }));
+    await userEvent.click(
+      screen.getByRole('button', { name: /保存先.*選択|フォルダを選ぶ|フォルダを変更/ }),
+    );
     await screen.findByText('repo1');
     await userEvent.click(screen.getByRole('button', { name: '選択' }));
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: /作成/ })).toBeEnabled(),
-    );
+    await waitFor(() => expect(screen.getByRole('button', { name: /作成/ })).toBeEnabled());
     await userEvent.click(screen.getByRole('button', { name: /作成/ }));
     await waitFor(() => expect(push).toHaveBeenCalledWith('/projects/proj-new'));
   });
@@ -74,11 +74,11 @@ describe('NewProjectDialog', () => {
   it('codebases は 0 件で作成可（初期思考用）', async () => {
     render(<NewProjectDialog open onClose={() => {}} />);
     await userEvent.type(screen.getByLabelText('プロジェクト名'), 'p');
-    await userEvent.click(screen.getByRole('button', { name: /保存先.*選択|フォルダを選ぶ|フォルダを変更/ }));
+    await userEvent.click(
+      screen.getByRole('button', { name: /保存先.*選択|フォルダを選ぶ|フォルダを変更/ }),
+    );
     await screen.findByText('repo1');
     await userEvent.click(screen.getByRole('button', { name: '選択' }));
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: /作成/ })).toBeEnabled(),
-    );
+    await waitFor(() => expect(screen.getByRole('button', { name: /作成/ })).toBeEnabled());
   });
 });

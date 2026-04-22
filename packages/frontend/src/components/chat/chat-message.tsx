@@ -1,6 +1,6 @@
 'use client';
 
-import type { ChatMessage as ChatMessageType, ChatBlock } from '@tally/core';
+import type { ChatBlock, ChatMessage as ChatMessageType } from '@tally/core';
 
 import { ToolApprovalCard } from './tool-approval-card';
 
@@ -21,11 +21,7 @@ export function ChatMessage({ message }: Props) {
       </div>
     );
   }
-  return (
-    <div style={ASSISTANT_WRAP_STYLE}>
-      {message.blocks.map((b, i) => renderBlock(b, i))}
-    </div>
-  );
+  return <div style={ASSISTANT_WRAP_STYLE}>{message.blocks.map((b, i) => renderBlock(b, i))}</div>;
 }
 
 function renderBlock(block: ChatBlock, idx: number) {

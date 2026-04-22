@@ -1,9 +1,5 @@
 import path from 'node:path';
-import {
-  FileSystemProjectStore,
-  listProjects,
-  registerProject,
-} from '@tally/storage';
+import { FileSystemProjectStore, listProjects, registerProject } from '@tally/storage';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
@@ -20,10 +16,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   const store = new FileSystemProjectStore(absDir);
   const meta = await store.getProjectMeta();
   if (!meta) {
-    return NextResponse.json(
-      { error: 'project.yaml が見つからない' },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: 'project.yaml が見つからない' }, { status: 400 });
   }
   const existing = await listProjects();
   if (existing.some((p) => p.id === meta.id && p.path !== absDir)) {

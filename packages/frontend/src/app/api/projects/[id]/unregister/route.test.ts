@@ -1,8 +1,8 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { listProjects, registerProject } from '@tally/storage';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { POST } from './route';
 
 let home: string;

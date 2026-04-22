@@ -5,8 +5,8 @@ import {
   ChatMessageSchema,
   ChatThreadMetaSchema,
   ChatThreadSchema,
-  CodebaseSchema,
   CodeRefNodeSchema,
+  CodebaseSchema,
   EdgeSchema,
   NodeSchema,
   ProjectMetaPatchSchema,
@@ -144,9 +144,7 @@ describe('CodebaseSchema', () => {
 
   it('id は kebab-case 英小文字 32 字以内', () => {
     expect(() => CodebaseSchema.parse({ id: 'Frontend', label: 'x', path: '/abs' })).toThrow();
-    expect(() =>
-      CodebaseSchema.parse({ id: 'a'.repeat(33), label: 'x', path: '/abs' }),
-    ).toThrow();
+    expect(() => CodebaseSchema.parse({ id: 'a'.repeat(33), label: 'x', path: '/abs' })).toThrow();
     expect(CodebaseSchema.parse({ id: 'a', label: 'x', path: '/abs' }).id).toBe('a');
   });
 });
@@ -190,7 +188,6 @@ describe('ProjectMetaSchema (刷新後)', () => {
     expect(() => ProjectMetaSchema.parse(meta)).toThrow(/codebases\[\]\.id/);
   });
 });
-
 
 describe('CodeRefNodeSchema (codebaseId 必須化)', () => {
   const base = { id: 'c-1', x: 0, y: 0, title: 't', body: 'b', type: 'coderef' as const };

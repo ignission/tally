@@ -46,9 +46,7 @@ export function DetailSheet() {
           Chat
         </button>
       </div>
-      <div style={TAB_CONTENT_STYLE}>
-        {tab === 'detail' ? <DetailContent /> : <ChatTab />}
-      </div>
+      <div style={TAB_CONTENT_STYLE}>{tab === 'detail' ? <DetailContent /> : <ChatTab />}</div>
     </aside>
   );
 }

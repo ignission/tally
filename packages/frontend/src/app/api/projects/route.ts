@@ -1,9 +1,5 @@
-import {
-  FileSystemProjectStore,
-  initProject,
-  listProjects,
-} from '@tally/storage';
 import { CodebaseSchema } from '@tally/core';
+import { FileSystemProjectStore, initProject, listProjects } from '@tally/storage';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
@@ -51,7 +47,11 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: parsed.error.message }, { status: 400 });
   }
   try {
-    const result = await initProject(parsed.data);
+    const { description, ...rest } = parsed.data;
+    const result = await initProject({
+      ...rest,
+      ...(description !== undefined ? { description } : {}),
+    });
     return NextResponse.json(result, { status: 201 });
   } catch (err) {
     return NextResponse.json({ error: String((err as Error).message ?? err) }, { status: 400 });

@@ -5,8 +5,8 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { clearProject } from './clear-project';
 import { FileSystemChatStore } from './chat-store';
+import { clearProject } from './clear-project';
 import { initProject } from './init-project';
 import { FileSystemProjectStore } from './project-store';
 

@@ -2,13 +2,13 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
 import {
-  ChatMessageSchema,
-  ChatThreadSchema,
-  newChatId,
   type ChatBlock,
   type ChatMessage,
+  ChatMessageSchema,
   type ChatThread,
   type ChatThreadMeta,
+  ChatThreadSchema,
+  newChatId,
 } from '@tally/core';
 
 import { chatFileName, resolveProjectPaths } from './project-dir';
@@ -36,11 +36,7 @@ export interface ChatStore {
   updateChatTitle(threadId: string, title: string): Promise<ChatThread>;
   // 指定 message の blocks に 1 ブロックを追記する。
   // tool_use / tool_result の incremental append 用。
-  appendBlockToMessage(
-    threadId: string,
-    messageId: string,
-    block: ChatBlock,
-  ): Promise<ChatThread>;
+  appendBlockToMessage(threadId: string, messageId: string, block: ChatBlock): Promise<ChatThread>;
   // 指定 message の blocks 配列を丸ごと置換する。
   // turn 末の text blocks 統合用。
   replaceMessageBlocks(

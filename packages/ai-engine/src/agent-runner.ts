@@ -76,10 +76,7 @@ export async function* runAgent(deps: RunAgentDeps): AsyncGenerator<AgentEvent> 
   // AGENT_REGISTRY[req.agent] は AgentName ごとの AgentDefinition の union となり、
   // validateInput の input 型は各エージェント入力型の intersection になる。
   // 実際には req.agent に対応する def の inputSchema で既に safeParse 済みのため unknown 経由でキャストする。
-  const vr = await def.validateInput(
-    { store, projectDir },
-    parsed.data as unknown as never,
-  );
+  const vr = await def.validateInput({ store, projectDir }, parsed.data as unknown as never);
   if (!vr.ok) {
     yield { type: 'error', code: vr.code, message: vr.message };
     return;

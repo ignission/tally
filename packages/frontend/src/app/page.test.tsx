@@ -43,7 +43,12 @@ beforeEach(() => {
     }
     if (u.pathname === '/api/fs/ls') {
       return new Response(
-        JSON.stringify({ path: '/home/you', parent: null, entries: [], containsProjectYaml: false }),
+        JSON.stringify({
+          path: '/home/you',
+          parent: null,
+          entries: [],
+          containsProjectYaml: false,
+        }),
         { status: 200 },
       );
     }

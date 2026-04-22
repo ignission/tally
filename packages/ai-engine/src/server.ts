@@ -1,7 +1,7 @@
 import { AGENT_NAMES } from '@tally/core';
 import type { AgentName } from '@tally/core';
 import { FileSystemChatStore, FileSystemProjectStore, listProjects } from '@tally/storage';
-import { WebSocketServer, type WebSocket } from 'ws';
+import { type WebSocket, WebSocketServer } from 'ws';
 import { z } from 'zod';
 
 import { runAgent } from './agent-runner';

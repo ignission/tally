@@ -34,7 +34,13 @@ export function CodebaseAgentButton({
   onRun,
 }: CodebaseAgentButtonProps) {
   const running = useCanvasStore((s) => s.runningAgent);
-  const { codebases, selected, pick, disabled: cbDisabled, tooltip: cbTooltip } = useCodebaseSelector();
+  const {
+    codebases,
+    selected,
+    pick,
+    disabled: cbDisabled,
+    tooltip: cbTooltip,
+  } = useCodebaseSelector();
 
   const busy = running !== null;
   const mine = running?.agent === agentName;

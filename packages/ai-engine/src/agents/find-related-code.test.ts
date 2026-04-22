@@ -66,10 +66,7 @@ describe('findRelatedCodeAgent.validateInput', () => {
   it('requirement / userstory も許可される', async () => {
     const req = await store.addNode({ type: 'requirement', x: 0, y: 0, title: 'r', body: '' });
     const story = await store.addNode({ type: 'userstory', x: 0, y: 0, title: 's', body: '' });
-    const r1 = await findRelatedCodeAgent.validateInput(
-      { store, projectDir },
-      { nodeId: req.id },
-    );
+    const r1 = await findRelatedCodeAgent.validateInput({ store, projectDir }, { nodeId: req.id });
     const r2 = await findRelatedCodeAgent.validateInput(
       { store, projectDir },
       { nodeId: story.id },

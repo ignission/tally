@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useCanvasStore } from '@/lib/store';
 
-import { GraphAgentButton, type AnchorNode } from './graph-agent-button';
+import { type AnchorNode, GraphAgentButton } from './graph-agent-button';
 
 const anchor: AnchorNode = {
   id: 'uc-1',

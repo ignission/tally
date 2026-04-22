@@ -6,7 +6,7 @@ import type { UseCaseNode } from '@tally/core';
 import { FileSystemProjectStore, type ProjectStore } from '@tally/storage';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { runAgent, type SdkLike } from './agent-runner';
+import { type SdkLike, runAgent } from './agent-runner';
 import type { AgentEvent, SdkMessageLike } from './stream';
 
 describe('runAgent', () => {
@@ -421,7 +421,11 @@ describe('runAgent', () => {
     }
 
     // start イベントが最初に発火し、codebasePath 未設定でも validateInput を通り抜ける
-    expect(events[0]).toEqual({ type: 'start', agent: 'extract-questions', input: { nodeId: 'uc-1' } });
+    expect(events[0]).toEqual({
+      type: 'start',
+      agent: 'extract-questions',
+      input: { nodeId: 'uc-1' },
+    });
     // validateInput が通っていれば agent_failed / error は出ない
     expect(events.some((e) => e.type === 'error')).toBe(false);
     // SDK が流した tool_use が AgentEvent として素通しされる

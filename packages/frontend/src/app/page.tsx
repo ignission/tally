@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 
 import { NewProjectDialog } from '@/components/dialog/new-project-dialog';
 import { ProjectImportDialog } from '@/components/dialog/project-import-dialog';
-import { fetchRegistryProjects, unregisterProjectApi, type RegistryProjectDto } from '@/lib/api';
+import { type RegistryProjectDto, fetchRegistryProjects, unregisterProjectApi } from '@/lib/api';
 
 export default function Page() {
   const [projects, setProjects] = useState<RegistryProjectDto[] | null>(null);
@@ -58,7 +58,8 @@ export default function Page() {
       {projects === null && !error && <div style={MUTED}>読み込み中…</div>}
       {projects !== null && projects.length === 0 && (
         <div style={MUTED}>
-          プロジェクトが登録されていません。「+ 新規プロジェクト」または「既存を読み込む」から開始してください。
+          プロジェクトが登録されていません。「+
+          新規プロジェクト」または「既存を読み込む」から開始してください。
         </div>
       )}
 
@@ -77,11 +78,7 @@ export default function Page() {
               </div>
             </div>
             <div style={ITEM_ACTIONS}>
-              <button
-                type="button"
-                onClick={() => void onUnregister(p.id)}
-                style={LINK}
-              >
+              <button type="button" onClick={() => void onUnregister(p.id)} style={LINK}>
                 レジストリから外す
               </button>
             </div>

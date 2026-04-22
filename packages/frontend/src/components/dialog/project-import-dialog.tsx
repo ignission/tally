@@ -36,11 +36,22 @@ export function ProjectImportDialog({ open, onClose }: Props) {
         onClose={onClose}
       />
       {error && (
-        <div role="alert" style={{
-          position: 'fixed', bottom: 16, left: '50%', transform: 'translateX(-50%)',
-          background: '#2b1419', color: '#f85149', padding: '8px 12px',
-          border: '1px solid #6e2130', borderRadius: 6, fontSize: 12, zIndex: 2000,
-        }}>
+        <div
+          role="alert"
+          style={{
+            position: 'fixed',
+            bottom: 16,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: '#2b1419',
+            color: '#f85149',
+            padding: '8px 12px',
+            border: '1px solid #6e2130',
+            borderRadius: 6,
+            fontSize: 12,
+            zIndex: 2000,
+          }}
+        >
           {error}
         </div>
       )}

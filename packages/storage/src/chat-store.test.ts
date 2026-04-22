@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
+import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { promises as fs } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 

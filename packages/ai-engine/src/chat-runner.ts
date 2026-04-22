@@ -1,10 +1,5 @@
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
-import {
-  newChatMessageId,
-  newToolUseId,
-  type ChatBlock,
-  type ChatMessage,
-} from '@tally/core';
+import { type ChatBlock, type ChatMessage, newChatMessageId, newToolUseId } from '@tally/core';
 import type { ChatStore, ProjectStore } from '@tally/storage';
 
 import type { SdkLike } from './agent-runner';
@@ -353,11 +348,7 @@ export class ChatRunner {
   // SDK 視点では通常の tool_use → tool_result の往復。
   // 間に挟まる pending / result の ChatEvent は emit callback で直接 queue に流す
   // (sideEvents buffer にすると SDK block 中に flush できず deadlock するため)。
-  private buildMcpServer(
-    tools: ToolEntry[],
-    emit: (e: ChatEvent) => void,
-    assistantMsgId: string,
-  ) {
+  private buildMcpServer(tools: ToolEntry[], emit: (e: ChatEvent) => void, assistantMsgId: string) {
     const find = (name: string): ToolEntry => {
       const t = tools.find((x) => x.name === name);
       if (!t) throw new Error(`tool not registered: ${name}`);

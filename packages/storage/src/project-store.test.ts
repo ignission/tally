@@ -248,7 +248,10 @@ describe('FileSystemProjectStore', () => {
   });
 
   describe('transmuteNode (proposal 採用)', () => {
-    async function addProposal(store: FileSystemProjectStore, extras: Partial<{ adoptAs: string }> = {}) {
+    async function addProposal(
+      store: FileSystemProjectStore,
+      extras: Partial<{ adoptAs: string }> = {},
+    ) {
       return store.addNode({
         type: 'proposal',
         x: 10,

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { listDirectory, mkdir, type FsListResult } from '@/lib/api';
+import { type FsListResult, listDirectory, mkdir } from '@/lib/api';
 
 export type FolderBrowserPurpose = 'create-project' | 'import-project' | 'add-codebase';
 
@@ -37,8 +37,7 @@ export function FolderBrowserDialog(props: FolderBrowserDialogProps) {
   if (!props.open) return null;
 
   const confirmDisabled =
-    listing === null ||
-    (props.purpose === 'import-project' && !listing.containsProjectYaml);
+    listing === null || (props.purpose === 'import-project' && !listing.containsProjectYaml);
 
   const visibleEntries = (listing?.entries ?? []).filter((e) => showHidden || !e.isHidden);
 
@@ -79,15 +78,15 @@ export function FolderBrowserDialog(props: FolderBrowserDialogProps) {
             ↑ 親
           </button>
         </div>
-        {error && <div role="alert" style={ERROR_STYLE}>{error}</div>}
+        {error && (
+          <div role="alert" style={ERROR_STYLE}>
+            {error}
+          </div>
+        )}
         <ul style={LIST_STYLE}>
           {visibleEntries.map((e) => (
             <li key={e.path} style={LIST_ITEM_STYLE}>
-              <button
-                type="button"
-                onClick={() => void load(e.path)}
-                style={ENTRY_BUTTON_STYLE}
-              >
+              <button type="button" onClick={() => void load(e.path)} style={ENTRY_BUTTON_STYLE}>
                 <span aria-hidden="true">📁</span>
                 {e.name}
                 {e.hasProjectYaml && <span style={BADGE_STYLE}>project.yaml あり</span>}

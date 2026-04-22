@@ -166,7 +166,8 @@ export function MermaidExportDialog({ open, onClose }: Props) {
         )}
 
         <div style={HINT_STYLE}>
-          コピーして Slack / Notion / Confluence / GitHub の Mermaid コードブロックに貼ると同じ図が表示される。
+          コピーして Slack / Notion / Confluence / GitHub の Mermaid
+          コードブロックに貼ると同じ図が表示される。
         </div>
 
         <div style={FOOTER_STYLE}>

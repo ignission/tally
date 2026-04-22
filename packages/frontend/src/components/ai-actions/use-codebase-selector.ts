@@ -29,8 +29,7 @@ export function useCodebaseSelector(): CodebaseSelectorState {
   const selected = useMemo<Codebase | null>(() => {
     if (codebases.length === 0) return null;
     if (codebases.length === 1) return codebases[0] ?? null;
-    const picked =
-      explicitId !== null ? codebases.find((c) => c.id === explicitId) : undefined;
+    const picked = explicitId !== null ? codebases.find((c) => c.id === explicitId) : undefined;
     return picked ?? codebases[0] ?? null;
   }, [codebases, explicitId]);
 

@@ -1,4 +1,12 @@
-import type { AdoptableType, Codebase, Edge, EdgeType, Node, NodeType, ProjectMeta } from '@tally/core';
+import type {
+  AdoptableType,
+  Codebase,
+  Edge,
+  EdgeType,
+  Node,
+  NodeType,
+  ProjectMeta,
+} from '@tally/core';
 
 export type NodeDraftInput = Omit<Node, 'id'>;
 export type NodePatchInput<T extends NodeType = NodeType> = Partial<
@@ -55,7 +63,9 @@ export interface CreateProjectInput {
 }
 
 // POST /api/projects/import: 既存 .tally ディレクトリからプロジェクトをインポート。
-export async function importProject(projectDir: string): Promise<{ id: string; projectDir: string }> {
+export async function importProject(
+  projectDir: string,
+): Promise<{ id: string; projectDir: string }> {
   const res = await fetch('/api/projects/import', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -134,7 +144,9 @@ export async function deleteChatThread(projectId: string, threadId: string): Pro
   }
 }
 
-export async function createProject(input: CreateProjectInput): Promise<{ id: string; projectDir: string }> {
+export async function createProject(
+  input: CreateProjectInput,
+): Promise<{ id: string; projectDir: string }> {
   const res = await fetch('/api/projects', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -228,9 +240,7 @@ export function adoptProposal(
 
 // GET /api/projects/default-path: プロジェクト名から保存先を提案。
 export async function fetchDefaultProjectPath(name: string): Promise<string> {
-  const res = await fetch(
-    `/api/projects/default-path?name=${encodeURIComponent(name)}`,
-  );
+  const res = await fetch(`/api/projects/default-path?name=${encodeURIComponent(name)}`);
   if (!res.ok) {
     throw new Error(`GET /api/projects/default-path ${res.status}`);
   }

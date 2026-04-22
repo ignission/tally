@@ -100,9 +100,7 @@ describe('ChatRunner', () => {
       threadId: thread.id,
     });
 
-    const entry = runner
-      .buildToolRegistry()
-      .find((t) => t.name === 'mcp__tally__create_node');
+    const entry = runner.buildToolRegistry().find((t) => t.name === 'mcp__tally__create_node');
     if (!entry) throw new Error('entry missing');
 
     const events: ChatEvent[] = [];
@@ -152,9 +150,7 @@ describe('ChatRunner', () => {
       threadId: thread.id,
     });
 
-    const entry = runner
-      .buildToolRegistry()
-      .find((t) => t.name === 'mcp__tally__create_node');
+    const entry = runner.buildToolRegistry().find((t) => t.name === 'mcp__tally__create_node');
     if (!entry) throw new Error('entry missing');
 
     const events: ChatEvent[] = [];

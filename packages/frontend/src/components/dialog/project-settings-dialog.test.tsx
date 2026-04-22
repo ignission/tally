@@ -1,10 +1,10 @@
+import type { ProjectMeta } from '@tally/core';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ProjectMeta } from '@tally/core';
 
-import { ProjectSettingsDialog } from './project-settings-dialog';
 import { useCanvasStore } from '@/lib/store';
+import { ProjectSettingsDialog } from './project-settings-dialog';
 
 const meta: ProjectMeta = {
   id: 'proj-a',
@@ -62,7 +62,9 @@ describe('ProjectSettingsDialog', () => {
 
   it('codebase を追加できる', async () => {
     render(<ProjectSettingsDialog open onClose={() => {}} />);
-    await userEvent.click(screen.getByRole('button', { name: /codebase を追加|コードベースを追加/ }));
+    await userEvent.click(
+      screen.getByRole('button', { name: /codebase を追加|コードベースを追加/ }),
+    );
     // FolderBrowserDialog が /home/you を表示するまで待つ
     await screen.findByText('api');
     // api フォルダに入る（load('/home/you/api') が走る）
@@ -75,9 +77,7 @@ describe('ProjectSettingsDialog', () => {
     await waitFor(() =>
       expect(patchProjectMeta).toHaveBeenCalledWith(
         expect.objectContaining({
-          codebases: expect.arrayContaining([
-            expect.objectContaining({ path: '/home/you/api' }),
-          ]),
+          codebases: expect.arrayContaining([expect.objectContaining({ path: '/home/you/api' })]),
         }),
       ),
     );
@@ -88,16 +88,16 @@ describe('ProjectSettingsDialog', () => {
     await userEvent.click(screen.getByRole('button', { name: /削除/ }));
     await userEvent.click(screen.getByRole('button', { name: /保存/ }));
     await waitFor(() =>
-      expect(patchProjectMeta).toHaveBeenCalledWith(
-        expect.objectContaining({ codebases: [] }),
-      ),
+      expect(patchProjectMeta).toHaveBeenCalledWith(expect.objectContaining({ codebases: [] })),
     );
   });
 
   it('id 重複時は保存 disabled', async () => {
     render(<ProjectSettingsDialog open onClose={() => {}} />);
     // まず 2 件目を追加
-    await userEvent.click(screen.getByRole('button', { name: /codebase を追加|コードベースを追加/ }));
+    await userEvent.click(
+      screen.getByRole('button', { name: /codebase を追加|コードベースを追加/ }),
+    );
     await screen.findByText('api');
     await userEvent.click(screen.getByRole('button', { name: /api/ }));
     await screen.findByDisplayValue('/home/you/api');

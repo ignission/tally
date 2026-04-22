@@ -6,7 +6,7 @@ import { FileSystemChatStore, FileSystemProjectStore, registerProject } from '@t
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { GET as getByIdHandler } from './[threadId]/route';
-import { GET as listHandler, POST as createHandler } from './route';
+import { POST as createHandler, GET as listHandler } from './route';
 
 describe('/api/projects/[id]/chats', () => {
   let home: string;
@@ -110,10 +110,9 @@ describe('/api/projects/[id]/chats', () => {
   });
 
   it('POST の body が壊れてたら 400', async () => {
-    const res = await createHandler(
-      new Request('http://x', { method: 'POST', body: 'not json' }),
-      { params: Promise.resolve({ id: 'proj-1' }) },
-    );
+    const res = await createHandler(new Request('http://x', { method: 'POST', body: 'not json' }), {
+      params: Promise.resolve({ id: 'proj-1' }),
+    });
     expect(res.status).toBe(400);
   });
 });

@@ -145,11 +145,9 @@ export const EdgeSchema = z.object({
 // ----------------------------------------------------------------------------
 
 export const CodebaseSchema = z.object({
-  id: z
-    .string()
-    .regex(/^[a-z][a-z0-9-]{0,31}$/u, {
-      message: 'codebase id は先頭英小文字 + 英小文字/数字/ハイフン、32 字以内',
-    }),
+  id: z.string().regex(/^[a-z][a-z0-9-]{0,31}$/u, {
+    message: 'codebase id は先頭英小文字 + 英小文字/数字/ハイフン、32 字以内',
+  }),
   label: z.string().min(1),
   path: z.string().min(1),
 });

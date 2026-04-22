@@ -28,8 +28,8 @@ import {
   updateEdge as updateEdgeApi,
   updateNode as updateNodeApi,
 } from './api';
-import { computeLayout, type LayoutDirection, type LayoutedPosition } from './layout';
-import { openChat, startAgent, type ChatHandle } from './ws';
+import { type LayoutDirection, type LayoutedPosition, computeLayout } from './layout';
+import { type ChatHandle, openChat, startAgent } from './ws';
 
 export type Selected = { kind: 'node'; id: string } | { kind: 'edge'; id: string } | null;
 
@@ -131,11 +131,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
   // startDecompose / startFindRelatedCode で共有する。
   // create クロージャ内に置くことで set/get を自然にキャプチャする。
   // codebaseId: フロントで選択された codebase の ID。省略時は ai-engine が codebases[0] を使う。
-  async function runAgentWS(
-    agent: AgentName,
-    nodeId: string,
-    codebaseId?: string,
-  ): Promise<void> {
+  async function runAgentWS(agent: AgentName, nodeId: string, codebaseId?: string): Promise<void> {
     const pid = get().projectId;
     if (!pid) throw new Error('projectId is not set');
     set({ runningAgent: { agent, inputNodeId: nodeId, events: [] } });
@@ -255,7 +251,11 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
           if (m.id !== evt.messageId) return m;
           // 対応する pending tool_use の approval を更新 + tool_result ブロック追加。
           const blocks = m.blocks.map((b) => {
-            if (b.type === 'tool_use' && b.toolUseId === evt.toolUseId && b.approval === 'pending') {
+            if (
+              b.type === 'tool_use' &&
+              b.toolUseId === evt.toolUseId &&
+              b.approval === 'pending'
+            ) {
               return { ...b, approval: evt.ok ? ('approved' as const) : ('rejected' as const) };
             }
             return b;

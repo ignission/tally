@@ -55,18 +55,18 @@ describe('initProject', () => {
     const projectDir = path.join(workspace, 'existing');
     await fs.mkdir(projectDir);
     await fs.writeFile(path.join(projectDir, 'project.yaml'), 'id: old\n');
-    await expect(
-      initProject({ projectDir, name: 'x', codebases: [] }),
-    ).rejects.toThrow(/既存の project\.yaml/);
+    await expect(initProject({ projectDir, name: 'x', codebases: [] })).rejects.toThrow(
+      /既存の project\.yaml/,
+    );
   });
 
   it('非空の dir で project.yaml 無しは拒否', async () => {
     const projectDir = path.join(workspace, 'dirty');
     await fs.mkdir(projectDir);
     await fs.writeFile(path.join(projectDir, 'random.txt'), 'x');
-    await expect(
-      initProject({ projectDir, name: 'x', codebases: [] }),
-    ).rejects.toThrow(/空ではありません/);
+    await expect(initProject({ projectDir, name: 'x', codebases: [] })).rejects.toThrow(
+      /空ではありません/,
+    );
   });
 
   it('存在しないパスでも親ディレクトリが存在すれば成功', async () => {
@@ -77,9 +77,9 @@ describe('initProject', () => {
 
   it('親ディレクトリが存在しないパスは拒否', async () => {
     const projectDir = path.join(workspace, 'missing-parent', 'sub');
-    await expect(
-      initProject({ projectDir, name: 'x', codebases: [] }),
-    ).rejects.toThrow(/親ディレクトリ/);
+    await expect(initProject({ projectDir, name: 'x', codebases: [] })).rejects.toThrow(
+      /親ディレクトリ/,
+    );
   });
 
   it('name が空は拒否', async () => {

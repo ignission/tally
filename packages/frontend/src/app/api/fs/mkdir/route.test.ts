@@ -24,9 +24,7 @@ describe('POST /api/fs/mkdir', () => {
   it('新規ディレクトリを作成して 201 を返す', async () => {
     const res = await POST(req({ path: dir, name: 'new-sub' }));
     expect(res.status).toBe(201);
-    expect(
-      (await fs.stat(path.join(dir, 'new-sub'))).isDirectory(),
-    ).toBe(true);
+    expect((await fs.stat(path.join(dir, 'new-sub'))).isDirectory()).toBe(true);
   });
 
   it('既存は 409', async () => {

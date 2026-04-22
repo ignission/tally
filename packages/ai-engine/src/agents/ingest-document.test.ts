@@ -8,7 +8,10 @@ import { describe, expect, it } from 'vitest';
 
 import { buildIngestDocumentPrompt, ingestDocumentAgent } from './ingest-document';
 
-const pasteInput = { source: 'paste', text: '招待機能を追加する。メンバーがメールで招待を送る。' } as const;
+const pasteInput = {
+  source: 'paste',
+  text: '招待機能を追加する。メンバーがメールで招待を送る。',
+} as const;
 const docsDirInput = { source: 'docs-dir', dirPath: 'docs' } as const;
 
 describe('buildIngestDocumentPrompt (paste モード)', () => {
@@ -65,12 +68,12 @@ describe('ingestDocumentAgent', () => {
   it('inputSchema discriminated union: paste / docs-dir のみ受理', () => {
     expect(ingestDocumentAgent.inputSchema.safeParse(pasteInput).success).toBe(true);
     expect(ingestDocumentAgent.inputSchema.safeParse(docsDirInput).success).toBe(true);
-    expect(
-      ingestDocumentAgent.inputSchema.safeParse({ source: 'file', text: 'x' }).success,
-    ).toBe(false);
-    expect(
-      ingestDocumentAgent.inputSchema.safeParse({ source: 'paste', text: '' }).success,
-    ).toBe(false);
+    expect(ingestDocumentAgent.inputSchema.safeParse({ source: 'file', text: 'x' }).success).toBe(
+      false,
+    );
+    expect(ingestDocumentAgent.inputSchema.safeParse({ source: 'paste', text: '' }).success).toBe(
+      false,
+    );
     expect(
       ingestDocumentAgent.inputSchema.safeParse({ source: 'docs-dir', dirPath: '' }).success,
     ).toBe(false);
@@ -106,10 +109,10 @@ describe('ingestDocumentAgent', () => {
 
   it('validateInput docs-dir: 存在しないディレクトリは not_found', async () => {
     const root = mkdtempSync(path.join(tmpdir(), 'tally-docs-dir-'));
-    const r = await ingestDocumentAgent.validateInput(
-      { store: {} as never, projectDir: root },
-      { source: 'docs-dir', dirPath: 'missing' } as const,
-    );
+    const r = await ingestDocumentAgent.validateInput({ store: {} as never, projectDir: root }, {
+      source: 'docs-dir',
+      dirPath: 'missing',
+    } as const);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.code).toBe('not_found');
     rmSync(root, { recursive: true, force: true });
@@ -117,10 +120,10 @@ describe('ingestDocumentAgent', () => {
 
   it('validateInput docs-dir: projectDir 外 (..) は bad_request', async () => {
     const root = mkdtempSync(path.join(tmpdir(), 'tally-docs-dir-'));
-    const r = await ingestDocumentAgent.validateInput(
-      { store: {} as never, projectDir: root },
-      { source: 'docs-dir', dirPath: '../escape' } as const,
-    );
+    const r = await ingestDocumentAgent.validateInput({ store: {} as never, projectDir: root }, {
+      source: 'docs-dir',
+      dirPath: '../escape',
+    } as const);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.code).toBe('bad_request');
     rmSync(root, { recursive: true, force: true });
@@ -129,10 +132,10 @@ describe('ingestDocumentAgent', () => {
   it('validateInput docs-dir: ファイルを指定したら bad_request', async () => {
     const root = mkdtempSync(path.join(tmpdir(), 'tally-docs-dir-'));
     await fs.writeFile(path.join(root, 'f.md'), 'x');
-    const r = await ingestDocumentAgent.validateInput(
-      { store: {} as never, projectDir: root },
-      { source: 'docs-dir', dirPath: 'f.md' } as const,
-    );
+    const r = await ingestDocumentAgent.validateInput({ store: {} as never, projectDir: root }, {
+      source: 'docs-dir',
+      dirPath: 'f.md',
+    } as const);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.code).toBe('bad_request');
     rmSync(root, { recursive: true, force: true });

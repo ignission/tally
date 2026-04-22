@@ -115,7 +115,9 @@ describe('lib/api', () => {
 
   it('4xx はエラーとして throw する', async () => {
     fetchMock.mockResolvedValueOnce(new Response('bad', { status: 400 }));
-    await expect(updateNode<'requirement'>(PID, 'req-xxxxx', { title: 'x' })).rejects.toThrow(/400/);
+    await expect(updateNode<'requirement'>(PID, 'req-xxxxx', { title: 'x' })).rejects.toThrow(
+      /400/,
+    );
   });
 
   it('patchProjectMeta は PATCH /api/projects/:id', async () => {
@@ -127,12 +129,16 @@ describe('lib/api', () => {
       updatedAt: '2026-04-19T00:00:00Z',
     };
     okJson(updated);
-    const result = await patchProjectMeta(PID, { codebases: [{ id: 'backend', label: 'Backend', path: '../backend' }] });
+    const result = await patchProjectMeta(PID, {
+      codebases: [{ id: 'backend', label: 'Backend', path: '../backend' }],
+    });
     expect(result).toEqual(updated);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe(`/api/projects/${PID}`);
     expect(init.method).toBe('PATCH');
-    expect(JSON.parse(init.body as string)).toEqual({ codebases: [{ id: 'backend', label: 'Backend', path: '../backend' }] });
+    expect(JSON.parse(init.body as string)).toEqual({
+      codebases: [{ id: 'backend', label: 'Backend', path: '../backend' }],
+    });
   });
 
   it('patchProjectMeta は null で codebases 削除シグナル', async () => {
@@ -168,12 +174,13 @@ describe('fetchRegistryProjects', () => {
   });
 
   it('GET /api/projects を叩いて projects を返す', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({ projects: [{ id: 'a', name: 'A', codebases: [] }] }),
-        { status: 200 },
-      ),
-    ) as typeof fetch;
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ projects: [{ id: 'a', name: 'A', codebases: [] }] }), {
+          status: 200,
+        }),
+      ) as typeof fetch;
     const list = await fetchRegistryProjects();
     expect(list[0]?.id).toBe('a');
   });
@@ -185,9 +192,11 @@ describe('createProject', () => {
   });
 
   it('POST /api/projects に projectDir + codebases を渡す', async () => {
-    const spy = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ id: 'new', projectDir: '/x' }), { status: 201 }),
-    );
+    const spy = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ id: 'new', projectDir: '/x' }), { status: 201 }),
+      );
     globalThis.fetch = spy as typeof fetch;
     const res = await createProject({
       projectDir: '/some/dir',
@@ -210,9 +219,11 @@ describe('importProject', () => {
   });
 
   it('POST /api/projects/import を叩く', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ id: 'x', projectDir: '/x' }), { status: 201 }),
-    ) as typeof fetch;
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ id: 'x', projectDir: '/x' }), { status: 201 }),
+      ) as typeof fetch;
     const res = await importProject('/some/dir');
     expect(res.id).toBe('x');
   });
@@ -253,12 +264,14 @@ describe('listDirectory', () => {
   });
 
   it('path 省略時は path パラメータを付けない', async () => {
-    const spy = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({ path: '/home', parent: null, entries: [], containsProjectYaml: false }),
-        { status: 200 },
-      ),
-    );
+    const spy = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ path: '/home', parent: null, entries: [], containsProjectYaml: false }),
+          { status: 200 },
+        ),
+      );
     globalThis.fetch = spy as typeof fetch;
     await listDirectory();
     const url = spy.mock.calls[0]?.[0] as string;
@@ -272,9 +285,9 @@ describe('mkdir', () => {
   });
 
   it('POST /api/fs/mkdir に path / name を渡す', async () => {
-    const spy = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ path: '/a/b' }), { status: 201 }),
-    );
+    const spy = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ path: '/a/b' }), { status: 201 }));
     globalThis.fetch = spy as typeof fetch;
     const res = await mkdir('/a', 'b');
     expect(res.path).toBe('/a/b');
@@ -290,12 +303,9 @@ describe('fetchDefaultProjectPath', () => {
 
   it('/api/projects/default-path?name= を叩いて path を返す', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({ path: '/home/you/.local/share/tally/projects/my-proj' }),
-        {
-          status: 200,
-        },
-      ),
+      new Response(JSON.stringify({ path: '/home/you/.local/share/tally/projects/my-proj' }), {
+        status: 200,
+      }),
     ) as typeof fetch;
     const p = await fetchDefaultProjectPath('My Proj');
     expect(p).toContain('/my-proj');

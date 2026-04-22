@@ -3,8 +3,8 @@
 import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
 
-import type { Codebase } from '@tally/core';
 import { createProject, fetchDefaultProjectPath } from '@/lib/api';
+import type { Codebase } from '@tally/core';
 import { FolderBrowserDialog } from './folder-browser-dialog';
 
 interface Props {
@@ -36,10 +36,7 @@ export function NewProjectDialog({ open, onClose }: Props) {
   if (!open) return null;
 
   const disabled =
-    busy ||
-    name.trim().length === 0 ||
-    projectDir.trim().length === 0 ||
-    duplicateIds.size > 0;
+    busy || name.trim().length === 0 || projectDir.trim().length === 0 || duplicateIds.size > 0;
 
   const onNameBlur = async () => {
     if (dirManuallySet) return;
@@ -60,15 +57,16 @@ export function NewProjectDialog({ open, onClose }: Props) {
 
   const onPickCodebase = (p: string) => {
     const rawSlug =
-      p.split('/').pop()?.toLowerCase().replace(/[^a-z0-9-]/g, '-') ?? 'cb';
+      p
+        .split('/')
+        .pop()
+        ?.toLowerCase()
+        .replace(/[^a-z0-9-]/g, '-') ?? 'cb';
     let id = rawSlug.slice(0, 32) || 'cb';
     while (codebases.some((c) => c.id === id)) {
       id = `${id.slice(0, 28)}-${Math.random().toString(36).slice(2, 4)}`;
     }
-    setCodebases([
-      ...codebases,
-      { id, label: p.split('/').pop() ?? id, path: p },
-    ]);
+    setCodebases([...codebases, { id, label: p.split('/').pop() ?? id, path: p }]);
     setPickerFor(null);
   };
 
@@ -120,12 +118,7 @@ export function NewProjectDialog({ open, onClose }: Props) {
         <div style={SECTION}>
           <div style={SECTION_HEADER}>
             保存先
-            <button
-              type="button"
-              onClick={() => setPickerFor('root')}
-              disabled={busy}
-              style={LINK}
-            >
+            <button type="button" onClick={() => setPickerFor('root')} disabled={busy} style={LINK}>
               {projectDir ? 'フォルダを変更' : '保存先を選択'}
             </button>
           </div>
@@ -176,7 +169,9 @@ export function NewProjectDialog({ open, onClose }: Props) {
                 />
                 <span style={CB_PATH}>{c.path}</span>
                 {duplicateIds.has(c.id) && (
-                  <span role="alert" style={ERROR_INLINE}>id 重複</span>
+                  <span role="alert" style={ERROR_INLINE}>
+                    id 重複
+                  </span>
                 )}
                 <button
                   type="button"
@@ -191,7 +186,11 @@ export function NewProjectDialog({ open, onClose }: Props) {
           </ul>
         </div>
 
-        {error && <div role="alert" style={ERROR}>{error}</div>}
+        {error && (
+          <div role="alert" style={ERROR}>
+            {error}
+          </div>
+        )}
 
         <div style={FOOTER}>
           <button type="button" onClick={onClose} disabled={busy} style={CANCEL_BTN}>

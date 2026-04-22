@@ -191,9 +191,7 @@ describe('WS /chat', () => {
     const events: { type: string; [k: string]: unknown }[] = [];
     await new Promise<void>((resolve, reject) => {
       ws.on('open', () => {
-        ws.send(
-          JSON.stringify({ type: 'open', projectId: 'proj-ws', threadId: thread.id }),
-        );
+        ws.send(JSON.stringify({ type: 'open', projectId: 'proj-ws', threadId: thread.id }));
         // open 応答 (chat_opened) を受けてから user_message を送る。
         setTimeout(() => {
           ws.send(JSON.stringify({ type: 'user_message', text: 'hi' }));
@@ -210,9 +208,7 @@ describe('WS /chat', () => {
       ws.on('error', reject);
     });
     expect(events[0]).toEqual({ type: 'chat_opened', threadId: thread.id });
-    expect(
-      events.some((e) => e.type === 'chat_text_delta' && e.text === 'こんにちは'),
-    ).toBe(true);
+    expect(events.some((e) => e.type === 'chat_text_delta' && e.text === 'こんにちは')).toBe(true);
     expect(events[events.length - 1]?.type).toBe('chat_turn_ended');
   }, 10_000);
 
@@ -229,9 +225,7 @@ describe('WS /chat', () => {
     const events: { type: string; code?: string; [k: string]: unknown }[] = [];
     await new Promise<void>((resolve, reject) => {
       ws.on('open', () => {
-        ws.send(
-          JSON.stringify({ type: 'open', projectId: 'proj-ws', threadId: 'chat-missing' }),
-        );
+        ws.send(JSON.stringify({ type: 'open', projectId: 'proj-ws', threadId: 'chat-missing' }));
       });
       ws.on('message', (data) => events.push(JSON.parse(data.toString())));
       ws.on('close', () => resolve());

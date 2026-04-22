@@ -29,9 +29,7 @@ export function ChatInput() {
             onSend();
           }
         }}
-        placeholder={
-          streaming ? '応答生成中…' : 'メッセージを入力 (Enter 送信 / Shift+Enter 改行)'
-        }
+        placeholder={streaming ? '応答生成中…' : 'メッセージを入力 (Enter 送信 / Shift+Enter 改行)'}
         disabled={streaming}
         rows={3}
         style={TEXTAREA_STYLE}

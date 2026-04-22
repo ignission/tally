@@ -4,9 +4,9 @@ import path from 'node:path';
 import { newProjectId } from '@tally/core';
 import type { Codebase } from '@tally/core';
 
+import { resolveProjectPaths } from './project-dir';
 import { FileSystemProjectStore } from './project-store';
 import { registerProject } from './registry';
-import { resolveProjectPaths } from './project-dir';
 
 export interface InitProjectInput {
   projectDir: string;

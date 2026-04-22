@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
 import type { Codebase } from '@tally/core';
+import { useEffect, useMemo, useState } from 'react';
 
 import { useCanvasStore } from '@/lib/store';
 import { FolderBrowserDialog } from './folder-browser-dialog';
@@ -36,12 +36,7 @@ export function ProjectSettingsDialog({
   }, [codebases]);
 
   const invalidIds = useMemo(
-    () =>
-      new Set(
-        codebases
-          .filter((c) => !/^[a-z][a-z0-9-]{0,31}$/u.test(c.id))
-          .map((c) => c.id),
-      ),
+    () => new Set(codebases.filter((c) => !/^[a-z][a-z0-9-]{0,31}$/u.test(c.id)).map((c) => c.id)),
     [codebases],
   );
 
@@ -51,15 +46,16 @@ export function ProjectSettingsDialog({
 
   const onPickCodebase = (p: string) => {
     const baseSlug =
-      p.split('/').pop()?.toLowerCase().replace(/[^a-z0-9-]/g, '-') ?? 'cb';
+      p
+        .split('/')
+        .pop()
+        ?.toLowerCase()
+        .replace(/[^a-z0-9-]/g, '-') ?? 'cb';
     let id = baseSlug.slice(0, 32) || 'cb';
     while (codebases.some((c) => c.id === id)) {
       id = `${id.slice(0, 28)}-${Math.random().toString(36).slice(2, 4)}`;
     }
-    setCodebases([
-      ...codebases,
-      { id, label: p.split('/').pop() ?? id, path: p },
-    ]);
+    setCodebases([...codebases, { id, label: p.split('/').pop() ?? id, path: p }]);
     setPickerOpen(false);
   };
 
@@ -83,18 +79,11 @@ export function ProjectSettingsDialog({
         <div style={SECTION}>
           <div style={SECTION_HEADER}>
             コードベース ({codebases.length})
-            <button
-              type="button"
-              onClick={() => setPickerOpen(true)}
-              disabled={busy}
-              style={LINK}
-            >
+            <button type="button" onClick={() => setPickerOpen(true)} disabled={busy} style={LINK}>
               + コードベースを追加
             </button>
           </div>
-          {codebases.length === 0 && (
-            <div style={MUTED}>コードベース未設定</div>
-          )}
+          {codebases.length === 0 && <div style={MUTED}>コードベース未設定</div>}
           <ul style={CB_LIST}>
             {codebases.map((c, i) => (
               <li key={`${c.path}-${i}`} style={CB_ITEM}>
@@ -135,9 +124,7 @@ export function ProjectSettingsDialog({
                 )}
                 <button
                   type="button"
-                  onClick={() =>
-                    setCodebases(codebases.filter((_, j) => j !== i))
-                  }
+                  onClick={() => setCodebases(codebases.filter((_, j) => j !== i))}
                   disabled={busy}
                   style={LINK}
                 >
@@ -155,12 +142,7 @@ export function ProjectSettingsDialog({
         )}
 
         <div style={FOOTER}>
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={busy}
-            style={CANCEL_BTN}
-          >
+          <button type="button" onClick={onClose} disabled={busy} style={CANCEL_BTN}>
             キャンセル
           </button>
           <button
