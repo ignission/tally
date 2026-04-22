@@ -14,12 +14,16 @@ export interface CodebaseSelectorState {
   tooltip: string | undefined;
 }
 
+// projectMeta が null のときに毎回新しい [] を返すとセレクタが無限ループするため、
+// モジュールスコープの定数を fallback に使って参照安定性を保証する。
+const EMPTY_CODEBASES: Codebase[] = [];
+
 // AI アクションボタン共通: 「どの codebase を使うか」を管理する hook。
 // - 0 件: disabled=true, tooltip='コードベースを追加してください'
 // - 1 件: そのまま自動選択
 // - 2 件以上: explicitId で切り替え可能 (未選択時は先頭をデフォルト)
 export function useCodebaseSelector(): CodebaseSelectorState {
-  const codebases = useCanvasStore((s) => s.projectMeta?.codebases ?? []);
+  const codebases = useCanvasStore((s) => s.projectMeta?.codebases ?? EMPTY_CODEBASES);
   const [explicitId, setExplicitId] = useState<string | null>(null);
 
   const selected = useMemo<Codebase | null>(() => {

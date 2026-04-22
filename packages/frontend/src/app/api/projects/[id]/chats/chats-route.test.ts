@@ -2,30 +2,39 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { FileSystemChatStore, FileSystemProjectStore } from '@tally/storage';
+import { FileSystemChatStore, FileSystemProjectStore, registerProject } from '@tally/storage';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { GET as getByIdHandler } from './[threadId]/route';
 import { GET as listHandler, POST as createHandler } from './route';
 
 describe('/api/projects/[id]/chats', () => {
-  let root: string;
-  const prev = process.env.TALLY_WORKSPACE;
+  let home: string;
+  let projectDir: string;
+  const prev = process.env.TALLY_HOME;
 
   beforeEach(async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-chats-api-'));
-    const store = new FileSystemProjectStore(root);
+    home = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-home-'));
+    process.env.TALLY_HOME = home;
+    projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-proj-'));
+    const store = new FileSystemProjectStore(projectDir);
     await store.saveProjectMeta({
       id: 'proj-1',
       name: 'P',
+      codebases: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
-    process.env.TALLY_WORKSPACE = root;
+    await fs.mkdir(path.join(projectDir, 'nodes'), { recursive: true });
+    await fs.mkdir(path.join(projectDir, 'edges'), { recursive: true });
+    await fs.writeFile(path.join(projectDir, 'edges', 'edges.yaml'), 'edges: []\n');
+    await fs.mkdir(path.join(projectDir, 'chats'), { recursive: true });
+    await registerProject({ id: 'proj-1', path: projectDir });
   });
   afterEach(async () => {
-    process.env.TALLY_WORKSPACE = prev;
-    await fs.rm(root, { recursive: true, force: true });
+    process.env.TALLY_HOME = prev;
+    await fs.rm(home, { recursive: true, force: true });
+    await fs.rm(projectDir, { recursive: true, force: true });
   });
 
   it('POST で新規スレッド作成、GET で一覧化', async () => {
@@ -66,7 +75,7 @@ describe('/api/projects/[id]/chats', () => {
   });
 
   it('GET /[threadId] で 1 スレッドの詳細', async () => {
-    const chatStore = new FileSystemChatStore(root);
+    const chatStore = new FileSystemChatStore(projectDir);
     const t = await chatStore.createChat({ projectId: 'proj-1', title: 'X' });
 
     const res = await getByIdHandler(new Request('http://x'), {

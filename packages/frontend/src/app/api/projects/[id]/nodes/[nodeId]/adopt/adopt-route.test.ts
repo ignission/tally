@@ -2,35 +2,42 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { FileSystemProjectStore } from '@tally/storage';
+import { FileSystemProjectStore, registerProject } from '@tally/storage';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { POST } from './route';
 
 describe('POST /api/projects/[id]/nodes/[nodeId]/adopt', () => {
-  let root: string;
-  const prevEnv = process.env.TALLY_WORKSPACE;
+  let home: string;
+  let projectDir: string;
+  const prevHome = process.env.TALLY_HOME;
 
   beforeEach(async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-adopt-'));
-    const store = new FileSystemProjectStore(root);
+    home = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-home-'));
+    process.env.TALLY_HOME = home;
+    projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-proj-'));
+    const store = new FileSystemProjectStore(projectDir);
     await store.saveProjectMeta({
       id: 'proj-test',
       name: 'Test',
+      codebases: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
-    await fs.mkdir(path.join(root, '.tally', 'nodes'), { recursive: true });
-    process.env.TALLY_WORKSPACE = root;
+    await fs.mkdir(path.join(projectDir, 'nodes'), { recursive: true });
+    await fs.mkdir(path.join(projectDir, 'edges'), { recursive: true });
+    await fs.writeFile(path.join(projectDir, 'edges', 'edges.yaml'), 'edges: []\n');
+    await registerProject({ id: 'proj-test', path: projectDir });
   });
 
   afterEach(async () => {
-    process.env.TALLY_WORKSPACE = prevEnv;
-    await fs.rm(root, { recursive: true, force: true });
+    process.env.TALLY_HOME = prevHome;
+    await fs.rm(home, { recursive: true, force: true });
+    await fs.rm(projectDir, { recursive: true, force: true });
   });
 
-  async function makeProposal(root: string) {
-    const store = new FileSystemProjectStore(root);
+  async function makeProposal(dir: string) {
+    const store = new FileSystemProjectStore(dir);
     return store.addNode({
       type: 'proposal',
       x: 0,
@@ -42,7 +49,7 @@ describe('POST /api/projects/[id]/nodes/[nodeId]/adopt', () => {
   }
 
   it('userstory として採用すると 200 と新しいノードを返す', async () => {
-    const prop = await makeProposal(root);
+    const prop = await makeProposal(projectDir);
     const req = new Request(`http://localhost/api/projects/proj-test/nodes/${prop.id}/adopt`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -59,7 +66,7 @@ describe('POST /api/projects/[id]/nodes/[nodeId]/adopt', () => {
   });
 
   it('adoptAs が proposal だと 400', async () => {
-    const prop = await makeProposal(root);
+    const prop = await makeProposal(projectDir);
     const req = new Request(`http://localhost/api/projects/proj-test/nodes/${prop.id}/adopt`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -72,7 +79,7 @@ describe('POST /api/projects/[id]/nodes/[nodeId]/adopt', () => {
   });
 
   it('proposal 以外を採用しようとすると 400', async () => {
-    const store = new FileSystemProjectStore(root);
+    const store = new FileSystemProjectStore(projectDir);
     const req1 = await store.addNode({
       type: 'requirement',
       x: 0,

@@ -2,38 +2,45 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { FileSystemProjectStore } from '@tally/storage';
+import { FileSystemProjectStore, registerProject } from '@tally/storage';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { PATCH, DELETE as deleteHandler } from './[edgeId]/route';
 import { POST } from './route';
 
 describe('POST /api/projects/[id]/edges', () => {
-  let root: string;
-  const prevEnv = process.env.TALLY_WORKSPACE;
+  let home: string;
+  let projectDir: string;
+  const prevHome = process.env.TALLY_HOME;
   let aId: string;
   let bId: string;
 
   beforeEach(async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-route-'));
-    const store = new FileSystemProjectStore(root);
+    home = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-home-'));
+    process.env.TALLY_HOME = home;
+    projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-proj-'));
+    const store = new FileSystemProjectStore(projectDir);
     await store.saveProjectMeta({
       id: 'proj-test',
       name: 'Test',
+      codebases: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
-    await fs.mkdir(path.join(root, '.tally', 'nodes'), { recursive: true });
+    await fs.mkdir(path.join(projectDir, 'nodes'), { recursive: true });
+    await fs.mkdir(path.join(projectDir, 'edges'), { recursive: true });
+    await fs.writeFile(path.join(projectDir, 'edges', 'edges.yaml'), 'edges: []\n');
     const a = await store.addNode({ type: 'requirement', x: 0, y: 0, title: 'a', body: '' });
     const b = await store.addNode({ type: 'usecase', x: 0, y: 0, title: 'b', body: '' });
     aId = a.id;
     bId = b.id;
-    process.env.TALLY_WORKSPACE = root;
+    await registerProject({ id: 'proj-test', path: projectDir });
   });
 
   afterEach(async () => {
-    process.env.TALLY_WORKSPACE = prevEnv;
-    await fs.rm(root, { recursive: true, force: true });
+    process.env.TALLY_HOME = prevHome;
+    await fs.rm(home, { recursive: true, force: true });
+    await fs.rm(projectDir, { recursive: true, force: true });
   });
 
   it('新規エッジを作成し、YAML に反映する', async () => {
@@ -49,7 +56,7 @@ describe('POST /api/projects/[id]/edges', () => {
     expect(created.from).toBe(aId);
     expect(created.to).toBe(bId);
 
-    const store = new FileSystemProjectStore(root);
+    const store = new FileSystemProjectStore(projectDir);
     const edges = await store.listEdges();
     expect(edges).toHaveLength(1);
   });
@@ -76,30 +83,37 @@ describe('POST /api/projects/[id]/edges', () => {
 });
 
 describe('PATCH /api/projects/[id]/edges/[edgeId]', () => {
-  let root: string;
-  const prevEnv = process.env.TALLY_WORKSPACE;
+  let home: string;
+  let projectDir: string;
+  const prevHome = process.env.TALLY_HOME;
   let edgeId: string;
 
   beforeEach(async () => {
-    root = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-route-'));
-    const store = new FileSystemProjectStore(root);
+    home = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-home-'));
+    process.env.TALLY_HOME = home;
+    projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-proj-'));
+    const store = new FileSystemProjectStore(projectDir);
     await store.saveProjectMeta({
       id: 'proj-test',
       name: 'Test',
+      codebases: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
-    await fs.mkdir(path.join(root, '.tally', 'nodes'), { recursive: true });
+    await fs.mkdir(path.join(projectDir, 'nodes'), { recursive: true });
+    await fs.mkdir(path.join(projectDir, 'edges'), { recursive: true });
+    await fs.writeFile(path.join(projectDir, 'edges', 'edges.yaml'), 'edges: []\n');
     const a = await store.addNode({ type: 'requirement', x: 0, y: 0, title: 'a', body: '' });
     const b = await store.addNode({ type: 'usecase', x: 0, y: 0, title: 'b', body: '' });
     const e = await store.addEdge({ from: a.id, to: b.id, type: 'satisfy' });
     edgeId = e.id;
-    process.env.TALLY_WORKSPACE = root;
+    await registerProject({ id: 'proj-test', path: projectDir });
   });
 
   afterEach(async () => {
-    process.env.TALLY_WORKSPACE = prevEnv;
-    await fs.rm(root, { recursive: true, force: true });
+    process.env.TALLY_HOME = prevHome;
+    await fs.rm(home, { recursive: true, force: true });
+    await fs.rm(projectDir, { recursive: true, force: true });
   });
 
   it('type の変更が反映される (id は不変)', async () => {
@@ -117,7 +131,7 @@ describe('PATCH /api/projects/[id]/edges/[edgeId]', () => {
     expect(updated.id).toBe(edgeId);
     expect(updated.type).toBe('refine');
 
-    const store = new FileSystemProjectStore(root);
+    const store = new FileSystemProjectStore(projectDir);
     const edges = await store.listEdges();
     expect(edges).toHaveLength(1);
     expect(edges[0]?.id).toBe(edgeId);
@@ -156,7 +170,7 @@ describe('PATCH /api/projects/[id]/edges/[edgeId]', () => {
       params: Promise.resolve({ id: 'proj-test', edgeId }),
     });
     expect(res.status).toBe(204);
-    const store = new FileSystemProjectStore(root);
+    const store = new FileSystemProjectStore(projectDir);
     expect(await store.listEdges()).toEqual([]);
     const nodes = await store.listNodes();
     expect(nodes).toHaveLength(2);
