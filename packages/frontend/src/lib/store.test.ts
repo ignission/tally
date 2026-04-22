@@ -16,6 +16,7 @@ function baseProject(): Project {
   return {
     id: 'proj-1',
     name: 'P',
+    codebases: [],
     createdAt: now,
     updatedAt: now,
     nodes: [n1],
@@ -134,6 +135,7 @@ describe('useCanvasStore', () => {
       useCanvasStore.getState().hydrate({
         id: 'proj-1',
         name: 't',
+        codebases: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         nodes: [{ id: 'uc-1', type: 'usecase', x: 0, y: 0, title: 'uc', body: '' }],
@@ -178,6 +180,7 @@ describe('useCanvasStore', () => {
       useCanvasStore.getState().hydrate({
         id: 'proj-1',
         name: 't',
+        codebases: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         nodes: [{ id: 'uc-1', type: 'usecase', x: 0, y: 0, title: 'uc', body: '' }],
@@ -246,6 +249,7 @@ describe('useCanvasStore', () => {
       store.getState().hydrate({
         id: 'proj-1',
         name: 't',
+        codebases: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         nodes: [{ id: 'uc-1', type: 'usecase', x: 0, y: 0, title: 'uc', body: '' }],
@@ -302,6 +306,7 @@ describe('useCanvasStore', () => {
       store.getState().hydrate({
         id: 'proj-1',
         name: 't',
+        codebases: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         nodes: [{ id: 'uc-1', type: 'usecase', x: 0, y: 0, title: 'uc', body: '' }],
@@ -364,6 +369,7 @@ describe('useCanvasStore', () => {
       store.getState().hydrate({
         id: 'proj-1',
         name: 't',
+        codebases: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         nodes: [],
@@ -402,6 +408,7 @@ describe('useCanvasStore', () => {
       store.getState().hydrate({
         id: 'proj-2',
         name: 't',
+        codebases: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         nodes: [],
@@ -479,6 +486,7 @@ describe('useCanvasStore', () => {
       useCanvasStore.getState().hydrate({
         id: 'proj-1',
         name: 'P',
+        codebases: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         nodes: [
@@ -516,6 +524,7 @@ describe('useCanvasStore', () => {
       useCanvasStore.getState().hydrate({
         id: 'proj-1',
         name: 'P',
+        codebases: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         nodes: [
@@ -598,6 +607,7 @@ describe('useCanvasStore', () => {
       store.getState().hydrate({
         id: 'proj-1',
         name: 't',
+        codebases: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         nodes: [],
@@ -646,6 +656,7 @@ describe('useCanvasStore', () => {
       store.getState().hydrate({
         id: 'proj-1',
         name: 't',
+        codebases: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         nodes: [],

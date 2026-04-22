@@ -71,7 +71,7 @@ describe('lib/api', () => {
 
   it('updateNode は PATCH /api/projects/:id/nodes/:nid', async () => {
     okJson({ ok: true });
-    await updateNode(PID, 'req-xxxxx', { title: 'new' });
+    await updateNode<'requirement'>(PID, 'req-xxxxx', { title: 'new' });
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe(`/api/projects/${PID}/nodes/req-xxxxx`);
     expect(init.method).toBe('PATCH');
@@ -115,36 +115,37 @@ describe('lib/api', () => {
 
   it('4xx はエラーとして throw する', async () => {
     fetchMock.mockResolvedValueOnce(new Response('bad', { status: 400 }));
-    await expect(updateNode(PID, 'req-xxxxx', { title: 'x' })).rejects.toThrow(/400/);
+    await expect(updateNode<'requirement'>(PID, 'req-xxxxx', { title: 'x' })).rejects.toThrow(/400/);
   });
 
   it('patchProjectMeta は PATCH /api/projects/:id', async () => {
     const updated = {
       id: PID,
       name: 'P',
-      codebasePath: '../backend',
+      codebases: [{ id: 'backend', label: 'Backend', path: '../backend' }],
       createdAt: '2026-04-18T00:00:00Z',
       updatedAt: '2026-04-19T00:00:00Z',
     };
     okJson(updated);
-    const result = await patchProjectMeta(PID, { codebasePath: '../backend' });
+    const result = await patchProjectMeta(PID, { codebases: [{ id: 'backend', label: 'Backend', path: '../backend' }] });
     expect(result).toEqual(updated);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe(`/api/projects/${PID}`);
     expect(init.method).toBe('PATCH');
-    expect(JSON.parse(init.body as string)).toEqual({ codebasePath: '../backend' });
+    expect(JSON.parse(init.body as string)).toEqual({ codebases: [{ id: 'backend', label: 'Backend', path: '../backend' }] });
   });
 
-  it('patchProjectMeta は null で codebasePath 削除シグナル', async () => {
+  it('patchProjectMeta は null で codebases 削除シグナル', async () => {
     okJson({
       id: PID,
       name: 'P',
+      codebases: [],
       createdAt: '2026-04-18T00:00:00Z',
       updatedAt: '2026-04-19T00:00:00Z',
     });
-    await patchProjectMeta(PID, { codebasePath: null });
+    await patchProjectMeta(PID, { codebases: [] });
     const [, init] = fetchMock.mock.calls[0] as [unknown, RequestInit];
-    expect(JSON.parse(init.body as string)).toEqual({ codebasePath: null });
+    expect(JSON.parse(init.body as string)).toEqual({ codebases: [] });
   });
 
   it('updateNode は undefined 値を null に変換して送信する', async () => {
