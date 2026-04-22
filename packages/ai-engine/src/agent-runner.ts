@@ -92,6 +92,7 @@ export async function* runAgent(deps: RunAgentDeps): AsyncGenerator<AgentEvent> 
     anchor: anchor ? { x: anchor.x, y: anchor.y } : { x: 0, y: 0 },
     anchorId: anchor?.id ?? '',
     agentName: req.agent,
+    ...(vr.codebaseId !== undefined ? { codebaseId: vr.codebaseId } : {}),
   });
 
   const prompt = def.buildPrompt({

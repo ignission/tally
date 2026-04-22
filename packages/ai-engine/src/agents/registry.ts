@@ -17,6 +17,9 @@ export interface AgentValidateOk {
   // 横断機能用: primary cwd に加えて AI が読み取り参照してよい絶対パス群。
   // SDK の cwd は単一なので、プロンプト内で位置を明示して Read/Grep させる。
   additionalCwds?: string[];
+  // 検証通過した対象 codebase の id。create_node が coderef proposal 生成時に
+  // additional へ注入して、後の adopt で codebaseId 整合性検証が通るようにする。
+  codebaseId?: string;
 }
 export interface AgentValidateError {
   ok: false;

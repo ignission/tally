@@ -105,5 +105,6 @@ export async function validateCodebaseAnchor(
     ok: true,
     anchor: node,
     cwd: abs,
+    codebaseId: target.id,
   };
 }

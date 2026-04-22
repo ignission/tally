@@ -19,12 +19,17 @@ export function FolderBrowserDialog(props: FolderBrowserDialogProps) {
   const [error, setError] = useState<string | null>(null);
   const [showHidden, setShowHidden] = useState(false);
   const [newDirName, setNewDirName] = useState('');
+  // パス入力は編集中の draft を別持ちし、keystroke 毎に load しない。
+  // Enter / blur で確定したときだけ load を走らせ、中間パスの解決失敗で
+  // スナップバックするのを防ぐ (codex P2 指摘)。
+  const [pathDraft, setPathDraft] = useState('');
 
   const load = useCallback(async (targetPath?: string) => {
     setError(null);
     try {
       const res = await listDirectory(targetPath);
       setListing(res);
+      setPathDraft(res.path);
     } catch (err) {
       setError(String((err as Error).message ?? err));
     }
@@ -64,8 +69,21 @@ export function FolderBrowserDialog(props: FolderBrowserDialogProps) {
         <div style={TOOLBAR_STYLE}>
           <input
             type="text"
-            value={listing?.path ?? ''}
-            onChange={(e) => void load(e.target.value)}
+            value={pathDraft}
+            onChange={(e) => setPathDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                void load(pathDraft);
+              } else if (e.key === 'Escape') {
+                // 編集を破棄して現在の listing.path に戻す。
+                setPathDraft(listing?.path ?? '');
+              }
+            }}
+            onBlur={() => {
+              // フォーカスが外れたらその時点の draft で確定。draft が現在位置と同じなら no-op。
+              if (pathDraft && pathDraft !== listing?.path) void load(pathDraft);
+            }}
             aria-label="現在のパス"
             style={PATH_INPUT_STYLE}
           />
