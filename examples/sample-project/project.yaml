@@ -3,6 +3,9 @@ name: TaskFlow 招待機能追加
 description: |
   タスク管理SaaS「TaskFlow」にチーム招待機能を追加するプロジェクト。
   メール経由の招待リンクでプロジェクトに参加できるようにする。
-codebasePath: ../taskflow-backend
+codebases:
+  - id: backend
+    label: TaskFlow API
+    path: ../taskflow-backend
 createdAt: 2026-04-18T10:00:00Z
 updatedAt: 2026-04-18T10:00:00Z

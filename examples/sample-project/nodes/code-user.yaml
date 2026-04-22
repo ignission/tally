@@ -1,5 +1,6 @@
 id: code-user
 type: coderef
+codebaseId: backend
 x: 640
 y: 40
 title: User モデル
