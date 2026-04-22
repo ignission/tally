@@ -27,6 +27,15 @@ describe('buildFindRelatedCodePrompt', () => {
     expect(p.userPrompt).toContain('招待');
     expect(p.userPrompt).toContain('メール招待');
   });
+
+  it('codebaseId が渡されたらプロンプト両方に含まれ、additional の契約にも codebaseId が明記される', () => {
+    const p = buildFindRelatedCodePrompt({
+      anchor: { id: 'uc-2', type: 'usecase', x: 0, y: 0, title: 'test', body: '' },
+      codebaseId: 'backend',
+    });
+    expect(p.userPrompt).toContain('backend');
+    expect(p.systemPrompt).toContain('codebaseId');
+  });
 });
 
 describe('findRelatedCodeAgent.validateInput', () => {

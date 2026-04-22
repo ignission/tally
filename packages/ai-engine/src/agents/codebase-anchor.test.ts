@@ -157,6 +157,49 @@ describe('validateCodebaseAnchor', () => {
     }
   });
 
+  it('coderef anchor の codebaseId を options.codebaseId より一段低く、codebases[0] より優先する', async () => {
+    // anchor は codebaseId: 'backend' を持つ coderef ノード
+    const dir = mkdtempSync(path.join(tmpdir(), 'cba-'));
+    const backendDir = mkdtempSync(path.join(tmpdir(), 'cba-be-'));
+    const node = {
+      id: 'cr-1',
+      type: 'coderef' as const,
+      codebaseId: 'backend',
+      x: 0,
+      y: 0,
+      title: 'some ref',
+      body: '',
+    };
+    const store = makeStore({
+      getNode: vi.fn().mockResolvedValue(node),
+      getProjectMeta: vi.fn().mockResolvedValue({
+        id: 'p',
+        name: 'x',
+        codebases: [
+          { id: 'frontend', label: 'Frontend', path: dir },
+          { id: 'backend', label: 'Backend', path: backendDir },
+        ],
+        createdAt: '',
+        updatedAt: '',
+      }),
+    });
+    // options.codebaseId 未指定 → anchor.codebaseId='backend' を使うべき
+    const r = await validateCodebaseAnchor(
+      { store, projectDir: '/' },
+      'cr-1',
+      ['coderef'] as unknown as readonly import('@tally/core').NodeType[],
+      'analyze-impact',
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      // frontend の path (dir) ではなく backend の path (backendDir) になるはず
+      expect(r.cwd).toBe(path.resolve('/', backendDir));
+      expect(r.codebaseId).toBe('backend');
+    }
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(backendDir, { recursive: true, force: true });
+  });
+
   it('requireCodebasePath: false でも nodeId 不存在 / 対象外 type は従来通り弾く', async () => {
     const store = makeStore({ getNode: vi.fn().mockResolvedValue(null) });
     const r = await validateCodebaseAnchor(

@@ -7,6 +7,9 @@ import type { AgentDefinition } from './registry';
 export interface AnalyzeImpactPromptInput {
   anchor: Node;
   additionalCwds?: string[];
+  // validateInput が解決した対象 codebase の ID。
+  // プロンプト内で AI に明示し、coderef proposal の additional に必ず含めさせる。
+  codebaseId?: string;
 }
 
 // analyze-impact のプロンプト。issue proposal が主役、coderef は補助 (find-related-code が
@@ -41,7 +44,7 @@ export function buildAnalyzeImpactPrompt(input: AnalyzeImpactPromptInput): {
     '- coderef proposal (副次的, 0〜5 件): create_node で type="proposal", adoptAs="coderef"',
     '  タイトル: "[AI] <filePath>:<startLine>"',
     '  body: "<現状要約> / 影響: <実装したらどう変更する必要があるか>" (人間可読)',
-    '  additional: { filePath, startLine, endLine, summary, impact }',
+    '  additional: { codebaseId, filePath, startLine, endLine, summary, impact }',
     '    filePath は codebasePath 基準の相対パス ("./" は付けない)',
     '    summary = 現状要約、impact = 実装で変わる方向性 (UI の将来拡張用、body と内容を一致させる)',
     '- issue proposal (主役, 0〜5 件): create_node で type="proposal", adoptAs="issue"',
@@ -69,6 +72,7 @@ export function buildAnalyzeImpactPrompt(input: AnalyzeImpactPromptInput): {
     `type: ${input.anchor.type}`,
     `タイトル: ${input.anchor.title}`,
     `本文:\n${input.anchor.body}`,
+    ...(input.codebaseId ? [`\n対象 codebaseId: ${input.codebaseId}`] : []),
     '',
     '上記ノードを実装した場合の既存コードへの影響を分析し、',
     'coderef proposal と issue proposal として記録してください。',
@@ -99,10 +103,11 @@ export const analyzeImpactAgent: AgentDefinition<AnalyzeImpactInput> = {
     );
   },
   // anchor 必須エージェント: validateInput が通過した時点で anchor は必ず存在する。
-  buildPrompt: ({ anchor, additionalCwds }) =>
+  buildPrompt: ({ anchor, additionalCwds, codebaseId }) =>
     buildAnalyzeImpactPrompt({
       anchor: anchor!,
       ...(additionalCwds ? { additionalCwds } : {}),
+      ...(codebaseId ? { codebaseId } : {}),
     }),
   allowedTools: [
     'mcp__tally__create_node',

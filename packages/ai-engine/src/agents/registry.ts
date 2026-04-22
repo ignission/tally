@@ -32,6 +32,9 @@ export interface AgentPromptInput {
   anchor?: Node;
   cwd?: string;
   additionalCwds?: string[];
+  // プロンプトに対象 codebaseId を明示するために validateInput が解決した id を渡す。
+  // AI が生成する coderef proposal の additional に codebaseId を必ず含めるよう指示する。
+  codebaseId?: string;
   input?: unknown; // agent 固有入力 (ingest-document の text など)
 }
 

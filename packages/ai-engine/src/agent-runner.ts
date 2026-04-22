@@ -84,6 +84,7 @@ export async function* runAgent(deps: RunAgentDeps): AsyncGenerator<AgentEvent> 
   const anchor = vr.anchor;
   const cwd = vr.cwd;
   const additionalCwds = vr.additionalCwds;
+  const codebaseId = vr.codebaseId;
 
   const sideEvents: AgentEvent[] = [];
   const mcp = buildTallyMcpServer({
@@ -99,6 +100,7 @@ export async function* runAgent(deps: RunAgentDeps): AsyncGenerator<AgentEvent> 
     ...(anchor !== undefined ? { anchor } : {}),
     ...(cwd !== undefined ? { cwd } : {}),
     ...(additionalCwds !== undefined ? { additionalCwds } : {}),
+    ...(codebaseId !== undefined ? { codebaseId } : {}),
     input: parsed.data,
   });
   try {

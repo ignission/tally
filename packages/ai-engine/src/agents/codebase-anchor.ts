@@ -64,15 +64,21 @@ export async function validateCodebaseAnchor(
   const meta = await deps.store.getProjectMeta();
   const codebases = meta?.codebases ?? [];
 
-  // codebaseId 指定があればそれを優先、なければ codebases[0] (後方互換)。
+  // 優先順位:
+  //  1. options.codebaseId (呼び出し元の明示指定)
+  //  2. anchor.codebaseId (coderef ノードが持つ所属 codebase)
+  //  3. codebases[0] (後方互換フォールバック)
+  const anchorCodebaseId = (node as { codebaseId?: string }).codebaseId;
+  const resolvedId = options.codebaseId ?? anchorCodebaseId;
+
   let target: Codebase | undefined;
-  if (options.codebaseId) {
-    target = codebases.find((c) => c.id === options.codebaseId);
+  if (resolvedId) {
+    target = codebases.find((c) => c.id === resolvedId);
     if (!target) {
       return {
         ok: false,
         code: 'bad_request',
-        message: `指定された codebaseId が見つかりません: ${options.codebaseId}`,
+        message: `指定された codebaseId が見つかりません: ${resolvedId}`,
       };
     }
   } else {
