@@ -547,6 +547,58 @@ describe('useCanvasStore', () => {
     });
   });
 
+  describe('アコーディオン (expandedNodes)', () => {
+    it('hydrate 直後は全ノード折りたたみ (expandedNodes が空)', () => {
+      expect(useCanvasStore.getState().expandedNodes).toEqual({});
+    });
+
+    it('toggleNodeExpanded で展開⇄折りたたみがトグルする', () => {
+      const { toggleNodeExpanded } = useCanvasStore.getState();
+      toggleNodeExpanded('req-a');
+      expect(useCanvasStore.getState().expandedNodes['req-a']).toBe(true);
+      toggleNodeExpanded('req-a');
+      expect(useCanvasStore.getState().expandedNodes['req-a']).toBeUndefined();
+    });
+
+    it('expandAllNodes はキャンバス上の全ノードを展開する', () => {
+      useCanvasStore.setState({
+        nodes: {
+          'n-1': { id: 'n-1', type: 'requirement', x: 0, y: 0, title: '', body: '' },
+          'n-2': { id: 'n-2', type: 'issue', x: 0, y: 0, title: '', body: '' },
+        },
+      });
+      useCanvasStore.getState().expandAllNodes();
+      expect(useCanvasStore.getState().expandedNodes).toEqual({ 'n-1': true, 'n-2': true });
+    });
+
+    it('collapseAllNodes で expandedNodes が空になる', () => {
+      useCanvasStore.setState({ expandedNodes: { 'req-a': true, 'n-x': true } });
+      useCanvasStore.getState().collapseAllNodes();
+      expect(useCanvasStore.getState().expandedNodes).toEqual({});
+    });
+
+    it('addNodeFromPalette は新規ノードを展開状態で挿入する (空ボディなのでユーザーが編集しやすい)', async () => {
+      const created = {
+        id: 'req-new',
+        type: 'requirement',
+        x: 10,
+        y: 10,
+        title: '',
+        body: '',
+      };
+      okJson(created, 201);
+      await useCanvasStore.getState().addNodeFromPalette('requirement', 10, 10);
+      expect(useCanvasStore.getState().expandedNodes['req-new']).toBe(true);
+    });
+
+    it('removeNode で削除ノードの展開エントリも掃除される', async () => {
+      useCanvasStore.setState({ expandedNodes: { 'req-a': true } });
+      okJson({});
+      await useCanvasStore.getState().removeNode('req-a');
+      expect(useCanvasStore.getState().expandedNodes['req-a']).toBeUndefined();
+    });
+  });
+
   describe('chat threads', () => {
     it('loadChatThreads: API から取得して chatThreadList に保存', async () => {
       okJson({

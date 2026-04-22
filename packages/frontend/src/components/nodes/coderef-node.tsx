@@ -3,9 +3,11 @@ import { NODE_META } from '@tally/core';
 import type { NodeProps } from '@xyflow/react';
 
 import { NodeBadge, NodeCard } from './node-card';
+import { useNodeAccordion } from './use-accordion';
 
-export function CodeRefNodeView({ data }: NodeProps) {
+export function CodeRefNodeView({ id, data }: NodeProps) {
   const node = (data as { node: CodeRefNode }).node;
+  const { collapsed, toggle } = useNodeAccordion(id);
   const range =
     node.startLine != null
       ? `${node.startLine}${
@@ -33,6 +35,8 @@ export function CodeRefNodeView({ data }: NodeProps) {
       body={node.body}
       badge={badge}
       footer={footer}
+      collapsed={collapsed}
+      onToggleCollapse={toggle}
     />
   );
 }
