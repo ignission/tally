@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { type FsListResult, listDirectory, mkdir } from '@/lib/api';
+import { isImeComposing } from '@/lib/ime';
 
 export type FolderBrowserPurpose = 'create-project' | 'import-project' | 'add-codebase';
 
@@ -72,7 +73,7 @@ export function FolderBrowserDialog(props: FolderBrowserDialogProps) {
             value={pathDraft}
             onChange={(e) => setPathDraft(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') {
+              if (e.key === 'Enter' && !isImeComposing(e)) {
                 e.preventDefault();
                 void load(pathDraft);
               } else if (e.key === 'Escape') {

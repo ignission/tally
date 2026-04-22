@@ -4,6 +4,7 @@ import type { QuestionNode, QuestionOption } from '@tally/core';
 import { nanoid } from 'nanoid';
 import { useState } from 'react';
 
+import { isImeComposing } from '@/lib/ime';
 import { useCanvasStore } from '@/lib/store';
 
 export function QuestionDetail({ node }: { node: QuestionNode }) {
@@ -92,7 +93,7 @@ export function QuestionDetail({ node }: { node: QuestionNode }) {
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') addOption();
+              if (e.key === 'Enter' && !isImeComposing(e)) addOption();
             }}
             placeholder="新しい選択肢..."
             style={{ ...INPUT_STYLE, flex: 1 }}

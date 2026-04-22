@@ -2,6 +2,8 @@
 
 import { useEffect } from 'react';
 
+import { isImeComposing } from '@/lib/ime';
+
 interface Props {
   open: boolean;
   title: string;
@@ -27,7 +29,8 @@ export function ConfirmDialog({
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
-      else if (e.key === 'Enter') onConfirm();
+      // window レベルのリスナーなので、別の入力欄で IME 変換中の Enter を拾って誤確定しないよう除外。
+      else if (e.key === 'Enter' && !isImeComposing(e)) onConfirm();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);

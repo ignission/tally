@@ -7,6 +7,7 @@ import { useId, useState } from 'react';
 import { AnalyzeImpactButton } from '@/components/ai-actions/analyze-impact-button';
 import { ExtractQuestionsButton } from '@/components/ai-actions/extract-questions-button';
 import { FindRelatedCodeButton } from '@/components/ai-actions/find-related-code-button';
+import { isImeComposing } from '@/lib/ime';
 import { useCanvasStore } from '@/lib/store';
 
 // AcceptanceCriterion と UserStoryTask はどちらも {id, text, done} の同形。
@@ -115,7 +116,7 @@ function CheckList({
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') add();
+            if (e.key === 'Enter' && !isImeComposing(e)) add();
           }}
           placeholder="新しい項目..."
           style={{ ...INPUT_STYLE, flex: 1 }}
