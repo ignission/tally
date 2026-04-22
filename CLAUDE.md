@@ -111,3 +111,21 @@ refactor(core): Node型にsourceAgentId追加
 - **実装方針に迷ったら**：該当する ADR を探す、なければ新規 ADR を書いてユーザーに確認
 - **AI 関連で迷ったら**：Claude Agent SDK の公式ドキュメント（https://docs.claude.com/en/api/agent-sdk）
 - **ストレージ設計に迷ったら**：`docs/adr/0008-project-independent-from-repo.md`（プロジェクト = 任意のディレクトリ）/ `docs/adr/0009-project-registry.md`（レジストリ、`TALLY_HOME`、フォルダピッカー）/ `docs/adr/0010-multiple-codebases.md`（`codebases[]` 配列）を参照
+
+## Skill routing
+
+ユーザーのリクエストが利用可能な skill とマッチした場合、必ず Skill ツールで skill を**最初のアクション**として呼び出す。直接回答せず、他のツールを先に使わないこと。skill は専門化されたワークフローを持ち、アドホックな回答より確実に良い結果を出す。
+
+主なルーティングルール:
+- プロダクトアイデア・「作る価値ある？」・ブレスト → office-hours
+- バグ・エラー・「なぜ壊れた」・500 エラー → investigate
+- ship / deploy / push / PR 作成 → ship
+- QA・サイトテスト・バグ探し → qa
+- コードレビュー・diff 確認 → review
+- ship 後のドキュメント更新 → document-release
+- 週次振り返り → retro
+- デザインシステム・ブランド → design-consultation
+- ビジュアル監査・デザイン磨き → design-review
+- アーキテクチャレビュー → plan-eng-review
+- 進捗保存・checkpoint・再開 → context-save / context-restore
+- コード品質・ヘルスチェック → health
