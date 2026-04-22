@@ -38,53 +38,55 @@ export default function Page() {
 
   return (
     <main style={MAIN}>
-      <header style={HEADER}>
-        <h1 style={H1}>Tally</h1>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button type="button" onClick={() => setShowNew(true)} style={PRIMARY_BTN}>
-            + 新規プロジェクト
-          </button>
-          <button type="button" onClick={() => setShowImport(true)} style={CANCEL_BTN}>
-            既存を読み込む
-          </button>
-        </div>
-      </header>
+      <div style={CONTAINER}>
+        <header style={HEADER}>
+          <h1 style={H1}>Tally</h1>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" onClick={() => setShowNew(true)} style={PRIMARY_BTN}>
+              + 新規プロジェクト
+            </button>
+            <button type="button" onClick={() => setShowImport(true)} style={CANCEL_BTN}>
+              既存を読み込む
+            </button>
+          </div>
+        </header>
 
-      {error && (
-        <div role="alert" style={ERROR}>
-          {error}
-        </div>
-      )}
-      {projects === null && !error && <div style={MUTED}>読み込み中…</div>}
-      {projects !== null && projects.length === 0 && (
-        <div style={MUTED}>
-          プロジェクトが登録されていません。「+
-          新規プロジェクト」または「既存を読み込む」から開始してください。
-        </div>
-      )}
+        {error && (
+          <div role="alert" style={ERROR}>
+            {error}
+          </div>
+        )}
+        {projects === null && !error && <div style={MUTED}>読み込み中…</div>}
+        {projects !== null && projects.length === 0 && (
+          <div style={MUTED}>
+            プロジェクトが登録されていません。「+
+            新規プロジェクト」または「既存を読み込む」から開始してください。
+          </div>
+        )}
 
-      <ul style={LIST}>
-        {(projects ?? []).map((p) => (
-          <li key={p.id} style={ITEM}>
-            <div style={ITEM_MAIN}>
-              <Link href={`/projects/${encodeURIComponent(p.id)}`} style={LINK_TITLE}>
-                {p.name}
-              </Link>
-              {p.description && <div style={DESC}>{p.description}</div>}
-              <div style={DIR}>{p.projectDir}</div>
-              <div style={CB_SUMMARY}>
-                codebases:{' '}
-                {p.codebases.length === 0 ? '未設定' : p.codebases.map((c) => c.id).join(', ')}
+        <ul style={LIST}>
+          {(projects ?? []).map((p) => (
+            <li key={p.id} style={ITEM}>
+              <div style={ITEM_MAIN}>
+                <Link href={`/projects/${encodeURIComponent(p.id)}`} style={LINK_TITLE}>
+                  {p.name}
+                </Link>
+                {p.description && <div style={DESC}>{p.description}</div>}
+                <div style={DIR}>{p.projectDir}</div>
+                <div style={CB_SUMMARY}>
+                  codebases:{' '}
+                  {p.codebases.length === 0 ? '未設定' : p.codebases.map((c) => c.id).join(', ')}
+                </div>
               </div>
-            </div>
-            <div style={ITEM_ACTIONS}>
-              <button type="button" onClick={() => void onUnregister(p.id)} style={LINK}>
-                レジストリから外す
-              </button>
-            </div>
-          </li>
-        ))}
-      </ul>
+              <div style={ITEM_ACTIONS}>
+                <button type="button" onClick={() => void onUnregister(p.id)} style={LINK}>
+                  レジストリから外す
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </div>
 
       <NewProjectDialog
         open={showNew}
@@ -104,7 +106,18 @@ export default function Page() {
   );
 }
 
-const MAIN = { padding: 24, maxWidth: 960, margin: '0 auto', color: '#e6edf3' };
+const MAIN: React.CSSProperties = {
+  minHeight: '100vh',
+  background: '#0d1117',
+  color: '#e6edf3',
+  fontFamily:
+    "system-ui, -apple-system, 'Segoe UI', 'Hiragino Sans', 'Yu Gothic UI', sans-serif",
+  padding: 24,
+};
+const CONTAINER: React.CSSProperties = {
+  maxWidth: 960,
+  margin: '0 auto',
+};
 const HEADER: React.CSSProperties = {
   display: 'flex',
   justifyContent: 'space-between',
