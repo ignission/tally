@@ -5,7 +5,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { YamlValidationError, atomicWriteFile, readYaml, writeYaml } from './yaml';
+import { atomicWriteFile, readYaml, writeYaml, YamlValidationError } from './yaml';
 
 async function mkTmp(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'tally-yaml-test-'));

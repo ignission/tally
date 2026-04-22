@@ -28,7 +28,7 @@ import {
   updateEdge as updateEdgeApi,
   updateNode as updateNodeApi,
 } from './api';
-import { type LayoutDirection, type LayoutedPosition, computeLayout } from './layout';
+import { computeLayout, type LayoutDirection, type LayoutedPosition } from './layout';
 import { type ChatHandle, openChat, startAgent } from './ws';
 
 export type Selected = { kind: 'node'; id: string } | { kind: 'edge'; id: string } | null;

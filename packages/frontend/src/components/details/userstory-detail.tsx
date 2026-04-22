@@ -1,9 +1,8 @@
 'use client';
 
+import type { UserStoryNode, UserStoryTask } from '@tally/core';
 import { nanoid } from 'nanoid';
 import { useId, useState } from 'react';
-
-import type { UserStoryNode, UserStoryTask } from '@tally/core';
 
 import { AnalyzeImpactButton } from '@/components/ai-actions/analyze-impact-button';
 import { ExtractQuestionsButton } from '@/components/ai-actions/extract-questions-button';

@@ -1,6 +1,5 @@
-import dagre from 'dagre';
-
 import type { Edge, Node } from '@tally/core';
+import dagre from 'dagre';
 
 // dagre 用の既定ノードサイズ。NodeCard の width=260 に合わせ、高さは本文込みの平均値。
 // 実寸とズレても衝突回避の余白として機能する。

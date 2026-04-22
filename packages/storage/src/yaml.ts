@@ -3,15 +3,15 @@ import path from 'node:path';
 
 import {
   type Document,
-  type YAMLMap,
-  type YAMLSeq,
-  type Node as YamlNode,
   isMap,
   isPair,
   isScalar,
   isSeq,
   parseDocument,
   stringify,
+  type YAMLMap,
+  type YAMLSeq,
+  type Node as YamlNode,
 } from 'yaml';
 import type { z } from 'zod';
 

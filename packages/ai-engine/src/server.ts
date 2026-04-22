@@ -1,11 +1,10 @@
-import { AGENT_NAMES } from '@tally/core';
 import type { AgentName } from '@tally/core';
+import { AGENT_NAMES } from '@tally/core';
 import { FileSystemChatStore, FileSystemProjectStore, listProjects } from '@tally/storage';
 import { type WebSocket, WebSocketServer } from 'ws';
 import { z } from 'zod';
-
-import { runAgent } from './agent-runner';
 import type { SdkLike } from './agent-runner';
+import { runAgent } from './agent-runner';
 import { ChatRunner } from './chat-runner';
 import type { AgentEvent, ChatEvent } from './stream';
 

@@ -144,7 +144,6 @@ export class ChatRunner {
         });
 
         for await (const msg of iter) {
-          // biome-ignore lint/suspicious/noConsole: debug trace (Phase 6 MVP、本番では一旦残す)
           console.log('[chat-runner] sdk msg:', JSON.stringify(msg).slice(0, 200));
           const blocks = extractAssistantBlocks(msg);
           for (const b of blocks) {

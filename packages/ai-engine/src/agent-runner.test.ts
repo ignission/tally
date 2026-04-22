@@ -6,7 +6,7 @@ import type { UseCaseNode } from '@tally/core';
 import { FileSystemProjectStore, type ProjectStore } from '@tally/storage';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { type SdkLike, runAgent } from './agent-runner';
+import { runAgent, type SdkLike } from './agent-runner';
 import type { AgentEvent, SdkMessageLike } from './stream';
 
 describe('runAgent', () => {

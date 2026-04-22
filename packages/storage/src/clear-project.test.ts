@@ -1,5 +1,4 @@
-import { promises as fs } from 'node:fs';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { promises as fs, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 

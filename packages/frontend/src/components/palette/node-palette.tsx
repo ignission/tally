@@ -1,7 +1,7 @@
 'use client';
 
-import { NODE_META, NODE_TYPES } from '@tally/core';
 import type { NodeType } from '@tally/core';
+import { NODE_META, NODE_TYPES } from '@tally/core';
 
 import { useCanvasStore } from '@/lib/store';
 

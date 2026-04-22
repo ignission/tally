@@ -238,7 +238,7 @@ describe('useCanvasStore', () => {
       ];
       vi.resetModules();
       vi.doMock('./ws', () => ({
-        startAgent: (opts: { agent: string }) => ({
+        startAgent: (_opts: { agent: string }) => ({
           events: (async function* () {
             for (const e of events) yield e;
           })(),
@@ -295,7 +295,7 @@ describe('useCanvasStore', () => {
       ];
       vi.resetModules();
       vi.doMock('./ws', () => ({
-        startAgent: (opts: { agent: string }) => ({
+        startAgent: (_opts: { agent: string }) => ({
           events: (async function* () {
             for (const e of events) yield e;
           })(),
@@ -358,7 +358,7 @@ describe('useCanvasStore', () => {
       ];
       vi.resetModules();
       vi.doMock('./ws', () => ({
-        startAgent: (opts: { agent: string }) => ({
+        startAgent: (_opts: { agent: string }) => ({
           events: (async function* () {
             for (const e of events) yield e;
           })(),

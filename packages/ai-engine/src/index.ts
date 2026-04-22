@@ -5,10 +5,10 @@ import { loadConfig } from './config';
 import { startServer } from './server';
 
 export const PACKAGE_NAME = '@tally/ai-engine';
+export type { ChatRunnerDeps } from './chat-runner';
+export { ChatRunner } from './chat-runner';
 export { loadConfig } from './config';
 export { startServer } from './server';
-export { ChatRunner } from './chat-runner';
-export type { ChatRunnerDeps } from './chat-runner';
 export type { AgentEvent, ChatEvent } from './stream';
 
 // tsx で直接呼ばれたときだけ起動する (vitest などで import されたときは起動しない)。

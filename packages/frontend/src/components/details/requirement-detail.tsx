@@ -1,14 +1,14 @@
 'use client';
 
-import { useId } from 'react';
-
-import { QUALITY_CATEGORIES, REQUIREMENT_KINDS, REQUIREMENT_PRIORITIES } from '@tally/core';
 import type {
   QualityCategory,
   RequirementKind,
   RequirementNode,
   RequirementPriority,
 } from '@tally/core';
+
+import { QUALITY_CATEGORIES, REQUIREMENT_KINDS, REQUIREMENT_PRIORITIES } from '@tally/core';
+import { useId } from 'react';
 
 import { AnalyzeImpactButton } from '@/components/ai-actions/analyze-impact-button';
 import { ExtractQuestionsButton } from '@/components/ai-actions/extract-questions-button';

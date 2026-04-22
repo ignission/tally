@@ -1,5 +1,5 @@
-import { EDGE_META } from '@tally/core';
 import type { Edge, EdgeType, Node, NodeType } from '@tally/core';
+import { EDGE_META } from '@tally/core';
 
 // グラフを Mermaid flowchart 構文へ変換する。
 // Slack/Notion/Confluence などに貼り付ければ静的な図として共有できる。

@@ -1,15 +1,14 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-
+import type { AdoptableType, Edge, Node, NodeType, Project, ProjectMeta } from '@tally/core';
 import {
   EdgeSchema,
   NodeSchema,
-  ProjectMetaSchema,
   newEdgeId,
   newNodeId,
+  ProjectMetaSchema,
   stripAiPrefix,
 } from '@tally/core';
-import type { AdoptableType, Edge, Node, NodeType, Project, ProjectMeta } from '@tally/core';
 import { z } from 'zod';
 
 import { nodeFileName, resolveProjectPaths } from './project-dir';

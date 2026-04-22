@@ -1,6 +1,5 @@
-import { describe, expect, it } from 'vitest';
-
 import type { Edge, Node } from '@tally/core';
+import { describe, expect, it } from 'vitest';
 
 import { buildMermaid } from './mermaid';
 

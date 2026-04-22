@@ -123,9 +123,7 @@ describe('FolderBrowserDialog', () => {
         onClose={() => {}}
       />,
     );
-    expect(
-      await screen.findByText(/このフォルダにサブフォルダはありません/),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/このフォルダにサブフォルダはありません/)).toBeInTheDocument();
   });
 
   it('エントリをクリックすると潜る', async () => {
