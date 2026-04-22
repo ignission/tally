@@ -33,7 +33,8 @@ describe('WS /agent', () => {
   });
 
   afterEach(async () => {
-    process.env.TALLY_HOME = prevTallyHome;
+    if (prevTallyHome === undefined) delete process.env.TALLY_HOME;
+    else process.env.TALLY_HOME = prevTallyHome;
     if (close) await close();
     close = null;
     await fs.rm(root, { recursive: true, force: true });
@@ -164,7 +165,8 @@ describe('WS /chat', () => {
   });
 
   afterEach(async () => {
-    process.env.TALLY_HOME = prevTallyHome;
+    if (prevTallyHome === undefined) delete process.env.TALLY_HOME;
+    else process.env.TALLY_HOME = prevTallyHome;
     if (close) await close();
     close = null;
     await fs.rm(root, { recursive: true, force: true });

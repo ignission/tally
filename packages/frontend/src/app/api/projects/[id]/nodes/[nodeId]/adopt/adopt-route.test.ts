@@ -31,7 +31,8 @@ describe('POST /api/projects/[id]/nodes/[nodeId]/adopt', () => {
   });
 
   afterEach(async () => {
-    process.env.TALLY_HOME = prevHome;
+    if (prevHome === undefined) delete process.env.TALLY_HOME;
+    else process.env.TALLY_HOME = prevHome;
     await fs.rm(home, { recursive: true, force: true });
     await fs.rm(projectDir, { recursive: true, force: true });
   });

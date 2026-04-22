@@ -14,9 +14,13 @@ import {
 } from './registry';
 
 describe('resolveTallyHome', () => {
-  const orig = { ...process.env };
+  const prevTallyHome = process.env.TALLY_HOME;
+  const prevXdgDataHome = process.env.XDG_DATA_HOME;
   afterEach(() => {
-    process.env = { ...orig };
+    if (prevTallyHome === undefined) delete process.env.TALLY_HOME;
+    else process.env.TALLY_HOME = prevTallyHome;
+    if (prevXdgDataHome === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = prevXdgDataHome;
   });
 
   it('TALLY_HOME が最優先', () => {
@@ -39,7 +43,7 @@ describe('resolveTallyHome', () => {
 
 describe('registry load/save', () => {
   let dir: string;
-  const orig = { ...process.env };
+  const prevHome = process.env.TALLY_HOME;
 
   beforeEach(async () => {
     dir = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-reg-'));
@@ -47,7 +51,8 @@ describe('registry load/save', () => {
   });
 
   afterEach(async () => {
-    process.env = { ...orig };
+    if (prevHome === undefined) delete process.env.TALLY_HOME;
+    else process.env.TALLY_HOME = prevHome;
     await fs.rm(dir, { recursive: true, force: true });
   });
 
@@ -78,14 +83,15 @@ describe('registry load/save', () => {
 
 describe('registry CRUD', () => {
   let dir: string;
-  const orig = { ...process.env };
+  const prevHome = process.env.TALLY_HOME;
 
   beforeEach(async () => {
     dir = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-reg-'));
     process.env.TALLY_HOME = dir;
   });
   afterEach(async () => {
-    process.env = { ...orig };
+    if (prevHome === undefined) delete process.env.TALLY_HOME;
+    else process.env.TALLY_HOME = prevHome;
     await fs.rm(dir, { recursive: true, force: true });
   });
 

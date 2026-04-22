@@ -5,14 +5,15 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { GET } from './route';
 
 let home: string;
-const orig = { ...process.env };
+const prevHome = process.env.TALLY_HOME;
 
 beforeEach(async () => {
   home = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-dp-'));
   process.env.TALLY_HOME = home;
 });
 afterEach(async () => {
-  process.env = { ...orig };
+  if (prevHome === undefined) delete process.env.TALLY_HOME;
+  else process.env.TALLY_HOME = prevHome;
   await fs.rm(home, { recursive: true, force: true });
 });
 

@@ -32,7 +32,8 @@ describe('POST /api/projects/[id]/nodes', () => {
   });
 
   afterEach(async () => {
-    process.env.TALLY_HOME = prevHome;
+    if (prevHome === undefined) delete process.env.TALLY_HOME;
+    else process.env.TALLY_HOME = prevHome;
     await fs.rm(home, { recursive: true, force: true });
     await fs.rm(projectDir, { recursive: true, force: true });
   });
@@ -101,7 +102,8 @@ describe('PATCH /api/projects/[id]/nodes/[nodeId]', () => {
   });
 
   afterEach(async () => {
-    process.env.TALLY_HOME = prevHome;
+    if (prevHome === undefined) delete process.env.TALLY_HOME;
+    else process.env.TALLY_HOME = prevHome;
     await fs.rm(home, { recursive: true, force: true });
     await fs.rm(projectDir, { recursive: true, force: true });
   });
@@ -203,7 +205,8 @@ describe('DELETE /api/projects/[id]/nodes/[nodeId]', () => {
   });
 
   afterEach(async () => {
-    process.env.TALLY_HOME = prevHome;
+    if (prevHome === undefined) delete process.env.TALLY_HOME;
+    else process.env.TALLY_HOME = prevHome;
     await fs.rm(home, { recursive: true, force: true });
     await fs.rm(projectDir, { recursive: true, force: true });
   });

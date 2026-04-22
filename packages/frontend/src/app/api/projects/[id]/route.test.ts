@@ -10,7 +10,7 @@ import { GET, PATCH } from './route';
 let home: string;
 let ws: string;
 let projectId: string;
-const orig = { ...process.env };
+const prevHome = process.env.TALLY_HOME;
 
 beforeEach(async () => {
   home = await fs.mkdtemp(path.join(os.tmpdir(), 'tally-home-'));
@@ -25,7 +25,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  process.env = { ...orig };
+  if (prevHome === undefined) delete process.env.TALLY_HOME;
+  else process.env.TALLY_HOME = prevHome;
   await fs.rm(home, { recursive: true, force: true });
   await fs.rm(ws, { recursive: true, force: true });
 });

@@ -32,7 +32,8 @@ describe('/api/projects/[id]/chats', () => {
     await registerProject({ id: 'proj-1', path: projectDir });
   });
   afterEach(async () => {
-    process.env.TALLY_HOME = prev;
+    if (prev === undefined) delete process.env.TALLY_HOME;
+    else process.env.TALLY_HOME = prev;
     await fs.rm(home, { recursive: true, force: true });
     await fs.rm(projectDir, { recursive: true, force: true });
   });
