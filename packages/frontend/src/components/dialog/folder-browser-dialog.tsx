@@ -102,15 +102,25 @@ export function FolderBrowserDialog(props: FolderBrowserDialogProps) {
           </div>
         )}
         <ul style={LIST_STYLE}>
-          {visibleEntries.map((e) => (
-            <li key={e.path} style={LIST_ITEM_STYLE}>
-              <button type="button" onClick={() => void load(e.path)} style={ENTRY_BUTTON_STYLE}>
-                <span aria-hidden="true">📁</span>
-                {e.name}
-                {e.hasProjectYaml && <span style={BADGE_STYLE}>project.yaml あり</span>}
-              </button>
+          {visibleEntries.length === 0 ? (
+            <li style={EMPTY_STATE_STYLE}>
+              {listing === null
+                ? '読み込み中…'
+                : (listing.entries.length ?? 0) > 0
+                  ? '隠しフォルダのみ（上の「隠しフォルダを表示」で表示）'
+                  : 'このフォルダにサブフォルダはありません（「↑ 親」で戻る）'}
             </li>
-          ))}
+          ) : (
+            visibleEntries.map((e) => (
+              <li key={e.path} style={LIST_ITEM_STYLE}>
+                <button type="button" onClick={() => void load(e.path)} style={ENTRY_BUTTON_STYLE}>
+                  <span aria-hidden="true">📁</span>
+                  {e.name}
+                  {e.hasProjectYaml && <span style={BADGE_STYLE}>project.yaml あり</span>}
+                </button>
+              </li>
+            ))
+          )}
         </ul>
         <label style={LABEL_STYLE}>
           <input
@@ -134,6 +144,12 @@ export function FolderBrowserDialog(props: FolderBrowserDialogProps) {
             + 新規フォルダ
           </button>
         </div>
+        {props.purpose === 'import-project' && listing && !listing.containsProjectYaml && (
+          <div style={HINT_STYLE}>
+            このフォルダは Tally プロジェクトではありません（project.yaml
+            が無い）。project.yaml を含むフォルダを選んでください。
+          </div>
+        )}
         <div style={FOOTER_STYLE}>
           <button type="button" onClick={props.onClose} style={CANCEL_BUTTON_STYLE}>
             キャンセル
@@ -142,7 +158,7 @@ export function FolderBrowserDialog(props: FolderBrowserDialogProps) {
             type="button"
             disabled={confirmDisabled}
             onClick={onConfirmClick}
-            style={PRIMARY_BUTTON_STYLE}
+            style={confirmDisabled ? PRIMARY_BUTTON_DISABLED_STYLE : PRIMARY_BUTTON_STYLE}
           >
             選択
           </button>
@@ -216,6 +232,13 @@ const LIST_STYLE = {
 
 const LIST_ITEM_STYLE = { margin: 0 };
 
+const EMPTY_STATE_STYLE = {
+  padding: '12px 8px',
+  fontSize: 12,
+  color: '#8b949e',
+  textAlign: 'center' as const,
+};
+
 const ENTRY_BUTTON_STYLE = {
   background: 'transparent',
   border: '1px solid transparent',
@@ -268,6 +291,17 @@ const PRIMARY_BUTTON_STYLE = {
   background: '#238636',
   border: '1px solid #2ea043',
   color: '#fff',
+};
+const PRIMARY_BUTTON_DISABLED_STYLE = {
+  ...PRIMARY_BUTTON_STYLE,
+  opacity: 0.45,
+  cursor: 'not-allowed',
+};
+
+const HINT_STYLE = {
+  fontSize: 11,
+  color: '#8b949e',
+  padding: '4px 2px',
 };
 
 const ERROR_STYLE = {
