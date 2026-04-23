@@ -89,10 +89,11 @@
     // CI/CDワークフローの依存関係管理ルール
     // =======================================================
 
-    // GitHub Actions マイナー・パッチ: グループ化して自動マージ
+    // GitHub Actions マイナー・パッチ・digest: グループ化して自動マージ
+    // digest は SHA 固定された actions (例: actions/checkout@<SHA> # v6.0.0) の更新を捕捉するため必須
     {
       "matchManagers": ["github-actions"],
-      "matchUpdateTypes": ["minor", "patch"],
+      "matchUpdateTypes": ["minor", "patch", "digest"],
       "groupName": "github-actions",
       "automerge": true,
       "addLabels": ["github-actions"]

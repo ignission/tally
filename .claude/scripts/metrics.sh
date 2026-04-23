@@ -33,12 +33,14 @@ echo ""
 
 # --- CI失敗率 ---
 echo "## CI失敗率"
-CI_JSON=$(gh run list --repo "$REPO" --limit 50 --json conclusion 2>/dev/null)
+# --created で指定期間内に絞り、完了 run のみを分母にする
+CI_JSON=$(gh run list --repo "$REPO" --created ">=${SINCE}T00:00:00Z" --limit 50 --json conclusion 2>/dev/null)
 if [ -n "$CI_JSON" ]; then
-  TOTAL_RUNS=$(echo "$CI_JSON" | jq 'length')
-  FAILED_RUNS=$(echo "$CI_JSON" | jq '[.[] | select(.conclusion == "failure")] | length')
-  SUCCESS_RUNS=$(echo "$CI_JSON" | jq '[.[] | select(.conclusion == "success")] | length')
-  echo "  直近50回: 成功 ${SUCCESS_RUNS} / 失敗 ${FAILED_RUNS} / 合計 ${TOTAL_RUNS}"
+  COMPLETED_RUNS=$(echo "$CI_JSON" | jq '[.[] | select(.conclusion != null and .conclusion != "")]')
+  TOTAL_RUNS=$(echo "$COMPLETED_RUNS" | jq 'length')
+  FAILED_RUNS=$(echo "$COMPLETED_RUNS" | jq '[.[] | select(.conclusion != "success" and .conclusion != "skipped")] | length')
+  SUCCESS_RUNS=$(echo "$COMPLETED_RUNS" | jq '[.[] | select(.conclusion == "success")] | length')
+  echo "  過去${DAYS}日 (完了 run のみ): 成功 ${SUCCESS_RUNS} / 失敗 ${FAILED_RUNS} / 合計 ${TOTAL_RUNS}"
   if [ "$TOTAL_RUNS" -gt 0 ]; then
     RATE=$(awk "BEGIN {printf \"%.1f\", $FAILED_RUNS * 100 / $TOTAL_RUNS}" 2>/dev/null) || RATE="計算失敗"
     echo "  失敗率: ${RATE}%"
@@ -52,12 +54,21 @@ echo ""
 echo "## CodeRabbit指摘（直近マージ済み10PR）"
 TOTAL_CR_COMMENTS=0
 PR_WITH_COMMENTS=0
+CR_FETCH_FAILURES=0
 MERGED_PR_NUMBERS=$(gh pr list --repo "$REPO" --state merged --search "merged:>=${SINCE}" --json number --jq '.[].number' --limit 10 2>/dev/null)
 if [ -n "$MERGED_PR_NUMBERS" ]; then
   for pr in $MERGED_PR_NUMBERS; do
-    # 変数代入自体は常に成功するため、|| でのフォールバックは機能しない。空チェックで対応
-    CR_COUNT=$(gh api "repos/${REPO}/pulls/${pr}/comments" --jq '[.[] | select(.user.login == "coderabbitai[bot]")] | length' 2>/dev/null)
-    [ -z "$CR_COUNT" ] && CR_COUNT=0
+    # --paginate で全ページ取得、失敗/非数値は skip してカウントから除外する
+    if ! CR_COUNT=$(gh api --paginate --slurp "repos/${REPO}/pulls/${pr}/comments" --jq 'map(.[] | select(.user.login == "coderabbitai[bot]")) | length' 2>/dev/null); then
+      echo "  PR #${pr}: CodeRabbit指摘の取得に失敗しました" >&2
+      CR_FETCH_FAILURES=$((CR_FETCH_FAILURES + 1))
+      continue
+    fi
+    if ! [[ "$CR_COUNT" =~ ^[0-9]+$ ]]; then
+      echo "  PR #${pr}: CodeRabbit指摘数の解析に失敗しました" >&2
+      CR_FETCH_FAILURES=$((CR_FETCH_FAILURES + 1))
+      continue
+    fi
     if [ "$CR_COUNT" -gt 0 ]; then
       echo "  PR #${pr}: ${CR_COUNT}件の指摘"
       TOTAL_CR_COMMENTS=$((TOTAL_CR_COMMENTS + CR_COUNT))
@@ -65,6 +76,7 @@ if [ -n "$MERGED_PR_NUMBERS" ]; then
     fi
   done
   echo "  合計: ${TOTAL_CR_COMMENTS}件（直近10PR中${PR_WITH_COMMENTS}PRに指摘あり）"
+  [ "$CR_FETCH_FAILURES" -gt 0 ] && echo "  取得失敗: ${CR_FETCH_FAILURES}PR" >&2
 else
   echo "  マージ済みPRの取得に失敗しました"
 fi

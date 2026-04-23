@@ -55,7 +55,7 @@ git fetch --prune
 リモートが削除されたローカルブランチを検出して削除:
 
 ```bash
-git branch -vv | grep '\[origin/.*: gone\]' | awk '{print $$1}' | xargs -r git branch -d
+git branch -vv | grep '\[origin/.*: gone\]' | awk '{print $1}' | xargs -r git branch -d
 ```
 
 `-d` は未マージブランチを拒否するため誤削除を防げる。強制削除が必要な場合はユーザーに確認すること。

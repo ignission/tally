@@ -38,8 +38,13 @@ Codexのレビュー結果を **必ずテーブル形式** で統合する。リ
 
 ## 完了時
 
-レビュー結果の報告後、フラグファイルを作成すること:
+レビュー結果の報告後、フラグファイルに **現在の HEAD SHA を書き込む** こと:
+
 ```bash
-touch "$(git rev-parse --git-dir)/claude-pre-push-review-done"
+git rev-parse HEAD | tee "$(git rev-parse --git-dir)/claude-pre-push-review-done"
 ```
-このフラグファイルにより、後続のPR作成hookが実行を許可する。
+
+フラグファイルには HEAD SHA が記録され、後続の PR 作成 hook がこの SHA と現在の HEAD の
+一致を検証する。一致しない（= review 後に新しいコミットが追加された）場合は再レビューが必要。
+
+単なる `touch` での空ファイル作成は pre-bash-guard でブロックされる（レビュー偽造防止）。

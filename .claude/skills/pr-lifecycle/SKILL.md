@@ -68,7 +68,7 @@ gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" \
 - CIが全てグリーンであること
 - CodeRabbitの未解決指摘がないこと
 
-**CodeRabbitのstatusがerrorの場合は処理中の可能性があるため、監視を継続すること。**
+**CodeRabbit status が error/failure の場合は API 失敗とみなして停止・報告すること** (hook `check-ci-coderabbit.sh` と整合)。
 
 どちらかが満たされていない場合はステップ2-3に戻る。
 
@@ -98,5 +98,5 @@ gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" \
 - **`resolveReviewThread` でresolveしない**: resolveはユーザーが判断する
 - **CodeRabbit指摘への「次回対応」返信は禁止**: このPRで対応するか、対応しない場合はGitHub Issueを作成してから返信する
 - **git pushはフォアグラウンドで実行する**: バックグラウンドだとコメント返信が先行してしまう
-- **CodeRabbit statusがerrorの場合は監視継続**: CI成功でもCodeRabbitが処理中なら停止しない
+- **CodeRabbit status が error の場合は停止**: hook `check-ci-coderabbit.sh` が `stop_monitoring_failure` を返すため、SKILL も同じく停止して API エラーをユーザーに報告する
 - **セルフレビュー禁止**: コードレビューは全て `/codex review`（Codex CLI）に委任すること

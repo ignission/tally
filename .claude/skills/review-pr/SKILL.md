@@ -7,10 +7,10 @@ allowed-tools: Bash, Read, Grep
 ## 手順
 
 1. `gh pr view --json number,url` で現在のブランチのPR番号を取得する
-2. 以下のコマンドでPRのレビューコメントとコメントを全て取得する:
-   - `gh api repos/ignission/claude-code-ark/pulls/{PR番号}/reviews` — レビュー本文
-   - `gh api repos/ignission/claude-code-ark/pulls/{PR番号}/comments` — インラインレビューコメント
-   - `gh api repos/ignission/claude-code-ark/issues/{PR番号}/comments` — 一般コメント（CodeRabbit等）
+2. 以下のコマンドでPRのレビューコメントとコメントを全て取得する (`REPO=$(gh repo view --json nameWithOwner -q '.nameWithOwner')` で動的取得):
+   - `gh api repos/$REPO/pulls/{PR番号}/reviews` — レビュー本文
+   - `gh api repos/$REPO/pulls/{PR番号}/comments` — インラインレビューコメント
+   - `gh api repos/$REPO/issues/{PR番号}/comments` — 一般コメント（CodeRabbit等）
 3. bot（CodeRabbit等）と人間のレビューを分類する
 4. 各指摘を以下の形式でリスト化する:
    - 指摘元（CodeRabbit / レビュアー名）

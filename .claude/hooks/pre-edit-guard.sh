@@ -3,7 +3,12 @@
 # エージェントがリンター設定を変更してルールを回避するのを防ぐ
 
 input="$(cat)"
-file="$(echo "$input" | jq -r '.tool_input.file_path // .tool_input.path // empty' 2>/dev/null)" || exit 0
+file="$(echo "$input" | jq -r '.tool_input.file_path // .tool_input.path // empty' 2>/dev/null)"
+jq_exit=$?
+if [ $jq_exit -ne 0 ]; then
+  echo "BLOCKED: pre-edit-guard の入力解析に失敗しました（fail-closed）" >&2
+  exit 2
+fi
 
 # ファイルパスが空なら通過
 [ -z "$file" ] && exit 0

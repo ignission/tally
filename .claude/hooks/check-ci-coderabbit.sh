@@ -37,9 +37,22 @@ if [[ -z "$CURRENT_BRANCH" ]]; then
   exit 1
 fi
 
-# === 1. CI状態チェック ===
+# === HEAD SHA 取得 (CI/CodeRabbit 両方で使用) ===
 
-if ! CI_RAW=$(gh run list --branch "$CURRENT_BRANCH" --limit 3 --json name,conclusion 2>/dev/null) || [[ -z "$CI_RAW" ]]; then
+if ! HEAD_SHA=$(gh pr view --json headRefOid -q '.headRefOid' 2>/dev/null) || [[ -z "$HEAD_SHA" ]]; then
+  HEAD_SHA=""
+fi
+
+# === 1. CI状態チェック ===
+# --commit で HEAD SHA に対応する run のみ取得 (古い run を誤って success 判定しない)
+
+if [[ -n "$HEAD_SHA" ]]; then
+  CI_RUN_FILTER=(--commit "$HEAD_SHA")
+else
+  CI_RUN_FILTER=(--branch "$CURRENT_BRANCH")
+fi
+
+if ! CI_RAW=$(gh run list "${CI_RUN_FILTER[@]}" --limit 3 --json name,conclusion 2>/dev/null) || [[ -z "$CI_RAW" ]]; then
   CI_STATUS="error"
   CI_DETAILS="CI情報の取得に失敗しました"
 else
@@ -55,7 +68,7 @@ fi
 
 # === 2. CodeRabbit状態チェック ===
 
-if ! HEAD_SHA=$(gh pr view --json headRefOid -q '.headRefOid' 2>/dev/null) || [[ -z "$HEAD_SHA" ]]; then
+if [[ -z "$HEAD_SHA" ]]; then
   CR_STATUS="not_found"
 else
   if ! CR_STATUS_RAW=$(gh api "repos/${REPO_INFO}/commits/${HEAD_SHA}/statuses" 2>/dev/null) || [[ -z "$CR_STATUS_RAW" ]]; then

@@ -10,24 +10,20 @@ COMMAND=$(echo "$STDIN_INPUT" | jq -r '.tool_input.command // ""' 2>/dev/null ||
 
 
 # --- pre-push-reviewフラグファイル作成のガード ---
-# コマンド文字列にフラグ名が含まれていれば検査
-# スキルの正規パターンのみ許可、それ以外は全てブロック
+# フラグファイルには HEAD SHA を書き込むのみ許可。gh pr create ガードで HEAD 一致を検証
+# 許可パターン: git rev-parse HEAD | tee "$(git rev-parse --git-dir)/claude-pre-push-review-done"
 if [[ "$COMMAND" =~ claude-pre-push-review-done ]]; then
-  # スキルの厳密なパターン: touch "$(git rev-parse --git-dir)/claude-pre-push-review-done"
-  # 5条件全て満たす場合のみ許可:
-  # (1) touchで始まる (2) git rev-parseを含む (3) コマンド連結(;|&)なし
-  # (4) コメント(#)なし (5) リダイレクト(>)なし (6) 改行なし
-  if [[ "$COMMAND" =~ ^[[:space:]]*touch[[:space:]] ]] && \
+  # スキルの正規パターンのみ許可
+  if [[ "$COMMAND" =~ ^[[:space:]]*git[[:space:]]+rev-parse[[:space:]]+HEAD[[:space:]]*\|[[:space:]]*tee[[:space:]] ]] && \
      [[ "$COMMAND" =~ git[[:space:]]+rev-parse[[:space:]]+--git-dir ]] && \
-     ! [[ "$COMMAND" =~ [\;\|\&] ]] && \
+     ! [[ "$COMMAND" =~ [\;\&] ]] && \
      ! [[ "$COMMAND" =~ \# ]] && \
-     ! [[ "$COMMAND" =~ \> ]] && \
      ! [[ "$COMMAND" =~ $'\n' ]]; then
     exit 0
   fi
   echo "BLOCKED: pre-push-reviewフラグファイルの手動作成は禁止されています" >&2
   echo "  WHY: /pre-push-review スキルを実行せずにPR作成ガードをバイパスするのを防止" >&2
-  echo "  FIX: /pre-push-review を実行してください。スキルが完了時にフラグを自動作成します" >&2
+  echo "  FIX: /pre-push-review スキル完了時にのみフラグが作成されます" >&2
   exit 2
 fi
 
@@ -133,6 +129,18 @@ fi
 
 # --- git push ガード: ソースコード変更時のCIチェック ---
 if [[ "$COMMAND" =~ ^[[:space:]]*git[[:space:]]+(.+[[:space:]]+)?push([[:space:]]|$) ]]; then
+  # 連結コマンド (&&, ||, ;) で git push の後ろにガード対象コマンドが続く場合、
+  # 後続チェックをバイパスしてしまうため事前にブロックする
+  if [[ "$COMMAND" =~ (\&\&|\|\||;) ]]; then
+    if [[ "$COMMAND" =~ gh[[:space:]]+(-R[[:space:]]+[^[:space:]]+[[:space:]]+)?pr[[:space:]]+(create|comment|review) ]] || \
+       [[ "$COMMAND" =~ gh[[:space:]]+issue[[:space:]]+comment ]] || \
+       [[ "$COMMAND" =~ gh[[:space:]]+api.*\/(issues|pulls|comments) ]]; then
+      echo "BLOCKED: git push と gh pr/issue 操作の連結は禁止です" >&2
+      echo "  WHY: 連結するとPR作成/コメントガードがバイパスされる" >&2
+      echo "  FIX: git push を実行後、別コマンドで gh pr create/comment を実行してください" >&2
+      exit 2
+    fi
+  fi
   PROJECT_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
   LOG=""
 
@@ -174,13 +182,23 @@ if [[ "$COMMAND" =~ ^[[:space:]]*git[[:space:]]+(.+[[:space:]]+)?push([[:space:]
 fi
 
 # --- gh pr create ガード: pre-push-review 実行済み確認 ---
+# フラグファイルの SHA が現在の HEAD と一致し、かつ 30 分以内に作成された場合のみ許可
 if [[ "$COMMAND" =~ ^[[:space:]]*gh[[:space:]]+pr[[:space:]]+create([[:space:]]|$) ]]; then
   FLAG_FILE="$(git rev-parse --git-dir)/claude-pre-push-review-done"
+  CURRENT_HEAD=$(git rev-parse HEAD 2>/dev/null) || CURRENT_HEAD=""
 
-  if [ -f "$FLAG_FILE" ]; then
+  if [ -f "$FLAG_FILE" ] && [ -n "$CURRENT_HEAD" ]; then
     if find "$FLAG_FILE" -mmin -30 | grep -q .; then
-      rm -f "$FLAG_FILE"
-      exit 0
+      FLAG_SHA=$(head -1 "$FLAG_FILE" 2>/dev/null | tr -d "[:space:]") || FLAG_SHA=""
+      if [ "$FLAG_SHA" = "$CURRENT_HEAD" ]; then
+        rm -f "$FLAG_FILE"
+        exit 0
+      else
+        echo "BLOCKED: pre-push-review フラグの SHA が現在の HEAD と一致しません" >&2
+        echo "  WHY: フラグ作成後に新しいコミットが追加されているため、レビュー結果が古い" >&2
+        echo "  FIX: /pre-push-review を再実行してから PR を作成してください" >&2
+        exit 2
+      fi
     fi
   fi
 
@@ -298,20 +316,31 @@ if $IS_PR_COMMENT; then
   COMMENT_TEXT="$COMMAND"
   # 安全なパス文字のみ許可（$()バックティック等の二重評価を防止）
   _safe_path() { [[ "$1" =~ ^[a-zA-Z0-9_./~-]+$ ]]; }
+  # 外部ボディソースは事前検査成功時のみ許可。読めない場合は fail closed
   if [[ "$COMMAND" =~ --body-file[=[:space:]]([^[:space:]]+) ]]; then
     BODY_FILE="$(_normalize_shell_token "${BASH_REMATCH[1]}")"
-    if _safe_path "$BODY_FILE" && [[ -f "$BODY_FILE" ]]; then
-      COMMENT_TEXT="$(cat "$BODY_FILE")"
+    if ! _safe_path "$BODY_FILE" || [[ "$BODY_FILE" == "-" ]] || [[ ! -f "$BODY_FILE" ]]; then
+      echo "BLOCKED: コメント本文ファイルを事前検査できません (${BODY_FILE})" >&2
+      echo "  FIX: 英数字のみのパスで --body-file <path> を指定してください" >&2
+      exit 2
     fi
+    COMMENT_TEXT="$(cat "$BODY_FILE")"
   elif [[ "$COMMAND" =~ (-f|-F|--field|--raw-field)[[:space:]]*body=@([^[:space:]]+) ]]; then
     BODY_FILE="$(_normalize_shell_token "${BASH_REMATCH[2]}")"
-    if _safe_path "$BODY_FILE" && [[ -f "$BODY_FILE" ]]; then
-      COMMENT_TEXT="$(cat "$BODY_FILE")"
+    if ! _safe_path "$BODY_FILE" || [[ "$BODY_FILE" == "-" ]] || [[ ! -f "$BODY_FILE" ]]; then
+      echo "BLOCKED: コメント本文ファイルを事前検査できません (${BODY_FILE})" >&2
+      exit 2
     fi
+    COMMENT_TEXT="$(cat "$BODY_FILE")"
   elif [[ "$COMMAND" =~ --input[=[:space:]]([^[:space:]]+) ]] && [[ "${BASH_REMATCH[1]}" != "-" ]]; then
     INPUT_FILE="$(_normalize_shell_token "${BASH_REMATCH[1]}")"
-    if _safe_path "$INPUT_FILE" && [[ -f "$INPUT_FILE" ]]; then
-      COMMENT_TEXT="$(jq -r '.. | objects | .body? // empty' "$INPUT_FILE" 2>/dev/null)"
+    if ! _safe_path "$INPUT_FILE" || [[ ! -f "$INPUT_FILE" ]]; then
+      echo "BLOCKED: input ファイルを事前検査できません (${INPUT_FILE})" >&2
+      exit 2
+    fi
+    if ! COMMENT_TEXT="$(jq -r '.. | objects | .body? // empty' "$INPUT_FILE" 2>/dev/null)"; then
+      echo "BLOCKED: input ファイルの JSON 解析に失敗しました" >&2
+      exit 2
     fi
   elif [[ "$COMMAND" =~ --input[=[:space:]]- ]] || [[ "$COMMAND" =~ (--editor|--web) ]]; then
     echo "BLOCKED: 本文を事前検査できないコメント投稿方法は禁止です（--editor / --input - / --web）" >&2
