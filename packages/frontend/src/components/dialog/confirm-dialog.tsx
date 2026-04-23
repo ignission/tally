@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 
-import { isImeComposing } from '@/lib/ime';
+import { isImeComposing, useWindowComposition } from '@/lib/ime';
 
 interface Props {
   open: boolean;
@@ -17,6 +17,8 @@ interface Props {
 // Escape でキャンセル、背景クリックでキャンセル、Enter でコンファーム。
 // backdrop を <button>、ダイアログ本体を <dialog> として兄弟配置し
 // a11y (Biome useSemanticElements / インタラクティブ要素のネスト禁止) を満たす。
+// window レベルで keydown を拾うため、別所で IME 変換中の Enter/Escape を
+// 誤確定しないよう useWindowComposition + isImeComposing の二重防御で弾く。
 export function ConfirmDialog({
   open,
   title,
@@ -25,16 +27,19 @@ export function ConfirmDialog({
   onConfirm,
   onClose,
 }: Props) {
+  const isComposingWindow = useWindowComposition();
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
+      // window リスナーなので、合成イベントの発火元が非フォーカス入力欄でも拾ってしまう。
+      // IME 変換中・確定直後 150ms は Enter/Escape どちらも抑止する。
+      if (isComposingWindow() || isImeComposing(e)) return;
       if (e.key === 'Escape') onClose();
-      // window レベルのリスナーなので、別の入力欄で IME 変換中の Enter を拾って誤確定しないよう除外。
-      else if (e.key === 'Enter' && !isImeComposing(e)) onConfirm();
+      else if (e.key === 'Enter') onConfirm();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose, onConfirm]);
+  }, [open, onClose, onConfirm, isComposingWindow]);
 
   if (!open) return null;
 

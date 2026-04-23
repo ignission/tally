@@ -3,6 +3,7 @@
 import type { Codebase } from '@tally/core';
 import { useEffect, useMemo, useState } from 'react';
 
+import { TextInput } from '@/components/ui/text-input';
 import { useCanvasStore } from '@/lib/store';
 import { FolderBrowserDialog } from './folder-browser-dialog';
 
@@ -82,7 +83,7 @@ export function ProjectSettingsDialog({ open, onClose }: { open: boolean; onClos
             {codebases.map((c, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: path が空の初期行でも一意にするため index を組み合わせる
               <li key={`${c.path}-${i}`} style={CB_ITEM}>
-                <input
+                <TextInput
                   type="text"
                   value={c.id}
                   onChange={(e) => {
@@ -94,7 +95,7 @@ export function ProjectSettingsDialog({ open, onClose }: { open: boolean; onClos
                   aria-label={`codebase-${i}-id`}
                   style={{ ...INPUT, width: 140 }}
                 />
-                <input
+                <TextInput
                   type="text"
                   value={c.label}
                   onChange={(e) => {

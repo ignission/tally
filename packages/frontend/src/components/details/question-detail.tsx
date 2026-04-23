@@ -4,7 +4,7 @@ import type { QuestionNode, QuestionOption } from '@tally/core';
 import { nanoid } from 'nanoid';
 import { useState } from 'react';
 
-import { isImeComposing } from '@/lib/ime';
+import { TextInput } from '@/components/ui/text-input';
 import { useCanvasStore } from '@/lib/store';
 
 export function QuestionDetail({ node }: { node: QuestionNode }) {
@@ -70,7 +70,7 @@ export function QuestionDetail({ node }: { node: QuestionNode }) {
               >
                 {isDecided ? '✓' : '○'}
               </button>
-              <input
+              <TextInput
                 defaultValue={opt.text}
                 onBlur={(e) => {
                   if (e.target.value !== opt.text) editText(opt.id, e.target.value);
@@ -89,11 +89,11 @@ export function QuestionDetail({ node }: { node: QuestionNode }) {
           );
         })}
         <li style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-          <input
+          <TextInput
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !isImeComposing(e)) addOption();
+              if (e.key === 'Enter') addOption();
             }}
             placeholder="新しい選択肢..."
             style={{ ...INPUT_STYLE, flex: 1 }}

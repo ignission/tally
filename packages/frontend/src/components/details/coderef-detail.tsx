@@ -3,6 +3,7 @@
 import type { CodeRefNode } from '@tally/core';
 import { useId } from 'react';
 
+import { TextInput } from '@/components/ui/text-input';
 import { useCanvasStore } from '@/lib/store';
 
 export function CodeRefDetail({ node }: { node: CodeRefNode }) {
@@ -20,7 +21,7 @@ export function CodeRefDetail({ node }: { node: CodeRefNode }) {
         <label htmlFor={fileId} style={LABEL}>
           ファイルパス
         </label>
-        <input
+        <TextInput
           id={fileId}
           defaultValue={node.filePath ?? ''}
           onBlur={(e) => {

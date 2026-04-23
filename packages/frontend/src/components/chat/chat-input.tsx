@@ -2,12 +2,13 @@
 
 import { useState } from 'react';
 
-import { isImeComposing } from '@/lib/ime';
+import { TextArea } from '@/components/ui/text-area';
 import { useCanvasStore } from '@/lib/store';
 
 // チャット入力欄。Enter で送信、Shift+Enter で改行。
 // 送信中 (streaming) は textarea disabled。
-// IME 変換中の Enter は isImeComposing で弾き、誤送信を防ぐ。
+// IME 変換中および確定直後の Enter は TextArea (useComposition) が吸収するため
+// このハンドラには届かない。
 export function ChatInput() {
   const [text, setText] = useState('');
   const sendChatMessage = useCanvasStore((s) => s.sendChatMessage);
@@ -22,11 +23,11 @@ export function ChatInput() {
 
   return (
     <div style={WRAP_STYLE}>
-      <textarea
+      <TextArea
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === 'Enter' && !e.shiftKey && !isImeComposing(e)) {
+          if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             onSend();
           }

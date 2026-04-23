@@ -3,6 +3,8 @@
 import type { Node } from '@tally/core';
 import { useId, useState } from 'react';
 
+import { TextArea } from '@/components/ui/text-area';
+import { TextInput } from '@/components/ui/text-input';
 import { useCanvasStore } from '@/lib/store';
 
 // 選択ノード切替時の resync は親側で `key={node.id}` による再マウントに委ねる。
@@ -26,7 +28,7 @@ export function CommonFields({ node }: { node: Node }) {
       <label htmlFor={titleId} style={LABEL_STYLE}>
         タイトル
       </label>
-      <input
+      <TextInput
         id={titleId}
         value={title}
         onChange={(e) => setTitle(e.target.value)}
@@ -36,7 +38,7 @@ export function CommonFields({ node }: { node: Node }) {
       <label htmlFor={bodyId} style={LABEL_STYLE}>
         本文
       </label>
-      <textarea
+      <TextArea
         id={bodyId}
         value={body}
         onChange={(e) => setBody(e.target.value)}

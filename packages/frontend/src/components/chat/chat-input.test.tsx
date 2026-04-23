@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useCanvasStore } from '@/lib/store';
 
@@ -8,6 +8,9 @@ import { ChatInput } from './chat-input';
 describe('ChatInput', () => {
   beforeEach(() => {
     useCanvasStore.getState().reset();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('空入力なら送信 disabled', () => {
@@ -52,6 +55,26 @@ describe('ChatInput', () => {
     fireEvent.keyDown(textarea, { key: 'Enter', keyCode: 229 });
     expect(spy).not.toHaveBeenCalled();
     // 確定後の素の Enter は送信する。
+    fireEvent.keyDown(textarea, { key: 'Enter' });
+    expect(spy).toHaveBeenCalledWith('にほんご');
+  });
+
+  it('compositionStart/End 後 150ms 以内の Enter は確定 Enter として抑止される（Safari 対策）', () => {
+    vi.useFakeTimers();
+    const spy = vi.fn().mockResolvedValue(undefined);
+    useCanvasStore.setState({ sendChatMessage: spy } as never);
+    render(<ChatInput />);
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'にほんご' } });
+    // Safari: compositionEnd が先に発火し、その直後に素の Enter keydown が来るパターン
+    fireEvent.compositionStart(textarea);
+    fireEvent.compositionEnd(textarea);
+    fireEvent.keyDown(textarea, { key: 'Enter' });
+    expect(spy).not.toHaveBeenCalled();
+    // 150ms 窓を超えれば通常 Enter として送信される
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
     fireEvent.keyDown(textarea, { key: 'Enter' });
     expect(spy).toHaveBeenCalledWith('にほんご');
   });

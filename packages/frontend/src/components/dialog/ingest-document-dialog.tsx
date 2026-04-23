@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 
+import { TextArea } from '@/components/ui/text-area';
+import { TextInput } from '@/components/ui/text-input';
 import { type IngestDocumentInput, useCanvasStore } from '@/lib/store';
 
 interface IngestDocumentDialogProps {
@@ -74,7 +76,7 @@ export function IngestDocumentDialog({ open, onClose }: IngestDocumentDialogProp
           </button>
         </div>
         {mode === 'paste' ? (
-          <textarea
+          <TextArea
             value={text}
             onChange={(e) => setText(e.target.value)}
             placeholder="要求書のテキストをここに貼り付け"
@@ -85,7 +87,7 @@ export function IngestDocumentDialog({ open, onClose }: IngestDocumentDialogProp
         ) : (
           <label style={DIR_LABEL_STYLE}>
             ディレクトリパス (workspaceRoot 相対)
-            <input
+            <TextInput
               type="text"
               value={dirPath}
               onChange={(e) => setDirPath(e.target.value)}

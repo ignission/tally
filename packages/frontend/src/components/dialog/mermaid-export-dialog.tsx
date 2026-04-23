@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { TextArea } from '@/components/ui/text-area';
 import { buildMermaid } from '@/lib/mermaid';
 import { useCanvasStore } from '@/lib/store';
 
@@ -161,7 +162,7 @@ export function MermaidExportDialog({ open, onClose }: Props) {
             )}
           </div>
         ) : (
-          <textarea readOnly value={source} style={TEXTAREA_STYLE} />
+          <TextArea readOnly value={source} style={TEXTAREA_STYLE} />
         )}
 
         <div style={HINT_STYLE}>
