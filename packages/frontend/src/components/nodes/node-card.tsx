@@ -15,6 +15,10 @@ export interface NodeCardProps {
   accentOverride?: { color: string; accent: string; label: string; icon: string };
   badge?: ReactNode;
   footer?: ReactNode;
+  /** アコーディオン: true なら body / footer を隠しタイトルだけ見せる。キャンバス上でのつながり重視。 */
+  collapsed?: boolean;
+  /** 折りたたみトグル。未指定ならトグルボタンは表示しない。 */
+  onToggleCollapse?: () => void;
 }
 
 const BASE_STYLE: CSSProperties = {
@@ -40,6 +44,8 @@ export function NodeCard({
   accentOverride,
   badge,
   footer,
+  collapsed,
+  onToggleCollapse,
 }: NodeCardProps) {
   const borderWidth = dashed ? 2 : 2;
   const borderStyle = dashed ? 'dashed' : 'solid';
@@ -51,6 +57,11 @@ export function NodeCard({
 
   const headerLabel = accentOverride?.label ?? meta.label;
   const headerIcon = accentOverride?.icon ?? meta.icon;
+
+  // 折りたたみ時はタイトル直下の余白を詰めて一行ラベル感を強める。
+  const titleStyle: CSSProperties = collapsed
+    ? { fontWeight: 700, fontSize: 14, marginBottom: 0 }
+    : { fontWeight: 700, fontSize: 14, marginBottom: 4 };
 
   return (
     <div
@@ -76,10 +87,42 @@ export function NodeCard({
         <span aria-hidden="true">{headerIcon}</span>
         <span>{headerLabel}</span>
         {badge}
+        {onToggleCollapse && (
+          <button
+            type="button"
+            // React Flow のドラッグ/選択に取られないよう nodrag/nopan を付与。
+            // クリックが親 div の onNodeClick に伝わると選択状態が暴れるので stopPropagation。
+            className="nodrag nopan"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleCollapse();
+            }}
+            onPointerDown={(e) => {
+              // React Flow は pointerdown で drag を開始するため、ここでも止めておく。
+              e.stopPropagation();
+            }}
+            aria-label={collapsed ? '展開' : '折りたたみ'}
+            aria-expanded={!collapsed}
+            title={collapsed ? '展開' : '折りたたみ'}
+            style={{
+              // badge がある場合は auto マージン済みなので 0、ない場合は末尾寄せのため auto。
+              marginLeft: badge ? 0 : 'auto',
+              background: 'transparent',
+              border: 'none',
+              color: effectiveAccent,
+              cursor: 'pointer',
+              padding: '0 2px',
+              fontSize: 10,
+              lineHeight: 1,
+            }}
+          >
+            {collapsed ? '▸' : '▾'}
+          </button>
+        )}
       </div>
-      <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>{title}</div>
-      {body && <div style={{ color: '#c8d1da' }}>{body}</div>}
-      {footer && <div style={{ marginTop: 8 }}>{footer}</div>}
+      <div style={titleStyle}>{title}</div>
+      {!collapsed && body && <div style={{ color: '#c8d1da' }}>{body}</div>}
+      {!collapsed && footer && <div style={{ marginTop: 8 }}>{footer}</div>}
       <Handle type="source" position={Position.Right} style={{ background: effectiveColor }} />
     </div>
   );

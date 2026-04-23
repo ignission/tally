@@ -32,6 +32,8 @@ export function Canvas() {
   const connectEdge = useCanvasStore((s) => s.connectEdge);
   const select = useCanvasStore((s) => s.select);
   const autoLayout = useCanvasStore((s) => s.autoLayout);
+  const expandAllNodes = useCanvasStore((s) => s.expandAllNodes);
+  const collapseAllNodes = useCanvasStore((s) => s.collapseAllNodes);
 
   const rfNodes = useMemo<RFNode[]>(
     () =>
@@ -82,6 +84,8 @@ export function Canvas() {
           moveNode={moveNode}
           select={select}
           autoLayout={autoLayout}
+          expandAllNodes={expandAllNodes}
+          collapseAllNodes={collapseAllNodes}
         />
       </div>
     </ReactFlowProvider>
@@ -96,6 +100,8 @@ function CanvasInner(props: {
   moveNode: (id: string, x: number, y: number) => Promise<void>;
   select: (target: { kind: 'node'; id: string } | { kind: 'edge'; id: string } | null) => void;
   autoLayout: (direction?: 'TB' | 'LR') => Promise<void>;
+  expandAllNodes: () => void;
+  collapseAllNodes: () => void;
 }) {
   const { fitView } = useReactFlow();
   const [aligning, setAligning] = useState<null | 'TB' | 'LR'>(null);
@@ -190,6 +196,22 @@ function CanvasInner(props: {
             style={alignButtonStyle(false)}
           >
             🗺 Mermaid
+          </button>
+          <button
+            type="button"
+            onClick={props.expandAllNodes}
+            title="すべてのノードを展開 (詳細表示)"
+            style={alignButtonStyle(false)}
+          >
+            ▾ 全展開
+          </button>
+          <button
+            type="button"
+            onClick={props.collapseAllNodes}
+            title="すべてのノードを折りたたみ (タイトルのみ)"
+            style={alignButtonStyle(false)}
+          >
+            ▸ 全折りたたみ
           </button>
           <button
             type="button"

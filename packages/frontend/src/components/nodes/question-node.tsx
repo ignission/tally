@@ -3,9 +3,11 @@ import { getSelectedOption, isDecided, NODE_META } from '@tally/core';
 import type { NodeProps } from '@xyflow/react';
 
 import { NodeBadge, NodeCard } from './node-card';
+import { useNodeAccordion } from './use-accordion';
 
-export function QuestionNodeView({ data }: NodeProps) {
+export function QuestionNodeView({ id, data }: NodeProps) {
   const node = (data as { node: QuestionNode }).node;
+  const { collapsed, toggle } = useNodeAccordion(id);
   const decided = isDecided(node);
   const selected = getSelectedOption(node);
 
@@ -56,6 +58,8 @@ export function QuestionNodeView({ data }: NodeProps) {
       faded={decided}
       badge={badge}
       footer={footer}
+      collapsed={collapsed}
+      onToggleCollapse={toggle}
     />
   );
 }

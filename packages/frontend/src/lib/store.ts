@@ -45,6 +45,15 @@ interface CanvasState {
   edges: Record<string, Edge>;
   selected: Selected;
 
+  // UI状態: ノードごとの展開状態 (アコーディオン)。
+  // true = 展開 (body/footer 表示)、キー未設定 or false = 折りたたみ (タイトルのみ)。
+  // デフォルトは折りたたみ。キャンバス上での「ノードのつながり」が見やすくなる。
+  // セッション内のみ保持し YAML には永続化しない。
+  expandedNodes: Record<string, boolean>;
+  toggleNodeExpanded: (id: string) => void;
+  expandAllNodes: () => void;
+  collapseAllNodes: () => void;
+
   hydrate: (project: Project) => void;
   reset: () => void;
   select: (target: Selected) => void;
@@ -316,6 +325,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
     nodes: {},
     edges: {},
     selected: null,
+    expandedNodes: {},
     runningAgent: null,
     chatThreadList: [],
     activeChatThreadId: null,
@@ -330,6 +340,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         nodes: byId(nodes),
         edges: byId(edges),
         selected: null,
+        // プロジェクト切替時は全ノード折りたたみで開始する (つながり重視の初期表示)。
+        expandedNodes: {},
       });
     },
 
@@ -340,10 +352,31 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         nodes: {},
         edges: {},
         selected: null,
+        expandedNodes: {},
         runningAgent: null,
       }),
 
     select: (target) => set({ selected: target }),
+
+    // 個別ノードの展開状態をトグル。未登録キーは折りたたみ扱いのため true に切り替える。
+    toggleNodeExpanded: (id) => {
+      const cur = get().expandedNodes;
+      if (cur[id]) {
+        // 折りたたむ: キー自体を削除して Record を小さく保つ。
+        const { [id]: _omit, ...rest } = cur;
+        set({ expandedNodes: rest });
+      } else {
+        set({ expandedNodes: { ...cur, [id]: true } });
+      }
+    },
+
+    expandAllNodes: () => {
+      const all: Record<string, boolean> = {};
+      for (const id of Object.keys(get().nodes)) all[id] = true;
+      set({ expandedNodes: all });
+    },
+
+    collapseAllNodes: () => set({ expandedNodes: {} }),
 
     moveNode: async (id, x, y) => {
       const pid = get().projectId;
@@ -395,7 +428,11 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         title: '',
         body: '',
       } as Omit<Node, 'id'>);
-      set({ nodes: { ...get().nodes, [created.id]: created } });
+      set({
+        nodes: { ...get().nodes, [created.id]: created },
+        // 新規ノードは空なので折りたたんだままだと存在が分かりづらい。展開状態で挿入する。
+        expandedNodes: { ...get().expandedNodes, [created.id]: true },
+      });
       return created;
     },
 
@@ -414,6 +451,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
       }
       // Biome の noDelete 回避のため destructuring で除外する。
       const { [id]: _removedNode, ...remainingNodes } = get().nodes;
+      const { [id]: _removedExpanded, ...remainingExpanded } = get().expandedNodes;
       const prevSelected = get().selected;
       const selectedPointsToThis =
         (prevSelected?.kind === 'node' && prevSelected.id === id) ||
@@ -421,6 +459,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
       set({
         nodes: remainingNodes,
         edges: remainingEdges,
+        expandedNodes: remainingExpanded,
         selected: selectedPointsToThis ? null : prevSelected,
       });
       try {
@@ -672,6 +711,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
       set({
         nodes: {},
         edges: {},
+        expandedNodes: {},
         selected: null,
         chatThreadList: [],
         activeChatThreadId: null,

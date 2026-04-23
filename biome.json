@@ -16,7 +16,10 @@
       "!**/coverage",
       "!**/*.tsbuildinfo",
       "!**/pnpm-lock.yaml",
-      "!**/examples/**/.tally"
+      "!**/examples/**/.tally",
+      "!**/.playwright-tally-home",
+      "!**/playwright-report",
+      "!**/test-results"
     ]
   },
   "assist": { "actions": { "source": { "organizeImports": "on" } } },

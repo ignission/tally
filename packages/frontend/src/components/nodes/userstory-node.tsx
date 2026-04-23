@@ -3,9 +3,11 @@ import { computeStoryProgress, NODE_META } from '@tally/core';
 import type { NodeProps } from '@xyflow/react';
 
 import { NodeBadge, NodeCard } from './node-card';
+import { useNodeAccordion } from './use-accordion';
 
-export function UserStoryNodeView({ data }: NodeProps) {
+export function UserStoryNodeView({ id, data }: NodeProps) {
   const node = (data as { node: UserStoryNode }).node;
+  const { collapsed, toggle } = useNodeAccordion(id);
   const progress = computeStoryProgress(node);
   const badge = node.points ? <NodeBadge tone="success">{`${node.points}pt`}</NodeBadge> : null;
 
@@ -32,6 +34,8 @@ export function UserStoryNodeView({ data }: NodeProps) {
       body={node.body}
       badge={badge}
       footer={footer}
+      collapsed={collapsed}
+      onToggleCollapse={toggle}
     />
   );
 }
