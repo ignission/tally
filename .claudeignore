@@ -1,0 +1,28 @@
+# 依存関係
+node_modules/
+
+# ビルド出力
+dist/
+.next/
+
+# Tally プロジェクトデータ（ドッグフード中のローカル状態）
+.tally/
+
+# gstack 一時出力
+.gstack/
+
+# 環境変数
+.env
+.env.*
+!.env.example
+
+# ロックファイル
+*.lock
+pnpm-lock.yaml
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
