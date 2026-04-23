@@ -1,50 +1,45 @@
 ---
 name: merge-and-cleanup
-description: PRマージ→main最新化→Jiraチケット完了を一括実行
-allowed-tools: Bash, Read, Agent
-argument-hint: [PR番号] [Jiraチケット番号]
+description: PRマージ → main 最新化 → ローカル/リモートブランチ削除を一括実行
+allowed-tools: Bash
+argument-hint: [PR番号]
 ---
 
-## PRマージ後のクリーンアップ
+## PR マージ後のクリーンアップ
 
-PR $0 をマージし、Jiraチケット $1 を完了にする。
+PR $0 をマージし、main を最新化してマージ済みブランチを掃除する。
 
 ## 手順
 
 以下の順序で実行すること:
 
-### 1. PRマージ
+### 1. PR マージ (squash + リモートブランチ削除)
 
 ```bash
 gh pr merge $0 --squash --delete-branch
 ```
 
-### 2. ローカルブランチ最新化
+### 2. ローカル main 最新化
 
 ```bash
 git checkout main && git pull
 ```
 
-マージ元のローカルブランチが残っている場合は削除:
+### 3. マージ済みローカルブランチの掃除
+
+リモートが削除されたローカルブランチを検出して削除:
 
 ```bash
+git fetch --prune
 git branch -vv | grep '\[origin/.*: gone\]' | awk '{print $$1}' | xargs -r git branch -d
 ```
 
-### 3. Jiraチケット完了
-
-チケット $1 のステータスを「完了」に遷移する。
-
-1. `getTransitionsForJiraIssue` で利用可能な遷移を取得
-2. 「完了」遷移のIDを特定
-3. `transitionJiraIssue` で遷移を実行
-
-cloudIdは `ignission.atlassian.net` を使用する。
+`-d` は未マージブランチを拒否するため、誤削除を防げる。強制削除が必要な場合はユーザーに確認すること。
 
 ## 完了報告
 
 全ステップ完了後、以下を報告:
 
 - PR #$0 マージ完了
-- $1 → 完了
 - ブランチ: main (最新)
+- 削除したローカルブランチ一覧

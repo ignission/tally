@@ -53,3 +53,4 @@ packages/*/test-results/
 # Claude Code ローカル権限オーバーライド（個人用、コミットしない）
 .claude/settings.local.json
 .claude/stop_hook_active
+.claude/push-completed.marker
