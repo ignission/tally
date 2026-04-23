@@ -19,10 +19,17 @@
       "!**/examples/**/.tally",
       "!**/.playwright-tally-home",
       "!**/playwright-report",
-      "!**/test-results"
+      "!**/test-results",
+      "!**/next-env.d.ts"
     ]
   },
-  "assist": { "actions": { "source": { "organizeImports": "on" } } },
+  "assist": {
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  },
   "linter": {
     "enabled": true,
     "rules": {
