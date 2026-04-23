@@ -44,3 +44,8 @@ workspace/
 # Codex 一時出力（サブエージェント用）
 .claude/tmp/
 .gstack/
+
+# Playwright
+packages/*/.playwright-tally-home/
+packages/*/playwright-report/
+packages/*/test-results/
