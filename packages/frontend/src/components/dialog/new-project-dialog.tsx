@@ -3,6 +3,7 @@
 import type { Codebase } from '@tally/core';
 import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
+import { TextInput } from '@/components/ui/text-input';
 import { createProject, fetchDefaultProjectPath } from '@/lib/api';
 import { FolderBrowserDialog } from './folder-browser-dialog';
 
@@ -94,7 +95,7 @@ export function NewProjectDialog({ open, onClose }: Props) {
 
         <label style={LABEL}>
           プロジェクト名
-          <input
+          <TextInput
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -106,7 +107,7 @@ export function NewProjectDialog({ open, onClose }: Props) {
 
         <label style={LABEL}>
           説明 (任意)
-          <input
+          <TextInput
             type="text"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
@@ -148,7 +149,7 @@ export function NewProjectDialog({ open, onClose }: Props) {
             {codebases.map((c, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: path が空の初期行でも一意にするため index を組み合わせる
               <li key={`${c.path}-${i}`} style={CB_ITEM}>
-                <input
+                <TextInput
                   type="text"
                   value={c.id}
                   onChange={(e) => {
@@ -160,7 +161,7 @@ export function NewProjectDialog({ open, onClose }: Props) {
                   style={{ ...INPUT, width: 140 }}
                   aria-label={`codebase-${i}-id`}
                 />
-                <input
+                <TextInput
                   type="text"
                   value={c.label}
                   onChange={(e) => {

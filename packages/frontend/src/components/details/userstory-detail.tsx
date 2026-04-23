@@ -7,6 +7,7 @@ import { useId, useState } from 'react';
 import { AnalyzeImpactButton } from '@/components/ai-actions/analyze-impact-button';
 import { ExtractQuestionsButton } from '@/components/ai-actions/extract-questions-button';
 import { FindRelatedCodeButton } from '@/components/ai-actions/find-related-code-button';
+import { TextInput } from '@/components/ui/text-input';
 import { useCanvasStore } from '@/lib/store';
 
 // AcceptanceCriterion と UserStoryTask はどちらも {id, text, done} の同形。
@@ -90,7 +91,7 @@ function CheckList({
               onChange(items.map((x) => (x.id === it.id ? { ...x, done: e.target.checked } : x)))
             }
           />
-          <input
+          <TextInput
             defaultValue={it.text}
             onBlur={(e) => {
               const nextText = e.target.value;
@@ -111,7 +112,7 @@ function CheckList({
         </li>
       ))}
       <li style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-        <input
+        <TextInput
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {

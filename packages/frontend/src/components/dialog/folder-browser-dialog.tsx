@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
+import { TextInput } from '@/components/ui/text-input';
 import { type FsListResult, listDirectory, mkdir } from '@/lib/api';
 
 export type FolderBrowserPurpose = 'create-project' | 'import-project' | 'add-codebase';
@@ -67,7 +68,7 @@ export function FolderBrowserDialog(props: FolderBrowserDialogProps) {
       <div style={DIALOG_STYLE}>
         <h2 style={TITLE_STYLE}>{titleFor(props.purpose)}</h2>
         <div style={TOOLBAR_STYLE}>
-          <input
+          <TextInput
             type="text"
             value={pathDraft}
             onChange={(e) => setPathDraft(e.target.value)}
@@ -132,7 +133,7 @@ export function FolderBrowserDialog(props: FolderBrowserDialogProps) {
           隠しフォルダを表示
         </label>
         <div style={MKDIR_ROW_STYLE}>
-          <input
+          <TextInput
             type="text"
             placeholder="新規フォルダ名"
             value={newDirName}
