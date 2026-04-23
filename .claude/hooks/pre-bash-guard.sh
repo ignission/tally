@@ -142,15 +142,15 @@ if [[ "$COMMAND" =~ ^[[:space:]]*git[[:space:]]+(.+[[:space:]]+)?push([[:space:]
   if [ "$HAS_SOURCE_CHANGES" = "1" ]; then
     LOG="${LOG}pre-bash-guard: ソースコードに変更あり。biome・型チェックを実行します...\n"
 
-    LOG="${LOG}pre-bash-guard: biome check を実行中...\n"
-    if ! CMD_OUTPUT=$(cd "$PROJECT_ROOT" && npx biome check . 2>&1); then
+    LOG="${LOG}pre-bash-guard: pnpm lint を実行中...\n"
+    if ! CMD_OUTPUT=$(cd "$PROJECT_ROOT" && pnpm lint 2>&1); then
       echo "$CMD_OUTPUT" >&2
-      echo "BLOCKED: biome check が失敗しました。'pnpm format'を実行してからpushしてください" >&2
+      echo "BLOCKED: pnpm lint が失敗しました。'pnpm check' で自動修正を試してからpushしてください" >&2
       exit 2
     fi
 
-    LOG="${LOG}pre-bash-guard: tsc --noEmit を実行中...\n"
-    if ! CMD_OUTPUT=$(cd "$PROJECT_ROOT" && npx tsc --noEmit 2>&1); then
+    LOG="${LOG}pre-bash-guard: pnpm typecheck を実行中...\n"
+    if ! CMD_OUTPUT=$(cd "$PROJECT_ROOT" && pnpm typecheck 2>&1); then
       echo "$CMD_OUTPUT" >&2
       echo "BLOCKED: 型チェックが失敗しました。型エラーを修正してからpushしてください" >&2
       exit 2
