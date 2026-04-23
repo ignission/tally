@@ -6,13 +6,7 @@ set -eo pipefail
 
 # stdinからツール入力JSONを読み取り、コマンドを抽出（パース失敗時はスキップ）
 STDIN_INPUT=$(cat)
-COMMAND=$(echo "$STDIN_INPUT" | jq -r '.tool_input.command // ""' 2>/dev/null) || exit 0
-
-# --- git commit / git tag はメッセージ内容を検査しない（誤検出防止） ---
-if [[ "$COMMAND" =~ ^[[:space:]]*git[[:space:]]+(commit|tag)[[:space:]] ]]; then
-  exit 0
-fi
-
+COMMAND=$(echo "$STDIN_INPUT" | jq -r '.tool_input.command // ""' 2>/dev/null || echo "")
 
 
 # --- pre-push-reviewフラグファイル作成のガード ---
@@ -41,6 +35,7 @@ fi
 # --- 破壊的コマンドガード ---
 # rm -rf: ビルドキャッシュ（node_modules, target, dist, .next, build等）削除のみ許可
 # 引数を個別に検査し、全operandがキャッシュ系ディレクトリの場合のみ通過させる
+# 注意: 引数はシェル単語分割で評価する。スペース含むパスや rm -r -- <path>（-f 省略）は未サポート
 if [[ "$COMMAND" =~ rm[[:space:]]+-[[:alpha:]]*r[[:alpha:]]*f ]] || [[ "$COMMAND" =~ rm[[:space:]]+-[[:alpha:]]*f[[:alpha:]]*r ]] || [[ "$COMMAND" =~ rm[[:space:]]+--recursive[[:space:]]+--force ]] || [[ "$COMMAND" =~ rm[[:space:]]+--force[[:space:]]+--recursive ]] || [[ "$COMMAND" =~ rm[[:space:]]+-r[[:space:]]+-f ]] || [[ "$COMMAND" =~ rm[[:space:]]+-f[[:space:]]+-r ]]; then
   # rm コマンドの引数を抽出（オプション以外）
   SAFE_DIRS="node_modules|target|dist|\.next|build|__pycache__|\.pytest_cache"
@@ -102,19 +97,17 @@ fi
 
 # --no-verify: git hooksのバイパスを禁止（エージェントがLefthookをスキップするのを防ぐ）
 # git push --no-verify もpre-pushフックをバイパスするためブロック対象
-if [[ "$COMMAND" =~ git[[:space:]]+.+--no-verify ]]; then
+if [[ "$COMMAND" =~ ^[[:space:]]*git[[:space:]]+.+--no-verify ]]; then
   echo "BLOCKED: --no-verify によるgit hookのバイパスは禁止されています" >&2
   echo "  WHY: Lefthookによる品質チェック（fmt/lint/test）がスキップされ、CIで失敗するコードがpushされる" >&2
   echo "  FIX: Lefthookの問題はlefthook.ymlの設定を確認" >&2
   exit 2
 fi
 
-# -n フラグ: git commit -n は --no-verify の短縮形なのでブロック
-# ただし git push -n はdry-runなので許可
-if [[ "$COMMAND" =~ git[[:space:]]+.+-n([[:space:]]|$) ]]; then
-  if [[ "$COMMAND" =~ git[[:space:]]+push ]] || [[ "$COMMAND" =~ git[[:space:]]+.*push ]]; then
-    : # git push -n はdry-run、許可
-  else
+# -n フラグ: git commit -n / git tag -n は --no-verify の短縮形なのでブロック
+# 注意: grep -n / git log -n 5 などの誤検出を避けるため、対象コマンドを commit/tag に限定
+if [[ "$COMMAND" =~ ^[[:space:]]*git[[:space:]]+(commit|tag)[[:space:]] ]]; then
+  if [[ "$COMMAND" =~ (^|[[:space:]])-n([[:space:]]|$) ]]; then
     echo "BLOCKED: -n（--no-verify短縮形）によるgit hookのバイパスは禁止されています" >&2
     echo "  WHY: Lefthookによる品質チェック（fmt/lint/test）がスキップされ、CIで失敗するコードがpushされる" >&2
     echo "  FIX: Lefthookの問題はlefthook.ymlの設定を確認" >&2
@@ -264,7 +257,12 @@ elif ! $IS_PR_COMMENT && [[ "$COMMAND" =~ /replies.sh ]]; then
 fi
 if $IS_PR_COMMENT; then
   # push完了マーカーの確認（60秒以内に作成されたものが必要）
-  PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
+  if [ -z "${CLAUDE_PROJECT_DIR:-}" ]; then
+    echo "BLOCKED: CLAUDE_PROJECT_DIR 未設定のためマーカーを読めません" >&2
+    echo "  FIX: Claude Code 経由でのみ実行してください" >&2
+    exit 2
+  fi
+  PROJECT_DIR="$CLAUDE_PROJECT_DIR"
   MARKER="$PROJECT_DIR/.claude/push-completed.marker"
   if [ ! -f "$MARKER" ]; then
     echo "BLOCKED: push完了前にCodeRabbit返信はできません" >&2
@@ -298,15 +296,23 @@ if $IS_PR_COMMENT; then
 
   # 先送り表現の検出対象テキストを決定（--body-file等からのファイル内容を抽出）
   COMMENT_TEXT="$COMMAND"
+  # 安全なパス文字のみ許可（$()バックティック等の二重評価を防止）
+  _safe_path() { [[ "$1" =~ ^[a-zA-Z0-9_./~-]+$ ]]; }
   if [[ "$COMMAND" =~ --body-file[=[:space:]]([^[:space:]]+) ]]; then
     BODY_FILE="$(_normalize_shell_token "${BASH_REMATCH[1]}")"
-    [[ -f "$BODY_FILE" ]] && COMMENT_TEXT="$(cat "$BODY_FILE")"
+    if _safe_path "$BODY_FILE" && [[ -f "$BODY_FILE" ]]; then
+      COMMENT_TEXT="$(cat "$BODY_FILE")"
+    fi
   elif [[ "$COMMAND" =~ (-f|-F|--field|--raw-field)[[:space:]]*body=@([^[:space:]]+) ]]; then
     BODY_FILE="$(_normalize_shell_token "${BASH_REMATCH[2]}")"
-    [[ -f "$BODY_FILE" ]] && COMMENT_TEXT="$(cat "$BODY_FILE")"
+    if _safe_path "$BODY_FILE" && [[ -f "$BODY_FILE" ]]; then
+      COMMENT_TEXT="$(cat "$BODY_FILE")"
+    fi
   elif [[ "$COMMAND" =~ --input[=[:space:]]([^[:space:]]+) ]] && [[ "${BASH_REMATCH[1]}" != "-" ]]; then
     INPUT_FILE="$(_normalize_shell_token "${BASH_REMATCH[1]}")"
-    [[ -f "$INPUT_FILE" ]] && COMMENT_TEXT="$(jq -r '.. | objects | .body? // empty' "$INPUT_FILE" 2>/dev/null)"
+    if _safe_path "$INPUT_FILE" && [[ -f "$INPUT_FILE" ]]; then
+      COMMENT_TEXT="$(jq -r '.. | objects | .body? // empty' "$INPUT_FILE" 2>/dev/null)"
+    fi
   elif [[ "$COMMAND" =~ --input[=[:space:]]- ]] || [[ "$COMMAND" =~ (--editor|--web) ]]; then
     echo "BLOCKED: 本文を事前検査できないコメント投稿方法は禁止です（--editor / --input - / --web）" >&2
     exit 2

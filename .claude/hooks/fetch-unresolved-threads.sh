@@ -32,27 +32,32 @@ fetch_unresolved_threads() {
   repo_name=$(printf '%s\n' "$repo_info" | cut -d'/' -f2)
 
   local raw_data
-  raw_data=$(gh api graphql -f query="
-    {
-      repository(owner: \"${repo_owner}\", name: \"${repo_name}\") {
-        pullRequest(number: ${pr_num}) {
-          reviewThreads(first: 100) {
-            nodes {
-              isResolved
-              comments(first: 1) {
-                nodes {
-                  author { login }
-                  body
-                  path
-                  line
+  # GraphQL変数経由で owner/name/number を渡す（インジェクション対策）
+  raw_data=$(gh api graphql \
+    -F owner="$repo_owner" \
+    -F name="$repo_name" \
+    -F number="$pr_num" \
+    -f query='
+      query($owner: String!, $name: String!, $number: Int!) {
+        repository(owner: $owner, name: $name) {
+          pullRequest(number: $number) {
+            reviewThreads(first: 100) {
+              nodes {
+                isResolved
+                comments(first: 1) {
+                  nodes {
+                    author { login }
+                    body
+                    path
+                    line
+                  }
                 }
               }
             }
           }
         }
       }
-    }
-  " 2>/dev/null) || raw_data=""
+    ' 2>/dev/null) || raw_data=""
 
   if [[ -z "$raw_data" ]]; then
     UNRESOLVED_THREADS_ERROR="true"

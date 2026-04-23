@@ -14,7 +14,7 @@ Tally は pnpm workspaces のモノレポ。各パッケージは責務が明確
 | `packages/core` | ノード/エッジの型定義・スキーマ（zod）・ID/メタデータヘルパ | 他パッケージ依存禁止 |
 | `packages/storage` | YAML ファイル永続化、プロジェクトディレクトリ/レジストリ管理 | core のみ |
 | `packages/ai-engine` | Claude Agent SDK ラッパー、WebSocket サーバー、AI エージェント・tools | core / storage |
-| `packages/frontend` | Next.js 16 App Router、React Flow キャンバス、Zustand ストア | core（型のみ） |
+| `packages/frontend` | Next.js 16 App Router、React Flow キャンバス、Zustand ストア | core（型のみ）。storage/ai-engine へは Route Handler または WebSocket 経由でアクセス |
 
 ## ルール
 

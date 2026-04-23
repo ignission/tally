@@ -27,8 +27,9 @@ if ! gh auth status &>/dev/null; then
   WARNINGS="${WARNINGS}WARNING: gh CLIが未認証です。gh auth login を実行してください\n"
 fi
 
-# ディスク容量チェック（5GB未満で警告）
-AVAIL_KB=$(df -k / | tail -1 | awk '{print $4}')
+# ディスク容量チェック（5GB未満で警告）— プロジェクト配置ボリュームを見る
+PROJECT_ROOT_FOR_DF="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+AVAIL_KB=$(df -k "$PROJECT_ROOT_FOR_DF" 2>/dev/null | tail -1 | awk '{print $4}')
 AVAIL_GB=$((AVAIL_KB / 1048576))
 if [ "$AVAIL_GB" -lt 5 ] 2>/dev/null; then
   WARNINGS="${WARNINGS}WARNING: ディスク残容量: ${AVAIL_GB}GB（5GB未満）\n"

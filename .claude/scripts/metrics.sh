@@ -3,7 +3,11 @@
 # 過去N日間のPR・CI・レビュー指摘を集計する
 
 DAYS="${1:-30}"
-REPO="ignission/claude-code-ark"
+REPO=$(gh repo view --json nameWithOwner -q '.nameWithOwner' 2>/dev/null || echo "")
+if [ -z "$REPO" ]; then
+  echo "ERROR: リポジトリ情報の取得に失敗しました。gh auth login を確認してください" >&2
+  exit 1
+fi
 
 # 日付計算（Linux/macOS両対応）
 SINCE=$(date -d "${DAYS} days ago" +%Y-%m-%d 2>/dev/null || date -v-"${DAYS}"d +%Y-%m-%d 2>/dev/null)
