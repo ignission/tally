@@ -8,6 +8,7 @@ import {
   CodebaseSchema,
   CodeRefNodeSchema,
   EdgeSchema,
+  McpServerConfigSchema,
   NodeSchema,
   ProjectMetaSchema,
   ProposalNodeSchema,
@@ -315,5 +316,78 @@ describe('ChatThreadSchema / ChatThreadMetaSchema', () => {
         updatedAt: '2026-04-20T00:00:00Z',
       }).success,
     ).toBe(true);
+  });
+});
+
+describe('McpServerConfigSchema', () => {
+  it('Cloud (basic) auth の round-trip が通る', () => {
+    const raw = {
+      id: 'atlassian-cloud',
+      name: 'Atlassian Cloud',
+      kind: 'atlassian' as const,
+      url: 'https://mcp.atlassian.example/v1/mcp',
+      auth: {
+        type: 'pat' as const,
+        scheme: 'basic' as const,
+        emailEnvVar: 'ATLASSIAN_EMAIL',
+        tokenEnvVar: 'ATLASSIAN_API_TOKEN',
+      },
+      options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
+    };
+    const parsed = McpServerConfigSchema.parse(raw);
+    expect(parsed).toEqual(raw);
+  });
+
+  it('Server/DC (bearer) auth の round-trip が通る', () => {
+    const raw = {
+      id: 'atlassian-onprem',
+      name: 'Atlassian On-Prem',
+      kind: 'atlassian' as const,
+      url: 'https://jira.example.com/mcp',
+      auth: {
+        type: 'pat' as const,
+        scheme: 'bearer' as const,
+        tokenEnvVar: 'JIRA_PAT',
+      },
+      options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
+    };
+    const parsed = McpServerConfigSchema.parse(raw);
+    expect(parsed).toEqual(raw);
+  });
+
+  it('basic で emailEnvVar 無しは fail', () => {
+    expect(() =>
+      McpServerConfigSchema.parse({
+        id: 'a',
+        name: 'A',
+        kind: 'atlassian',
+        url: 'https://x.test/mcp',
+        auth: { type: 'pat', scheme: 'basic', tokenEnvVar: 'T' },
+      }),
+    ).toThrow();
+  });
+
+  it('options 未指定なら default が入る', () => {
+    const parsed = McpServerConfigSchema.parse({
+      id: 'a',
+      name: 'A',
+      kind: 'atlassian',
+      url: 'https://x.test/mcp',
+      auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'X_PAT' },
+    });
+    expect(parsed.options.maxChildIssues).toBe(30);
+    expect(parsed.options.maxCommentsPerIssue).toBe(5);
+  });
+
+  it('url が URL でないと fail', () => {
+    expect(() =>
+      McpServerConfigSchema.parse({
+        id: 'a',
+        name: 'A',
+        kind: 'atlassian',
+        url: 'not a url',
+        auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'X' },
+      }),
+    ).toThrow();
   });
 });

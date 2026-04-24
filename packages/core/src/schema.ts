@@ -188,6 +188,47 @@ export const ProjectMetaSchema = z
   })
   .superRefine((meta, ctx) => checkUniqueCodebaseIds(meta.codebases, ctx));
 
+// ---------------------------------------------------------------------------
+// MCP サーバー設定スキーマ (Atlassian MCP 連携)
+// ---------------------------------------------------------------------------
+
+// Atlassian Cloud は Basic (base64(email:token))、Server/DC は Bearer (pat) の 2 scheme。
+// どちらも PAT ベースの認証 (OAuth は MVP 非対応、Premise 9)。
+const McpAuthSchema = z.discriminatedUnion('scheme', [
+  z.object({
+    type: z.literal('pat'),
+    scheme: z.literal('basic'),
+    emailEnvVar: z.string().min(1), // 例 "ATLASSIAN_EMAIL"
+    tokenEnvVar: z.string().min(1), // 例 "ATLASSIAN_API_TOKEN"
+  }),
+  z.object({
+    type: z.literal('pat'),
+    scheme: z.literal('bearer'),
+    tokenEnvVar: z.string().min(1), // 例 "JIRA_PAT"
+  }),
+]);
+
+// options は未指定時に {} を default として与え、内側で各フィールドの default を発火させる。
+// zod v4 では outer .default(value) が parse 前に value をそのまま流すため、
+// 入力と同じ経路でフィールド default を解決するには .default({}) → inner default の 2 段構え。
+const McpServerOptionsSchema = z
+  .object({
+    maxChildIssues: z.number().int().positive().default(30),
+    maxCommentsPerIssue: z.number().int().nonnegative().default(5),
+  })
+  .default(() => ({ maxChildIssues: 30, maxCommentsPerIssue: 5 }));
+
+export const McpServerConfigSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  kind: z.literal('atlassian'),
+  url: z.string().url(),
+  auth: McpAuthSchema,
+  options: McpServerOptionsSchema,
+});
+
+export type McpServerConfig = z.infer<typeof McpServerConfigSchema>;
+
 // 実行時に Project 全体を扱う際の合成スキーマ (メモリ上表現)。
 export const ProjectSchema = z
   .object({
