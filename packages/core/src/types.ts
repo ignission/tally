@@ -20,7 +20,7 @@ import type {
   UserStoryNodeSchema,
 } from './schema';
 
-export type { ChatBlock, ChatMessage, ChatThread, ChatThreadMeta } from './schema';
+export type { ChatBlock, ChatMessage, ChatThread, ChatThreadMeta, McpServerConfig } from './schema';
 
 export type NodeType = (typeof NODE_TYPES)[number];
 export type EdgeType = (typeof EDGE_TYPES)[number];
