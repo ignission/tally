@@ -21,9 +21,12 @@ async function openSampleProject(page: Page): Promise<void> {
 // .react-flow__viewport の inline style の transform を取得する。
 // React Flow v12 系は `translate(Xpx, Ypx) scale(Z)` の形式で書き込む。
 async function readViewportTransform(page: Page): Promise<string> {
-  return await page.locator('.react-flow__viewport').first().evaluate((el) => {
-    return (el as HTMLElement).style.transform;
-  });
+  return await page
+    .locator('.react-flow__viewport')
+    .first()
+    .evaluate((el) => {
+      return (el as HTMLElement).style.transform;
+    });
 }
 
 // transform 文字列から translate(x, y) を抽出。scale 部分は無視する。
