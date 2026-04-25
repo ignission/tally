@@ -67,6 +67,7 @@ export function Canvas() {
   // - メインパネル (キャンバス) 操作時のみ動作させ、Chat 入力中などのテキスト入力フォーカス時は奪わない
   // - IME 変換 Enter/Z 誤発火を防ぐため isComposing もケア
   // - Shift 併用 (Redo) は今回の要件外なので無視
+  // - 履歴が空のときはブラウザ既定 Undo を握り潰さない (preventDefault しない)
   const undoMoveNodeRef = useRef(undoMoveNode);
   useEffect(() => {
     undoMoveNodeRef.current = undoMoveNode;
@@ -81,6 +82,10 @@ export function Canvas() {
       if (evt.shiftKey) return; // Redo (将来拡張) と区別。
       const isUndo = evt.ctrlKey || evt.metaKey;
       if (!isUndo) return;
+      // 履歴が空なら preventDefault せずブラウザ既定動作に委ねる。
+      // keydown ハンドラの preventDefault は同期呼び出しでないと効かないため、
+      // store から `moveHistory` を同期取得して判定する。
+      if (useCanvasStore.getState().moveHistory.length === 0) return;
       evt.preventDefault();
       undoMoveNodeRef.current().catch((err) => {
         console.error('undoMoveNode failed', err);

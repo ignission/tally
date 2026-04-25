@@ -67,7 +67,8 @@ async function waitForNodeAt(
     });
 }
 
-// ノード中央付近 (タイトル下端寄り) を掴んで dx/dy だけ動かす。
+// ノードのヘッダ部 (上端寄り) を掴んで dx/dy だけ動かす。
+// 上端には展開/折りたたみボタンや本文インタラクションが少なく、ドラッグの掴みどころとして安定。
 // React Flow はマイクロドラッグだと「クリック」と判定するため十分大きく動かす。
 async function dragNodeBy(
   page: Page,
@@ -78,7 +79,7 @@ async function dragNodeBy(
   const box = await node.boundingBox();
   if (!box) throw new Error('node bounding box not found');
   const startX = box.x + box.width / 2;
-  const startY = box.y + box.height - 10; // タイトル下端寄り (ボタンを避ける)
+  const startY = box.y + 10; // ヘッダ部 (タイトル行)。本文ボタンを避ける。
   // onNodeDragStop が PATCH /nodes/{id} を投げるのを待ち受ける (Minor-B)。
   // 観測失敗 (timeout) でも例外にしない。後続の DOM 反映は呼び出し側で expect.poll する。
   const responsePromise = page

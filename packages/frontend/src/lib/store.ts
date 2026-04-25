@@ -414,9 +414,10 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
       // Undo 履歴に「移動前」を push (FIFO、容量超過は古いものを捨てる)。
       // 楽観更新と一緒のタイミングで積むことで、サーバ失敗時のロールバックでも履歴の整合は取れる
       // (履歴に積んだエントリは「現在の prev 座標」を指すため)。
+      // 失敗時に丸ごと復元できるよう push 前のスナップショット (histBefore) を保持する。
+      const histBefore = get().moveHistory;
       if (moved) {
-        const hist = get().moveHistory;
-        const appended = [...hist, { id, x: prev.x, y: prev.y }];
+        const appended = [...histBefore, { id, x: prev.x, y: prev.y }];
         // 古い履歴から落とす。slice で「末尾 LIMIT 件」を取り出すことで mutation を避ける。
         const next =
           appended.length > MOVE_HISTORY_LIMIT
@@ -429,10 +430,11 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
       } catch (err) {
         // サーバ側の YAML は変わっていないので、元の座標へ戻す。
         set({ nodes: { ...get().nodes, [id]: prev } });
-        // 履歴に積んだ巻き戻し対象も取り除く (移動が成立しなかったため)。
+        // 履歴も push 前のスナップショットへ丸ごと戻す。
+        // slice(0, -1) では LIMIT 超過で押し出された旧 head が復元できないため
+        // histBefore 自体を再代入する。
         if (moved) {
-          const hist = get().moveHistory;
-          if (hist.length > 0) set({ moveHistory: hist.slice(0, -1) });
+          set({ moveHistory: histBefore });
         }
         throw err;
       }
@@ -444,6 +446,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
       // 履歴の末尾が「すでに削除されたノード」を指していた場合は黙って捨て、
       // 次の有効なエントリで Undo を続行する。1 回の Ctrl+Z で 1 回成功するか
       // 履歴が空になるまで進める。
+      // ループ中は hist (ローカル) のみを更新し、最後に 1 回だけ store に書き戻す
+      // (途中の暫定 set による render 揺れを避ける)。楽観 nodes 更新だけは別 set。
       let hist = [...get().moveHistory];
       while (hist.length > 0) {
         const last = hist[hist.length - 1];
@@ -462,10 +466,11 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         // ここでは直接 set + API 呼び出しする。
         const restored = { ...cur, x: last.x, y: last.y };
         const prevState = cur;
-        const nextHist = hist.slice(0, -1);
+        hist = hist.slice(0, -1);
+        // 楽観 nodes 更新と確定済み履歴 (skip 含む) を 1 回でまとめて反映する。
         set({
           nodes: { ...get().nodes, [last.id]: restored },
-          moveHistory: nextHist,
+          moveHistory: hist,
         });
         try {
           await updateNodeApi(pid, last.id, { x: last.x, y: last.y });
@@ -474,16 +479,17 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
           // サーバ更新が失敗したら UI も履歴も元に戻す (整合性優先)。
           // skip した削除済みエントリも含めて巻き戻すと「不可能な復元先」を
           // 残してしまうため、巻き戻すのは「実際に試行したエントリ」だけ。
-          // つまり [...nextHist, last] を再現する。
+          // つまり [...hist, last] を再現する。
           set({
             nodes: { ...get().nodes, [last.id]: prevState },
-            moveHistory: [...nextHist, last],
+            moveHistory: [...hist, last],
           });
           throw err;
         }
       }
       // skip の結果として履歴が空になった場合も含め、何も Undo できなかった。
-      // skip で捨てたエントリは store に書き戻す必要があるためここで反映する。
+      // skip で捨てたエントリは store に書き戻す必要があるためここで反映する
+      // (このパスは loop 内で set されないので、最終 1 回の set として残す)。
       set({ moveHistory: hist });
       return false;
     },
