@@ -29,7 +29,7 @@ export function ChatContextBar() {
   const canAttachSelected = selectedNodeId != null && !ids.includes(selectedNodeId);
 
   return (
-    <div style={WRAP_STYLE}>
+    <div style={WRAP_STYLE} data-testid="chat-context-bar">
       <div style={ROW_STYLE}>
         <span style={LABEL_STYLE}>コンテキスト</span>
         {attached.map((n) => (
@@ -90,6 +90,7 @@ function ChatContextChip({ node, onRemove }: ChipProps) {
         borderColor: meta.accent,
       }}
       title={`${meta.label}: ${label}`}
+      data-testid="chat-context-chip"
     >
       <span style={{ color: meta.color, fontSize: 10 }}>{meta.icon}</span>
       <span>{truncated}</span>
