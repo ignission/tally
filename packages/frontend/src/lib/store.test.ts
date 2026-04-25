@@ -547,6 +547,122 @@ describe('useCanvasStore', () => {
     });
   });
 
+  describe('moveHistory / undoMoveNode (issue #13)', () => {
+    it('moveNode 成功で履歴に「移動前座標」が push される', async () => {
+      okJson({ id: 'req-a', type: 'requirement', x: 10, y: 20, title: 'A', body: '' });
+      await useCanvasStore.getState().moveNode('req-a', 10, 20);
+      const hist = useCanvasStore.getState().moveHistory;
+      expect(hist).toHaveLength(1);
+      expect(hist[0]).toEqual({ id: 'req-a', x: 0, y: 0 });
+    });
+
+    it('moveNode 失敗時は履歴も巻き戻る (push されない)', async () => {
+      fetchMock.mockResolvedValueOnce(new Response('no', { status: 500 }));
+      await expect(useCanvasStore.getState().moveNode('req-a', 99, 99)).rejects.toThrow();
+      expect(useCanvasStore.getState().moveHistory).toEqual([]);
+    });
+
+    it('同じ座標への moveNode は履歴に積まない', async () => {
+      okJson({ id: 'req-a', type: 'requirement', x: 0, y: 0, title: 'A', body: '' });
+      await useCanvasStore.getState().moveNode('req-a', 0, 0);
+      expect(useCanvasStore.getState().moveHistory).toEqual([]);
+    });
+
+    it('undoMoveNode は最大 3 回まで動作する', async () => {
+      // 4 回連続で move (履歴は 3 件まで保持される)。
+      okJson({ id: 'req-a', type: 'requirement', x: 1, y: 1, title: 'A', body: '' });
+      await useCanvasStore.getState().moveNode('req-a', 1, 1);
+      okJson({ id: 'req-a', type: 'requirement', x: 2, y: 2, title: 'A', body: '' });
+      await useCanvasStore.getState().moveNode('req-a', 2, 2);
+      okJson({ id: 'req-a', type: 'requirement', x: 3, y: 3, title: 'A', body: '' });
+      await useCanvasStore.getState().moveNode('req-a', 3, 3);
+      okJson({ id: 'req-a', type: 'requirement', x: 4, y: 4, title: 'A', body: '' });
+      await useCanvasStore.getState().moveNode('req-a', 4, 4);
+
+      // 履歴は最大 3 件 = 古い (0,0) は捨てられ、(1,1) (2,2) (3,3) が残る。
+      expect(useCanvasStore.getState().moveHistory).toHaveLength(3);
+
+      // 1 回目 Undo: (3,3) へ戻る。
+      okJson({ id: 'req-a', type: 'requirement', x: 3, y: 3, title: 'A', body: '' });
+      const r1 = await useCanvasStore.getState().undoMoveNode();
+      expect(r1).toBe(true);
+      expect(useCanvasStore.getState().nodes['req-a']).toMatchObject({ x: 3, y: 3 });
+
+      // 2 回目 Undo: (2,2) へ戻る。
+      okJson({ id: 'req-a', type: 'requirement', x: 2, y: 2, title: 'A', body: '' });
+      const r2 = await useCanvasStore.getState().undoMoveNode();
+      expect(r2).toBe(true);
+      expect(useCanvasStore.getState().nodes['req-a']).toMatchObject({ x: 2, y: 2 });
+
+      // 3 回目 Undo: (1,1) へ戻る。
+      okJson({ id: 'req-a', type: 'requirement', x: 1, y: 1, title: 'A', body: '' });
+      const r3 = await useCanvasStore.getState().undoMoveNode();
+      expect(r3).toBe(true);
+      expect(useCanvasStore.getState().nodes['req-a']).toMatchObject({ x: 1, y: 1 });
+
+      // 4 回目: 履歴は空 (古い (0,0) は溢れて捨てられた)。何もせず false を返す。
+      const r4 = await useCanvasStore.getState().undoMoveNode();
+      expect(r4).toBe(false);
+      // 座標は最後の Undo で戻した (1,1) のまま。
+      expect(useCanvasStore.getState().nodes['req-a']).toMatchObject({ x: 1, y: 1 });
+    });
+
+    it('履歴空のとき undoMoveNode は false を返し座標は変わらない', async () => {
+      const before = useCanvasStore.getState().nodes['req-a'];
+      const r = await useCanvasStore.getState().undoMoveNode();
+      expect(r).toBe(false);
+      expect(useCanvasStore.getState().nodes['req-a']).toEqual(before);
+      // 余計な fetch も走らない。
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('undoMoveNode が API 失敗した場合、履歴と座標を巻き戻して例外を投げる', async () => {
+      okJson({ id: 'req-a', type: 'requirement', x: 50, y: 60, title: 'A', body: '' });
+      await useCanvasStore.getState().moveNode('req-a', 50, 60);
+      expect(useCanvasStore.getState().moveHistory).toHaveLength(1);
+
+      fetchMock.mockResolvedValueOnce(new Response('no', { status: 500 }));
+      await expect(useCanvasStore.getState().undoMoveNode()).rejects.toThrow();
+      // ロールバック: 座標は (50,60) のまま、履歴も維持。
+      expect(useCanvasStore.getState().nodes['req-a']).toMatchObject({ x: 50, y: 60 });
+      expect(useCanvasStore.getState().moveHistory).toHaveLength(1);
+    });
+
+    it('アコーディオン操作 (toggleNodeExpanded) は履歴を増やさない', () => {
+      const before = useCanvasStore.getState().moveHistory;
+      useCanvasStore.getState().toggleNodeExpanded('req-a');
+      useCanvasStore.getState().expandAllNodes();
+      useCanvasStore.getState().collapseAllNodes();
+      expect(useCanvasStore.getState().moveHistory).toEqual(before);
+    });
+
+    it('addNodeFromPalette / connectEdge は履歴を増やさない', async () => {
+      const created = {
+        id: 'req-new',
+        type: 'requirement',
+        x: 100,
+        y: 100,
+        title: '',
+        body: '',
+      };
+      okJson(created, 201);
+      await useCanvasStore.getState().addNodeFromPalette('requirement', 100, 100);
+      expect(useCanvasStore.getState().moveHistory).toEqual([]);
+
+      okJson({ id: 'e-1', from: 'req-a', to: 'req-new', type: 'trace' }, 201);
+      await useCanvasStore.getState().connectEdge('req-a', 'req-new', 'trace');
+      expect(useCanvasStore.getState().moveHistory).toEqual([]);
+    });
+
+    it('hydrate でプロジェクト切替時は履歴がクリアされる', async () => {
+      okJson({ id: 'req-a', type: 'requirement', x: 10, y: 20, title: 'A', body: '' });
+      await useCanvasStore.getState().moveNode('req-a', 10, 20);
+      expect(useCanvasStore.getState().moveHistory).toHaveLength(1);
+      useCanvasStore.getState().hydrate(baseProject());
+      expect(useCanvasStore.getState().moveHistory).toEqual([]);
+    });
+  });
+
   describe('アコーディオン (expandedNodes)', () => {
     it('hydrate 直後は全ノード折りたたみ (expandedNodes が空)', () => {
       expect(useCanvasStore.getState().expandedNodes).toEqual({});

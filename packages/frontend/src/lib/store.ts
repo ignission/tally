@@ -33,6 +33,15 @@ import { type ChatHandle, openChat, startAgent } from './ws';
 
 export type Selected = { kind: 'node'; id: string } | { kind: 'edge'; id: string } | null;
 
+// ノード移動 Undo 履歴の最大保持数。
+// issue #13 の要件「最大 3 回ほど操作が戻せると便利」に基づく。
+// 容量を超えた古い履歴は破棄する (FIFO)。
+export const MOVE_HISTORY_LIMIT = 3;
+
+// ノード移動の履歴エントリ。移動前 (id, x, y) を記録する。
+// Ctrl+Z 押下時にこの座標へ戻す。
+export type MoveHistoryEntry = { id: string; x: number; y: number };
+
 // ingest-document エージェントへの入力。paste = 貼り付けテキスト、docs-dir = プロジェクト内ディレクトリ走査。
 export type IngestDocumentInput =
   | { source: 'paste'; text: string }
@@ -59,6 +68,14 @@ interface CanvasState {
   select: (target: Selected) => void;
 
   moveNode: (id: string, x: number, y: number) => Promise<void>;
+  // ノード移動の Undo 履歴 (FIFO スタック、最大 MOVE_HISTORY_LIMIT 件)。
+  // moveNode 実行時に「移動前 (id, x, y)」を push し、undoMoveNode 時に pop する。
+  // セッション内のみ保持し、永続化しない (リロードでクリア)。
+  // ノード追加・エッジ操作・アコーディオン展開などは履歴に積まない。
+  moveHistory: MoveHistoryEntry[];
+  // 直近のノード移動を 1 件取り消す。履歴が空なら何もしない (resolve false)。
+  // サーバ更新失敗時は履歴を巻き戻して例外を投げる呼び出し側に委ねる。
+  undoMoveNode: () => Promise<boolean>;
   patchNode: <T extends NodeType>(
     id: string,
     patch: Partial<Omit<Extract<Node, { type: T }>, 'id' | 'type'>>,
@@ -326,6 +343,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
     edges: {},
     selected: null,
     expandedNodes: {},
+    moveHistory: [],
     runningAgent: null,
     chatThreadList: [],
     activeChatThreadId: null,
@@ -342,6 +360,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         selected: null,
         // プロジェクト切替時は全ノード折りたたみで開始する (つながり重視の初期表示)。
         expandedNodes: {},
+        // プロジェクト切替時は移動履歴もリセット (別プロジェクトの座標を戻すと壊れる)。
+        moveHistory: [],
       });
     },
 
@@ -353,6 +373,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         edges: {},
         selected: null,
         expandedNodes: {},
+        moveHistory: [],
         runningAgent: null,
       }),
 
@@ -383,15 +404,68 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
       if (!pid) throw new Error('projectId is not set');
       const prev = get().nodes[id];
       if (!prev) throw new Error(`unknown node: ${id}`);
+      // 同じ座標へのドラッグ (= 実質クリックで動いていない) は履歴に積まない。
+      // ドラッグ操作直後 onNodeDragStop が同位置で呼ばれても無視する。
+      const moved = prev.x !== x || prev.y !== y;
       // NOTE(phase3): 同一ノードへの並行リクエストは後勝ち。失敗ロールバックが
       // 後続操作の楽観更新を巻き戻す可能性があるが、単一ユーザー前提のため許容。
       // 楽観更新: ドラッグ中の UI を即座に反映する。
       set({ nodes: { ...get().nodes, [id]: { ...prev, x, y } } });
+      // Undo 履歴に「移動前」を push (FIFO、容量超過は古いものを捨てる)。
+      // 楽観更新と一緒のタイミングで積むことで、サーバ失敗時のロールバックでも履歴の整合は取れる
+      // (履歴に積んだエントリは「現在の prev 座標」を指すため)。
+      if (moved) {
+        const hist = get().moveHistory;
+        const next = [...hist, { id, x: prev.x, y: prev.y }];
+        // 古い履歴から落とす。1 操作に 1 件 push なので超過は最大 1 件。
+        if (next.length > MOVE_HISTORY_LIMIT) next.splice(0, next.length - MOVE_HISTORY_LIMIT);
+        set({ moveHistory: next });
+      }
       try {
         await updateNodeApi(pid, id, { x, y });
       } catch (err) {
         // サーバ側の YAML は変わっていないので、元の座標へ戻す。
         set({ nodes: { ...get().nodes, [id]: prev } });
+        // 履歴に積んだ巻き戻し対象も取り除く (移動が成立しなかったため)。
+        if (moved) {
+          const hist = get().moveHistory;
+          if (hist.length > 0) set({ moveHistory: hist.slice(0, -1) });
+        }
+        throw err;
+      }
+    },
+
+    undoMoveNode: async () => {
+      const pid = get().projectId;
+      if (!pid) return false;
+      const hist = get().moveHistory;
+      if (hist.length === 0) return false;
+      const last = hist[hist.length - 1];
+      if (!last) return false;
+      const cur = get().nodes[last.id];
+      // 対象ノードが既に削除されていたら履歴だけ捨てる。
+      if (!cur) {
+        set({ moveHistory: hist.slice(0, -1) });
+        return false;
+      }
+      // 履歴を 1 件巻き戻し、楽観的に元座標へ戻す。
+      // moveNode を再利用すると新たな履歴が積まれて Undo が無限にループするため、
+      // ここでは直接 set + API 呼び出しする。
+      const restored = { ...cur, x: last.x, y: last.y };
+      const prevState = cur;
+      set({
+        nodes: { ...get().nodes, [last.id]: restored },
+        moveHistory: hist.slice(0, -1),
+      });
+      try {
+        await updateNodeApi(pid, last.id, { x: last.x, y: last.y });
+        return true;
+      } catch (err) {
+        // サーバ更新が失敗したら UI も履歴も元に戻す (整合性優先)。
+        set({
+          nodes: { ...get().nodes, [last.id]: prevState },
+          moveHistory: hist,
+        });
         throw err;
       }
     },
