@@ -14,7 +14,7 @@ import {
   type Node as RFNode,
   useReactFlow,
 } from '@xyflow/react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import '@xyflow/react/dist/style.css';
 
@@ -68,10 +68,8 @@ export function Canvas() {
   // - IME 変換 Enter/Z 誤発火を防ぐため isComposing もケア
   // - Shift 併用 (Redo) は今回の要件外なので無視
   // - 履歴が空のときはブラウザ既定 Undo を握り潰さない (preventDefault しない)
-  const undoMoveNodeRef = useRef(undoMoveNode);
-  useEffect(() => {
-    undoMoveNodeRef.current = undoMoveNode;
-  }, [undoMoveNode]);
+  // Zustand の action は安定参照のため ref ラップは不要。
+  // useEffect の依存配列に `undoMoveNode` を入れて直接呼ぶ。
   useEffect(() => {
     function handler(evt: KeyboardEvent) {
       // ブラウザ既定の Undo は textarea/input の文字編集向けなので、
@@ -87,13 +85,13 @@ export function Canvas() {
       // store から `moveHistory` を同期取得して判定する。
       if (useCanvasStore.getState().moveHistory.length === 0) return;
       evt.preventDefault();
-      undoMoveNodeRef.current().catch((err) => {
+      undoMoveNode().catch((err) => {
         console.error('undoMoveNode failed', err);
       });
     }
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, []);
+  }, [undoMoveNode]);
 
   const rfNodes = useMemo<RFNode[]>(
     () =>
