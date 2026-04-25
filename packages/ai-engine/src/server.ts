@@ -27,6 +27,9 @@ const ChatOpenSchema = z.object({
 const ChatUserMessageSchema = z.object({
   type: z.literal('user_message'),
   text: z.string().min(1),
+  // issue #11: ユーザーが「@メンション」で添付したノード ID 群。
+  // 省略時は空配列扱い。runner 側で存在しないものは無視する。
+  contextNodeIds: z.array(z.string().min(1)).optional(),
 });
 
 const ChatApproveToolSchema = z.object({
@@ -206,7 +209,10 @@ function handleChatConnection(ws: WebSocket, sdk: SdkLike): void {
         return;
       }
       try {
-        for await (const evt of runner.runUserTurn(result.data.text)) {
+        for await (const evt of runner.runUserTurn(
+          result.data.text,
+          result.data.contextNodeIds ?? [],
+        )) {
           send(evt);
         }
       } catch (err) {
