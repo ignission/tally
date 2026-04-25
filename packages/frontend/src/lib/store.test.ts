@@ -654,6 +654,71 @@ describe('useCanvasStore', () => {
       expect(useCanvasStore.getState().moveHistory).toEqual([]);
     });
 
+    it('削除済みノードを指す履歴は undoMoveNode で skip されて false になる', async () => {
+      // 1) ノードを移動 (履歴に 1 件積む)。
+      okJson({ id: 'req-a', type: 'requirement', x: 10, y: 20, title: 'A', body: '' });
+      await useCanvasStore.getState().moveNode('req-a', 10, 20);
+      expect(useCanvasStore.getState().moveHistory).toHaveLength(1);
+
+      // 2) ノードを削除 (DELETE 成功)。これで履歴の末尾は「もう存在しないノード」を指す。
+      okJson({});
+      await useCanvasStore.getState().removeNode('req-a');
+      expect(useCanvasStore.getState().nodes['req-a']).toBeUndefined();
+
+      // 3) Undo: skip された結果、何も戻せず false が返り、履歴は空になる。
+      //    余計な PATCH も走らない (削除済みなので API 呼び出しはスキップされる)。
+      const callsBefore = fetchMock.mock.calls.length;
+      const r = await useCanvasStore.getState().undoMoveNode();
+      expect(r).toBe(false);
+      expect(useCanvasStore.getState().moveHistory).toEqual([]);
+      expect(fetchMock.mock.calls.length).toBe(callsBefore);
+    });
+
+    it('A 移動 → B 移動 → A 削除 → Undo で B が戻り、もう 1 回 Undo は false (A は skip)', async () => {
+      // 2 ノードを持つ project に差し替え。
+      useCanvasStore.getState().hydrate({
+        id: 'proj-1',
+        name: 'P',
+        codebases: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        nodes: [
+          { id: 'req-a', type: 'requirement', x: 0, y: 0, title: 'A', body: '' },
+          { id: 'req-b', type: 'requirement', x: 100, y: 100, title: 'B', body: '' },
+        ],
+        edges: [],
+      });
+
+      // A を移動 → 履歴: [A:(0,0)]
+      okJson({ id: 'req-a', type: 'requirement', x: 11, y: 22, title: 'A', body: '' });
+      await useCanvasStore.getState().moveNode('req-a', 11, 22);
+      // B を移動 → 履歴: [A:(0,0), B:(100,100)]
+      okJson({ id: 'req-b', type: 'requirement', x: 200, y: 200, title: 'B', body: '' });
+      await useCanvasStore.getState().moveNode('req-b', 200, 200);
+      expect(useCanvasStore.getState().moveHistory).toHaveLength(2);
+
+      // A を削除 → 履歴は変わらないが、末尾以外に「削除済み」を指すエントリが残る。
+      okJson({});
+      await useCanvasStore.getState().removeNode('req-a');
+      expect(useCanvasStore.getState().nodes['req-a']).toBeUndefined();
+
+      // 1 回目 Undo: 末尾 (B) は生きているので普通に戻せる。
+      okJson({ id: 'req-b', type: 'requirement', x: 100, y: 100, title: 'B', body: '' });
+      const r1 = await useCanvasStore.getState().undoMoveNode();
+      expect(r1).toBe(true);
+      expect(useCanvasStore.getState().nodes['req-b']).toMatchObject({ x: 100, y: 100 });
+      // 履歴は [A:(0,0)] が残るが、A は削除済みなので次回 skip 対象になる。
+      expect(useCanvasStore.getState().moveHistory).toHaveLength(1);
+
+      // 2 回目 Undo: 末尾の A は削除済み → skip され、履歴は空に → false を返す。
+      // PATCH は走らない。
+      const callsBefore = fetchMock.mock.calls.length;
+      const r2 = await useCanvasStore.getState().undoMoveNode();
+      expect(r2).toBe(false);
+      expect(useCanvasStore.getState().moveHistory).toEqual([]);
+      expect(fetchMock.mock.calls.length).toBe(callsBefore);
+    });
+
     it('hydrate でプロジェクト切替時は履歴がクリアされる', async () => {
       okJson({ id: 'req-a', type: 'requirement', x: 10, y: 20, title: 'A', body: '' });
       await useCanvasStore.getState().moveNode('req-a', 10, 20);
