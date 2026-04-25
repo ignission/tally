@@ -82,10 +82,9 @@ async function dragNodeBy(
   // onNodeDragStop が PATCH /nodes/{id} を投げるのを待ち受ける (Minor-B)。
   // 観測失敗 (timeout) でも例外にしない。後続の DOM 反映は呼び出し側で expect.poll する。
   const responsePromise = page
-    .waitForResponse(
-      (res) => NODE_PATCH_RE.test(res.url()) && res.request().method() === 'PATCH',
-      { timeout: 5000 },
-    )
+    .waitForResponse((res) => NODE_PATCH_RE.test(res.url()) && res.request().method() === 'PATCH', {
+      timeout: 5000,
+    })
     .catch(() => null);
   await page.mouse.move(startX, startY);
   await page.mouse.down();
@@ -104,10 +103,9 @@ async function pressUndoOnCanvas(page: Page): Promise<void> {
   // pane (背景) をクリックしてフォーカスを外す。位置は左上の余白。
   await page.locator('.react-flow__pane').click({ position: { x: 5, y: 5 } });
   const responsePromise = page
-    .waitForResponse(
-      (res) => NODE_PATCH_RE.test(res.url()) && res.request().method() === 'PATCH',
-      { timeout: 1500 },
-    )
+    .waitForResponse((res) => NODE_PATCH_RE.test(res.url()) && res.request().method() === 'PATCH', {
+      timeout: 1500,
+    })
     .catch(() => null);
   await page.keyboard.press('Control+z');
   await responsePromise;
@@ -226,9 +224,9 @@ test.describe('ノード移動 Undo', () => {
     expect(Math.abs(stillMoved.x - moved.x)).toBeLessThanOrEqual(1);
     expect(Math.abs(stillMoved.y - moved.y)).toBeLessThanOrEqual(1);
     // initial と比べて十分ずれている。
-    expect(
-      Math.abs(stillMoved.x - initial.x) + Math.abs(stillMoved.y - initial.y),
-    ).toBeGreaterThan(20);
+    expect(Math.abs(stillMoved.x - initial.x) + Math.abs(stillMoved.y - initial.y)).toBeGreaterThan(
+      20,
+    );
 
     // フォーカスを外して Ctrl+Z すれば今度は戻る (履歴は消費されていない証拠)。
     await pressUndoOnCanvas(page);
