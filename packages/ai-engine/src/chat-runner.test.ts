@@ -225,9 +225,90 @@ describe('ChatRunner', () => {
     expect(capturedPrompt).toContain('type: requirement');
     expect(capturedPrompt).toContain('title: 招待メールから登録できる');
     expect(capturedPrompt).toContain('priority: must');
-    // user メッセージは履歴に積まれている (runUserTurn 内で空 assistant が後置されるため
-    // current_user_message ではなく conversation_history に入る既存挙動)。
-    expect(capturedPrompt).toContain('この要求を分解してほしい');
+    // codex セカンドオピニオン #16 修正後: user メッセージは <current_user_message> に入る。
+    // <context_nodes> ブロックは <current_user_message> より前に位置する。
+    expect(capturedPrompt).toContain('<current_user_message>');
+    const ctxIdx = capturedPrompt.indexOf('<context_nodes>');
+    const curIdx = capturedPrompt.indexOf('<current_user_message>');
+    expect(ctxIdx).toBeGreaterThanOrEqual(0);
+    expect(curIdx).toBeGreaterThan(ctxIdx);
+    // 「この要求を分解してほしい」は current_user_message ブロック内にある。
+    expect(capturedPrompt.slice(curIdx)).toContain('この要求を分解してほしい');
+    // 履歴に user 入力が紛れていない (今回が初ターンなので conversation_history 自体が出ない)。
+    expect(capturedPrompt).not.toContain('<conversation_history>');
+  });
+
+  // codex セカンドオピニオン #16 (ロジックバグ): runUserTurn は内部で空 assistant message を
+  // append するため、prompt 組立を append 前にスナップショットしないと末尾が assistant となり
+  // <current_user_message> が出ず、<context_nodes> が user 入力の後ろに並ぶ問題があった。
+  // この回帰を防ぐ:
+  //   1) <context_nodes> ブロックが <current_user_message> より前にある
+  //   2) 今ターンの user 入力が <conversation_history> 内に出現しない (= 履歴に埋もれていない)
+  it('runUserTurn: <context_nodes> は <current_user_message> より前、user 入力は履歴に埋もれない', async () => {
+    const chatStore = new FileSystemChatStore(root);
+    const projectStore = new FileSystemProjectStore(root);
+    const thread = await chatStore.createChat({ projectId: 'proj-1', title: 't' });
+
+    // 過去ターンを 1 往復仕込む。新しい user 入力が conversation_history に紛れないことを
+    // この過去 user 入力の有無と対比して確認するため。
+    await chatStore.appendMessage(thread.id, {
+      id: newChatMessageId(),
+      role: 'user',
+      blocks: [{ type: 'text', text: '過去のユーザー発話' }],
+      createdAt: new Date().toISOString(),
+    });
+    await chatStore.appendMessage(thread.id, {
+      id: newChatMessageId(),
+      role: 'assistant',
+      blocks: [{ type: 'text', text: '過去のアシスタント応答' }],
+      createdAt: new Date().toISOString(),
+    });
+
+    const target = (await projectStore.addNode({
+      type: 'requirement',
+      x: 0,
+      y: 0,
+      title: 'T1',
+      body: '',
+    })) as Node;
+
+    let capturedPrompt = '';
+    const sdk: SdkLike = {
+      query: ({ prompt }: { prompt: string }) => {
+        capturedPrompt = prompt;
+        return (async function* () {
+          yield { type: 'result', subtype: 'success', result: 'ok' } as unknown as SdkMessageLike;
+        })();
+      },
+    };
+    const runner = new ChatRunner({
+      sdk,
+      chatStore,
+      projectStore,
+      projectDir: root,
+      threadId: thread.id,
+    });
+
+    const NEW_USER_TEXT = '今ターンの新しい入力XYZ';
+    for await (const _e of runner.runUserTurn(NEW_USER_TEXT, [target.id])) {
+      // drain
+    }
+
+    const histIdx = capturedPrompt.indexOf('<conversation_history>');
+    const histEndIdx = capturedPrompt.indexOf('</conversation_history>');
+    const ctxIdx = capturedPrompt.indexOf('<context_nodes>');
+    const curIdx = capturedPrompt.indexOf('<current_user_message>');
+
+    // 順序: history → context → current
+    expect(histIdx).toBeGreaterThanOrEqual(0);
+    expect(ctxIdx).toBeGreaterThan(histIdx);
+    expect(curIdx).toBeGreaterThan(ctxIdx);
+
+    // 今ターンの user 入力は <current_user_message> ブロック内にあり、conversation_history には無い。
+    const historyBlock = capturedPrompt.slice(histIdx, histEndIdx);
+    expect(historyBlock).toContain('過去のユーザー発話');
+    expect(historyBlock).not.toContain(NEW_USER_TEXT);
+    expect(capturedPrompt.slice(curIdx)).toContain(NEW_USER_TEXT);
   });
 
   // 不在 ID は黙って捨てる: 削除済みノードを混ぜても他のノードは渡る + エラーにならない。
@@ -320,6 +401,28 @@ describe('formatNodeForContext / buildChatPrompt', () => {
     expect(out).toContain('* メールリンク');
     expect(out).toContain('- 電話SMS');
     expect(out).toContain('decision: opt-1');
+  });
+
+  it('formatNodeForContext: proposal は未採用注釈と adoptAs を含み sourceAgentId は含まない', () => {
+    // codex セカンドオピニオン #16: proposal の sourceAgentId は AI にとって意味の無い内部属性。
+    // 代わりに「未採用の AI 提案」であることを note として AI に伝える (ADR-0005)。
+    const node: Node = {
+      id: 'p-1',
+      type: 'proposal',
+      x: 0,
+      y: 0,
+      title: '[AI] 提案タイトル',
+      body: '提案ボディ',
+      adoptAs: 'requirement',
+      sourceAgentId: 'agent-decompose-to-stories',
+    };
+    const out = formatNodeForContext(node);
+    expect(out).toContain('id: p-1');
+    expect(out).toContain('type: proposal');
+    expect(out).toContain('未採用の AI 提案');
+    expect(out).toContain('adoptAs: requirement');
+    expect(out).not.toContain('sourceAgentId');
+    expect(out).not.toContain('agent-decompose-to-stories');
   });
 
   it('formatNodeForContext: coderef の filePath/startLine などを含む', () => {

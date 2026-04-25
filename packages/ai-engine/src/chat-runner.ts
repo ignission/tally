@@ -103,7 +103,19 @@ export class ChatRunner {
     await chatStore.appendMessage(threadId, userMsg);
     yield { type: 'chat_user_message_appended', messageId: userMsgId };
 
-    // 2. 空の assistant message を append (後続の tool_use 即時永続化の親として必要)
+    // 2. prompt を先に組む。user message 追加直後の履歴 (末尾が user) をスナップショットし、
+    //    buildChatPrompt が <current_user_message> を末尾の user message として正しく抽出できる状態で呼ぶ。
+    //    これは「<context_nodes> は今ターンの user 入力より前に置く」契約 (issue #11) を守るため必須。
+    //    後続で空 assistant を append すると履歴末尾が assistant になってしまい、buildChatPrompt の
+    //    `last?.role === 'user'` 判定が false に倒れる (= context_nodes が user 入力の後ろに並ぶバグ) ので、
+    //    必ずこの順で snapshot → prompt 組立 → 空 assistant append の順を守る。
+    const threadWithUser = await chatStore.getChat(threadId);
+    const contextNodes = await loadContextNodes(projectStore, contextNodeIds);
+    const prompt = buildChatPrompt(threadWithUser?.messages ?? [], contextNodes);
+    const systemPrompt = buildChatSystemPrompt();
+
+    // 3. 空の assistant message を append (後続の tool_use 即時永続化の親として必要)
+    //    prompt スナップショット後に行うことで、上記 buildChatPrompt の前提が崩れないようにする。
     const assistantMsgId = newChatMessageId();
     await chatStore.appendMessage(threadId, {
       id: assistantMsgId,
@@ -112,12 +124,6 @@ export class ChatRunner {
       createdAt: new Date().toISOString(),
     });
     yield { type: 'chat_assistant_message_started', messageId: assistantMsgId };
-
-    // 3. prompt / system prompt を組む (user msg 追加後の履歴込み)
-    const threadWithUser = await chatStore.getChat(threadId);
-    const contextNodes = await loadContextNodes(projectStore, contextNodeIds);
-    const prompt = buildChatPrompt(threadWithUser?.messages ?? [], contextNodes);
-    const systemPrompt = buildChatSystemPrompt();
 
     // 4. MCP 経由で呼ばれる tool ハンドラ内で invokeInterceptedTool を回す。
     //    MCP handler は SDK query を block するので、イベント emit は AsyncQueue 経由に分離する。
@@ -526,8 +532,11 @@ export function formatNodeForContext(node: Node): string {
     if (node.summary) lines.push(`summary: ${node.summary}`);
     if (node.impact) lines.push(`impact: ${node.impact}`);
   } else if (node.type === 'proposal') {
+    // 未採用の AI 提案であることを AI 側に明示する。
+    // sourceAgentId は AI にとって意味の無い内部属性なので渡さない (codex セカンドオピニオン #16)。
+    // adoptAs は「採用時にどの正規 type に昇格するか」のヒントとして残す (ADR-0005)。
+    lines.push('note: このノードは未採用の AI 提案です (人間の採用操作で正規ノードに昇格)');
     if (node.adoptAs) lines.push(`adoptAs: ${node.adoptAs}`);
-    if (node.sourceAgentId) lines.push(`sourceAgentId: ${node.sourceAgentId}`);
   }
   return lines.join('\n');
 }
