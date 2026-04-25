@@ -86,9 +86,12 @@ export function startAgent(opts: StartAgentOptions): AgentHandle {
 // ChatHandle: /chat WS 接続のハンドル。events は ChatEvent の AsyncIterable、
 // sendUserMessage / approveTool は client → server 方向のメッセージ送信。
 // close() で WS を閉じる (サーバ側も runner を破棄する)。
+//
+// sendUserMessage の contextNodeIds は issue #11 で追加。空 / 省略時はサーバが
+// 「context 添付なし」として扱う。
 export interface ChatHandle {
   events: AsyncIterable<ChatEvent>;
-  sendUserMessage: (text: string) => void;
+  sendUserMessage: (text: string, contextNodeIds?: string[]) => void;
   approveTool: (toolUseId: string, approved: boolean) => void;
   close: () => void;
 }
@@ -178,7 +181,12 @@ export function openChat(opts: OpenChatOptions): ChatHandle {
 
   return {
     events,
-    sendUserMessage: (text) => sendWhenReady({ type: 'user_message', text }),
+    sendUserMessage: (text, contextNodeIds) =>
+      sendWhenReady({
+        type: 'user_message',
+        text,
+        ...(contextNodeIds && contextNodeIds.length > 0 ? { contextNodeIds } : {}),
+      }),
     approveTool: (toolUseId, approved) =>
       sendWhenReady({ type: 'approve_tool', toolUseId, approved }),
     close: () => ws.close(),

@@ -113,6 +113,15 @@ interface CanvasState {
   closeChatThread: () => void;
   sendChatMessage: (text: string) => Promise<void>;
   approveChatTool: (toolUseId: string, approved: boolean) => void;
+
+  // issue #11: チャットに「@メンション」のように添付するノード ID 群。
+  // 順序保持 + 重複排除のため配列で持つ。スレッド切替・close で自動クリア
+  // (永続化はしない / chats/<id>.yaml にも書かない)。
+  chatContextNodeIds: string[];
+  addChatContextNode: (nodeId: string) => void;
+  removeChatContextNode: (nodeId: string) => void;
+  clearChatContext: () => void;
+
   // 現在開いているスレッドを削除する。open 中なら閉じ、一覧からも除去。
   deleteChatThread: (threadId: string) => Promise<void>;
   // プロジェクトのノード/エッジ/チャットを全クリア (project.yaml は維持)。
@@ -331,6 +340,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
     activeChatThreadId: null,
     chatThreadMessages: [],
     chatThreadStreaming: false,
+    chatContextNodeIds: [],
 
     hydrate: (project) => {
       const { nodes, edges, ...meta } = project;
@@ -342,6 +352,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         selected: null,
         // プロジェクト切替時は全ノード折りたたみで開始する (つながり重視の初期表示)。
         expandedNodes: {},
+        // プロジェクト切替時は context もクリア (別プロジェクトのノード id は無効)。
+        chatContextNodeIds: [],
       });
     },
 
@@ -354,6 +366,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         selected: null,
         expandedNodes: {},
         runningAgent: null,
+        chatContextNodeIds: [],
       }),
 
     select: (target) => set({ selected: target }),
@@ -632,6 +645,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         activeChatThreadId: threadId,
         chatThreadMessages: thread.messages,
         chatThreadStreaming: false,
+        // スレッド切替時は context もリセット (前スレッドの添付を引きずらない)。
+        chatContextNodeIds: [],
       });
       const handle = openChat({ projectId: pid, threadId });
       chatHandle = handle;
@@ -653,11 +668,31 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         chatHandle.close();
         chatHandle = null;
       }
-      set({ activeChatThreadId: null, chatThreadMessages: [], chatThreadStreaming: false });
+      set({
+        activeChatThreadId: null,
+        chatThreadMessages: [],
+        chatThreadStreaming: false,
+        chatContextNodeIds: [],
+      });
     },
+
+    // issue #11: チャット添付ノードの操作。
+    // add: 重複なら no-op、存在しないノード id でも UI 側でフィルタするので許容。
+    addChatContextNode: (nodeId) => {
+      const cur = get().chatContextNodeIds;
+      if (cur.includes(nodeId)) return;
+      set({ chatContextNodeIds: [...cur, nodeId] });
+    },
+    removeChatContextNode: (nodeId) => {
+      set({ chatContextNodeIds: get().chatContextNodeIds.filter((id) => id !== nodeId) });
+    },
+    clearChatContext: () => set({ chatContextNodeIds: [] }),
 
     // user 入力を WS に送る。楽観的に user メッセージをローカルにも積み、streaming フラグを立てる。
     // サーバ側は chat_user_message_appended で append 完了を通知するが、UI は楽観分で十分。
+    // issue #11: chatContextNodeIds を WS フレームに同梱して AI に渡す。
+    // 送信後はキャンバス側で別ノードを取り上げ直しがち、かつ「同じノードを連続で参照したい」
+    // ケースもあるため、自動クリアはしない。明示的に削除/clear を呼ぶ運用。
     sendChatMessage: async (text) => {
       if (!chatHandle) throw new Error('chat thread is not opened');
       const userMsg: ChatMessage = {
@@ -670,7 +705,10 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         chatThreadMessages: [...get().chatThreadMessages, userMsg],
         chatThreadStreaming: true,
       });
-      chatHandle.sendUserMessage(text);
+      // 削除済みノード id (キャンバスから消えたもの) はサーバが getNode で弾くが、
+      // クライアント側でも一応フィルタして無駄なペイロードを送らない。
+      const ctxIds = get().chatContextNodeIds.filter((id) => id in get().nodes);
+      chatHandle.sendUserMessage(text, ctxIds);
     },
 
     approveChatTool: (toolUseId, approved) => {
@@ -691,6 +729,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
           activeChatThreadId: null,
           chatThreadMessages: [],
           chatThreadStreaming: false,
+          chatContextNodeIds: [],
         });
       }
       await deleteChatThreadApi(pid, threadId);
@@ -717,6 +756,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         activeChatThreadId: null,
         chatThreadMessages: [],
         chatThreadStreaming: false,
+        chatContextNodeIds: [],
       });
     },
 

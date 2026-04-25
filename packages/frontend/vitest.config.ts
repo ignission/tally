@@ -25,6 +25,10 @@ export default defineConfig({
           include: ['src/**/*.test.tsx'],
           environment: 'jsdom',
           setupFiles: ['./vitest.setup.ts'],
+          // React 19 では `React.act` が development build にしか含まれない。
+          // testing-library が React.act を必要とするので test 実行は development 扱いにする。
+          // (NODE_ENV=test だと react.production.js が読まれて React.act が undefined になる)
+          env: { NODE_ENV: 'development' },
         },
       },
       {
