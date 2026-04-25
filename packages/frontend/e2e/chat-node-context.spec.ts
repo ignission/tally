@@ -85,7 +85,7 @@ test.describe('Chat コンテキストノード操作', () => {
     const picker = page.getByRole('dialog', { name: 'コンテキストに追加するノードを選択' });
     await expect(picker).toBeVisible();
     // ピッカー内のボタンで該当ノードを 1 件 add。文字列短縮(36文字以下) のため title 完全一致で取れる。
-    await picker.getByRole('button', { name: new RegExp(TARGET_TITLE_PICKER) }).click();
+    await picker.getByRole('button', { name: TARGET_TITLE_PICKER }).click();
 
     await expect(bar.getByTestId('chat-context-chip')).toHaveCount(2);
   });
@@ -99,7 +99,7 @@ test.describe('Chat コンテキストノード操作', () => {
     await page.getByRole('button', { name: '選択中のノードを添付' }).click();
     await page.getByRole('button', { name: 'コンテキストにノードを追加' }).click();
     const picker = page.getByRole('dialog', { name: 'コンテキストに追加するノードを選択' });
-    await picker.getByRole('button', { name: new RegExp(TARGET_TITLE_PICKER) }).click();
+    await picker.getByRole('button', { name: TARGET_TITLE_PICKER }).click();
 
     const bar = page.getByTestId('chat-context-bar');
     await expect(bar.getByTestId('chat-context-chip')).toHaveCount(2);
