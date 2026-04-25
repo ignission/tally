@@ -15,3 +15,23 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/*
+ * React Flow キャンバスの操作感調整 (issue #12)
+ * - パン操作はスクロールに集約したため、ペイン上は default カーソル。
+ * - ノード上はホバーで grab、ドラッグ中は grabbing。
+ * - ドラッグ中のノードは半透明にして「掴んでいる」フィードバックを強める (ゴーストイメージ)。
+ */
+.react-flow__pane {
+  cursor: default;
+}
+
+.react-flow__node {
+  cursor: grab;
+}
+
+.react-flow__node.dragging,
+.react-flow__node.draggable.dragging {
+  cursor: grabbing;
+  opacity: 0.7;
+}
