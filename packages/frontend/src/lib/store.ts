@@ -139,6 +139,11 @@ function byId<T extends { id: string }>(items: T[]): Record<string, T> {
   return out;
 }
 
+// issue #11: チャットコンテキストに添付できるノード数の上限。
+// サーバ側 (packages/ai-engine/src/server.ts の MAX_CHAT_CONTEXT_NODES) と同じ値。
+// クライアント側でも先回りで弾くことで、無駄な WS フレームを送らない & UI の意図を明示する。
+const MAX_CHAT_CONTEXT_NODES = 20;
+
 // Phase 3: 可変ストア。楽観的更新 + 失敗時ロールバックで YAML と同期する。
 export const useCanvasStore = create<CanvasState>((set, get) => {
   // Phase 6: 現在開いているチャットスレッドの WS handle。
@@ -678,9 +683,12 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
 
     // issue #11: チャット添付ノードの操作。
     // add: 重複なら no-op、存在しないノード id でも UI 側でフィルタするので許容。
+    // 上限 (MAX_CHAT_CONTEXT_NODES) を超える場合も no-op。サーバ側でも同じ値で弾くが、
+    // クライアントで先に弾くことで送信前に状態を一致させる。
     addChatContextNode: (nodeId) => {
       const cur = get().chatContextNodeIds;
       if (cur.includes(nodeId)) return;
+      if (cur.length >= MAX_CHAT_CONTEXT_NODES) return;
       set({ chatContextNodeIds: [...cur, nodeId] });
     },
     removeChatContextNode: (nodeId) => {
