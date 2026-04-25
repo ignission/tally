@@ -28,6 +28,11 @@ export function ChatContextBar() {
   const selectedNodeId = selected?.kind === 'node' ? selected.id : null;
   const canAttachSelected = selectedNodeId != null && !ids.includes(selectedNodeId);
 
+  // pickerOpen の状態に応じてトグルボタンの aria-label を切り替え、SR でも開閉が伝わるようにする。
+  const pickerToggleLabel = pickerOpen
+    ? 'コンテキスト追加ピッカーを閉じる'
+    : 'コンテキストにノードを追加';
+
   return (
     <div style={WRAP_STYLE} data-testid="chat-context-bar">
       <div style={ROW_STYLE}>
@@ -43,7 +48,7 @@ export function ChatContextBar() {
           style={BUTTON_STYLE}
           onClick={() => setPickerOpen((v) => !v)}
           aria-expanded={pickerOpen}
-          aria-label="コンテキストにノードを追加"
+          aria-label={pickerToggleLabel}
         >
           {pickerOpen ? '× 閉じる' : '+ ノードを追加'}
         </button>
@@ -116,29 +121,33 @@ function ChatContextPicker({ onClose }: PickerProps) {
   const ids = useCanvasStore((s) => s.chatContextNodeIds);
   const addCtx = useCanvasStore((s) => s.addChatContextNode);
 
-  const all = Object.values(nodes);
-  const groupedByType = new Map<NodeType, Node[]>();
-  for (const n of all) {
-    const arr = groupedByType.get(n.type) ?? [];
-    arr.push(n);
-    groupedByType.set(n.type, arr);
-  }
-  // NODE_META のキー順で並べる (NODE_TYPES と一致)。
+  // NODE_META のキー順 (= 宣言順) で 1 パスに直接 groups を組む。
+  // 2 段階 (Map 構築 → 再走査) を避け、空グループはここで除外する。
   const orderedTypes = Object.keys(NODE_META) as NodeType[];
+  const groups = orderedTypes
+    .map((type) => ({
+      type,
+      items: Object.values(nodes).filter((n) => n.type === type),
+    }))
+    .filter((g) => g.items.length > 0);
+  const isEmpty = groups.length === 0;
 
-  if (all.length === 0) {
+  if (isEmpty) {
     return (
-      <div style={PICKER_STYLE}>
+      <div style={PICKER_STYLE} role="dialog" aria-label="コンテキストに追加するノードを選択">
         <p style={PICKER_EMPTY_STYLE}>キャンバスにノードがありません。</p>
+        <div style={PICKER_FOOTER_STYLE}>
+          <button type="button" style={SECONDARY_BUTTON_STYLE} onClick={onClose}>
+            閉じる
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
     <div style={PICKER_STYLE} role="dialog" aria-label="コンテキストに追加するノードを選択">
-      {orderedTypes.map((type) => {
-        const items = groupedByType.get(type);
-        if (!items || items.length === 0) return null;
+      {groups.map(({ type, items }) => {
         const meta = NODE_META[type];
         return (
           <div key={type} style={PICKER_GROUP_STYLE}>
