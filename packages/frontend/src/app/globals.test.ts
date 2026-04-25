@@ -9,6 +9,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // issue #12: キャンバスの操作感を CSS で担保する。
 // React Flow のクラスを globals.css で上書きしているため、
 // 必要なルールが消えていないことをテストで担保する。
+// TODO: React 19 + RTL 互換が解決したら、ソーステキスト読取ではなく実 DOM の getComputedStyle で検証する。
 describe('globals.css のキャンバス操作ルール', () => {
   it('React Flow キャンバスの操作感ルールがすべて含まれている', async () => {
     const css = await readFile(path.resolve(__dirname, 'globals.css'), 'utf8');

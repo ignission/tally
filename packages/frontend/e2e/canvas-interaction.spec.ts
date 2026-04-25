@@ -8,18 +8,18 @@ import { expect, type Page, test } from '@playwright/test';
 //  3. wheel イベントで縦方向にパン (.react-flow__viewport の transform が変化)
 //  4. Shift+wheel で横方向にパン (transform の translateX が変化)
 
-const TARGET_TITLE = '権限レベルの柔軟設定';
-
 async function openSampleProject(page: Page): Promise<void> {
   await page.goto('/');
   await page.getByRole('link', { name: /TaskFlow 招待機能追加/ }).click();
   // React Flow のノード描画と viewport の transform 反映 (fitView) を待つ。
+  // 後続テストはノードが 1 件以上存在することを暗黙の前提とするため、ここで明示的に保証する。
+  await expect(page.locator('.react-flow__node')).not.toHaveCount(0);
   await page.locator('.react-flow__node').first().waitFor({ state: 'visible' });
   await page.locator('.react-flow__viewport').first().waitFor({ state: 'attached' });
 }
 
 // .react-flow__viewport の inline style の transform を取得する。
-// React Flow は `translate(x, y) scale(z)` の形式で書き込む。
+// React Flow v12 系は `translate(Xpx, Ypx) scale(Z)` の形式で書き込む。
 async function readViewportTransform(page: Page): Promise<string> {
   return await page.locator('.react-flow__viewport').first().evaluate((el) => {
     return (el as HTMLElement).style.transform;
@@ -27,9 +27,16 @@ async function readViewportTransform(page: Page): Promise<string> {
 }
 
 // transform 文字列から translate(x, y) を抽出。scale 部分は無視する。
+// 前提: React Flow v12 系の `translate(Xpx, Ypx) scale(Z)` 形式。
+// パース失敗時は黙って 0 を返さず throw する。CSS 形式が変わった場合に
+// 偽陰性 (transform 不変判定で誤合格) を起こさず、即座に気付けるようにするため。
 function parseTranslate(transform: string): { x: number; y: number } {
   const m = /translate\(\s*(-?[\d.]+)px\s*,\s*(-?[\d.]+)px\s*\)/.exec(transform);
-  if (!m) return { x: 0, y: 0 };
+  if (!m) {
+    throw new Error(
+      `viewport transform が想定形式 (translate(Xpx, Ypx) scale(Z)) ではない: ${JSON.stringify(transform)}`,
+    );
+  }
   return { x: Number(m[1]), y: Number(m[2]) };
 }
 
@@ -46,9 +53,9 @@ test.describe('キャンバス操作感 (cursor / scroll-pan)', () => {
 
     // ノード: ホバーで grab。getComputedStyle はホバー擬似クラスでなく実際の cursor 値を返すので、
     // CSS で `.react-flow__node { cursor: grab }` が当たっていることを直接確認する。
+    // 特定タイトルへの依存はフィクスチャ脆弱性を生むため、最初の 1 件で十分。
     const nodeCursor = await page
       .locator('.react-flow__node')
-      .filter({ hasText: TARGET_TITLE })
       .first()
       .evaluate((el) => getComputedStyle(el).cursor);
     expect(nodeCursor).toBe('grab');
@@ -95,7 +102,10 @@ test.describe('キャンバス操作感 (cursor / scroll-pan)', () => {
 
     await page.mouse.move(cx, cy);
     // Shift を押しながら wheel を発火。Playwright の mouse.wheel は modifiers を直接持たないため、
-    // keyboard.down('Shift') で押下状態を作る。React Flow / ブラウザは shift+deltaY を deltaX 相当として扱う。
+    // keyboard.down('Shift') で押下状態を作る。
+    // 前提: Shift+wheel はブラウザが deltaX として扱い、panOnScrollMode=Free が translateX を動かす。
+    // 注意: CI ヘッドレス環境 (Chromium / Firefox / WebKit / OS) で deltaX 振替の挙動が変わる可能性があり、
+    // 将来的に flake が出た場合はここを疑う (代替案: page.mouse.wheel に直接 deltaX を渡す等)。
     await page.keyboard.down('Shift');
     try {
       await page.mouse.wheel(0, 200);
