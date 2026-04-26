@@ -907,4 +907,104 @@ describe('useCanvasStore', () => {
       expect(approveSpy).toHaveBeenCalledWith('tool-1', true);
     });
   });
+
+  // issue #11: チャットコンテキストノード添付の操作と sendChatMessage への伝搬。
+  describe('chat context nodes', () => {
+    it('add/remove/clear で chatContextNodeIds が変化する', () => {
+      const s = useCanvasStore.getState();
+      s.addChatContextNode('req-a');
+      expect(useCanvasStore.getState().chatContextNodeIds).toEqual(['req-a']);
+      // 重複追加は no-op
+      useCanvasStore.getState().addChatContextNode('req-a');
+      expect(useCanvasStore.getState().chatContextNodeIds).toEqual(['req-a']);
+      useCanvasStore.getState().addChatContextNode('req-b');
+      expect(useCanvasStore.getState().chatContextNodeIds).toEqual(['req-a', 'req-b']);
+      useCanvasStore.getState().removeChatContextNode('req-a');
+      expect(useCanvasStore.getState().chatContextNodeIds).toEqual(['req-b']);
+      useCanvasStore.getState().clearChatContext();
+      expect(useCanvasStore.getState().chatContextNodeIds).toEqual([]);
+    });
+
+    it('sendChatMessage は chatContextNodeIds を 2 引数目に渡す (削除済み id は除外)', async () => {
+      const sent: { text: string; ctx: string[] | undefined }[] = [];
+      vi.resetModules();
+      vi.doMock('./ws', () => ({
+        startAgent: vi.fn(),
+        openChat: () => ({
+          events: (async function* () {
+            yield { type: 'chat_opened', threadId: 'chat-1' };
+          })(),
+          sendUserMessage: (text: string, ctx?: string[]) => sent.push({ text, ctx }),
+          approveTool: vi.fn(),
+          close: () => {},
+        }),
+      }));
+      const { useCanvasStore: store } = await import('./store');
+      store.getState().hydrate({
+        id: 'proj-1',
+        name: 't',
+        codebases: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        nodes: [
+          { id: 'req-a', type: 'requirement', x: 0, y: 0, title: 'A', body: '' },
+          { id: 'req-b', type: 'requirement', x: 0, y: 0, title: 'B', body: '' },
+        ],
+        edges: [],
+      });
+      fetchMock.mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: 'chat-1', messages: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+      await store.getState().openChatThread('chat-1');
+      await new Promise((r) => setTimeout(r, 20));
+      // 存在する 2 件 + 削除済み 1 件を仕込む
+      store.getState().addChatContextNode('req-a');
+      store.getState().addChatContextNode('req-b');
+      store.getState().addChatContextNode('req-deleted');
+      await store.getState().sendChatMessage('深掘りして');
+      expect(sent).toHaveLength(1);
+      expect(sent[0]?.text).toBe('深掘りして');
+      // 存在しない req-deleted は除外される
+      expect(sent[0]?.ctx).toEqual(['req-a', 'req-b']);
+    });
+
+    it('スレッド切替時に chatContextNodeIds はリセットされる', async () => {
+      vi.resetModules();
+      vi.doMock('./ws', () => ({
+        startAgent: vi.fn(),
+        openChat: () => ({
+          events: (async function* () {
+            yield { type: 'chat_opened', threadId: 'chat-1' };
+          })(),
+          sendUserMessage: vi.fn(),
+          approveTool: vi.fn(),
+          close: () => {},
+        }),
+      }));
+      const { useCanvasStore: store } = await import('./store');
+      store.getState().hydrate({
+        id: 'proj-1',
+        name: 't',
+        codebases: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        nodes: [{ id: 'req-a', type: 'requirement', x: 0, y: 0, title: 'A', body: '' }],
+        edges: [],
+      });
+      store.getState().addChatContextNode('req-a');
+      expect(store.getState().chatContextNodeIds).toEqual(['req-a']);
+      fetchMock.mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: 'chat-1', messages: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+      await store.getState().openChatThread('chat-1');
+      // openChatThread の中で chatContextNodeIds: [] にリセットされる
+      expect(store.getState().chatContextNodeIds).toEqual([]);
+    });
+  });
 });

@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 
 import { useCanvasStore } from '@/lib/store';
 
+import { ChatContextBar } from './chat-context-bar';
 import { ChatInput } from './chat-input';
 import { ChatMessages } from './chat-messages';
 import { ChatThreadList } from './chat-thread-list';
@@ -38,6 +39,7 @@ export function ChatTab() {
           <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
             <ChatMessages />
           </div>
+          <ChatContextBar />
           <ChatInput />
         </>
       ) : (

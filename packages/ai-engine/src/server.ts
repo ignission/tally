@@ -24,9 +24,17 @@ const ChatOpenSchema = z.object({
   threadId: z.string().min(1),
 });
 
+// contextNodeIds の最大件数。20 件は UI 操作上現実的な上限であり、prompt 肥大化と
+// 悪意ある大量送信の両方を抑止する (codex セカンドオピニオン #16)。
+const MAX_CHAT_CONTEXT_NODES = 20;
+
 const ChatUserMessageSchema = z.object({
   type: z.literal('user_message'),
   text: z.string().min(1),
+  // issue #11: ユーザーが「@メンション」で添付したノード ID 群。
+  // 省略時は空配列扱い。runner 側で存在しないものは無視する。
+  // 上限超過は zod エラー (= bad_request) としてクライアントに返す。
+  contextNodeIds: z.array(z.string().min(1)).max(MAX_CHAT_CONTEXT_NODES).optional(),
 });
 
 const ChatApproveToolSchema = z.object({
@@ -206,7 +214,10 @@ function handleChatConnection(ws: WebSocket, sdk: SdkLike): void {
         return;
       }
       try {
-        for await (const evt of runner.runUserTurn(result.data.text)) {
+        for await (const evt of runner.runUserTurn(
+          result.data.text,
+          result.data.contextNodeIds ?? [],
+        )) {
           send(evt);
         }
       } catch (err) {

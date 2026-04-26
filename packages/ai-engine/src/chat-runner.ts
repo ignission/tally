@@ -1,5 +1,11 @@
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
-import { type ChatBlock, type ChatMessage, newChatMessageId, newToolUseId } from '@tally/core';
+import {
+  type ChatBlock,
+  type ChatMessage,
+  type Node,
+  newChatMessageId,
+  newToolUseId,
+} from '@tally/core';
 import type { ChatStore, ProjectStore } from '@tally/storage';
 
 import type { SdkLike } from './agent-runner';
@@ -73,8 +79,12 @@ export class ChatRunner {
   // 3) MCP サーバを組み立てて SDK に渡し、assistant stream を iterate
   // 4) text block は buffer + delta emit。tool_use は MCP ハンドラ内で承認 intercept される。
   // 5) turn 末に text blocks を assistant message 先頭に統合
-  async *runUserTurn(userText: string): AsyncGenerator<ChatEvent> {
-    const { sdk, chatStore, projectDir, threadId } = this.deps;
+  //
+  // contextNodeIds: ユーザーが「@メンション」で添付したノード ID 配列 (issue #11)。
+  // ProjectStore から該当ノードを引いて prompt の <context_nodes> ブロックに埋め込む。
+  // 不在 ID は無視 (削除済みノード等)。永続化はせず、毎ターンの prompt prefix としてのみ使う。
+  async *runUserTurn(userText: string, contextNodeIds: string[] = []): AsyncGenerator<ChatEvent> {
+    const { sdk, chatStore, projectStore, projectDir, threadId } = this.deps;
 
     const thread = await chatStore.getChat(threadId);
     if (!thread) {
@@ -93,7 +103,19 @@ export class ChatRunner {
     await chatStore.appendMessage(threadId, userMsg);
     yield { type: 'chat_user_message_appended', messageId: userMsgId };
 
-    // 2. 空の assistant message を append (後続の tool_use 即時永続化の親として必要)
+    // 2. prompt を先に組む。user message 追加直後の履歴 (末尾が user) をスナップショットし、
+    //    buildChatPrompt が <current_user_message> を末尾の user message として正しく抽出できる状態で呼ぶ。
+    //    これは「<context_nodes> は今ターンの user 入力より前に置く」契約 (issue #11) を守るため必須。
+    //    後続で空 assistant を append すると履歴末尾が assistant になってしまい、buildChatPrompt の
+    //    `last?.role === 'user'` 判定が false に倒れる (= context_nodes が user 入力の後ろに並ぶバグ) ので、
+    //    必ずこの順で snapshot → prompt 組立 → 空 assistant append の順を守る。
+    const threadWithUser = await chatStore.getChat(threadId);
+    const contextNodes = await loadContextNodes(projectStore, contextNodeIds);
+    const prompt = buildChatPrompt(threadWithUser?.messages ?? [], contextNodes);
+    const systemPrompt = buildChatSystemPrompt();
+
+    // 3. 空の assistant message を append (後続の tool_use 即時永続化の親として必要)
+    //    prompt スナップショット後に行うことで、上記 buildChatPrompt の前提が崩れないようにする。
     const assistantMsgId = newChatMessageId();
     await chatStore.appendMessage(threadId, {
       id: assistantMsgId,
@@ -102,11 +124,6 @@ export class ChatRunner {
       createdAt: new Date().toISOString(),
     });
     yield { type: 'chat_assistant_message_started', messageId: assistantMsgId };
-
-    // 3. prompt / system prompt を組む (user msg 追加後の履歴込み)
-    const threadWithUser = await chatStore.getChat(threadId);
-    const prompt = buildChatPrompt(threadWithUser?.messages ?? []);
-    const systemPrompt = buildChatSystemPrompt();
 
     // 4. MCP 経由で呼ばれる tool ハンドラ内で invokeInterceptedTool を回す。
     //    MCP handler は SDK query を block するので、イベント emit は AsyncQueue 経由に分離する。
@@ -448,13 +465,90 @@ function buildChatSystemPrompt(): string {
     '- create_node / create_edge は必ずユーザー承認を経る (サーバ側で承認 UI を挟む)。',
     '- 迷ったら質問する。勝手に決めない。',
     '- 既存ノード把握したい時は list_by_type / find_related を使う (承認不要)。',
+    '',
+    'コンテキストノード (issue #11):',
+    '- prompt 内の <context_nodes> はユーザーが明示的に「このノードについて話したい」と添付したノード。',
+    '- 深掘り・分割・方針変更の依頼は、その文脈ノードの id / type / title / body を踏まえて応答する。',
+    '- ノードの「更新」「削除」は AI が直接行えない。代替の proposal を新たに create_node し、',
+    '  ユーザーが採用するかを判断する設計 (ADR-0005)。',
   ].join('\n');
+}
+
+// ProjectStore から context node を引いて、存在するものだけ返す。
+// 順序は入力配列に従う。重複 ID は最初の 1 件のみ残す。
+async function loadContextNodes(store: ProjectStore, ids: readonly string[]): Promise<Node[]> {
+  if (ids.length === 0) return [];
+  const seen = new Set<string>();
+  const out: Node[] = [];
+  for (const id of ids) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const node = await store.getNode(id);
+    if (node) out.push(node);
+  }
+  return out;
+}
+
+// Node を AI 向けにテキスト表現する。冗長な座標 (x/y) は省き、
+// 思考に効く属性 (id/type/title/body と型固有の補助) のみを並べる。
+// JSON.stringify は読みづらいので key: value の素朴な行で並べる。
+export function formatNodeForContext(node: Node): string {
+  const lines: string[] = [];
+  lines.push(`id: ${node.id}`);
+  lines.push(`type: ${node.type}`);
+  if (node.title) lines.push(`title: ${node.title}`);
+  if (node.body) lines.push(`body: ${node.body}`);
+  if (node.type === 'requirement') {
+    if (node.kind) lines.push(`kind: ${node.kind}`);
+    if (node.priority) lines.push(`priority: ${node.priority}`);
+    if (node.qualityCategory) lines.push(`qualityCategory: ${node.qualityCategory}`);
+  } else if (node.type === 'userstory') {
+    if (node.points) lines.push(`points: ${node.points}`);
+    if (node.acceptanceCriteria && node.acceptanceCriteria.length > 0) {
+      lines.push('acceptanceCriteria:');
+      for (const ac of node.acceptanceCriteria) {
+        lines.push(`  - [${ac.done ? 'x' : ' '}] ${ac.text}`);
+      }
+    }
+    if (node.tasks && node.tasks.length > 0) {
+      lines.push('tasks:');
+      for (const t of node.tasks) {
+        lines.push(`  - [${t.done ? 'x' : ' '}] ${t.text}`);
+      }
+    }
+  } else if (node.type === 'question') {
+    if (node.options && node.options.length > 0) {
+      lines.push('options:');
+      for (const o of node.options) {
+        const mark = o.selected ? '*' : '-';
+        lines.push(`  ${mark} ${o.text} (id=${o.id})`);
+      }
+    }
+    if (node.decision) lines.push(`decision: ${node.decision}`);
+  } else if (node.type === 'coderef') {
+    if (node.filePath) lines.push(`filePath: ${node.filePath}`);
+    if (typeof node.startLine === 'number') lines.push(`startLine: ${node.startLine}`);
+    if (typeof node.endLine === 'number') lines.push(`endLine: ${node.endLine}`);
+    if (node.summary) lines.push(`summary: ${node.summary}`);
+    if (node.impact) lines.push(`impact: ${node.impact}`);
+  } else if (node.type === 'proposal') {
+    // 未採用の AI 提案であることを AI 側に明示する。
+    // sourceAgentId は AI にとって意味の無い内部属性なので渡さない (codex セカンドオピニオン #16)。
+    // adoptAs は「採用時にどの正規 type に昇格するか」のヒントとして残す (ADR-0005)。
+    lines.push('note: このノードは未採用の AI 提案です (人間の採用操作で正規ノードに昇格)');
+    if (node.adoptAs) lines.push(`adoptAs: ${node.adoptAs}`);
+  }
+  return lines.join('\n');
 }
 
 // チャット履歴を単一 prompt にエンコードする。
 // tool_use / tool_result は冗長なので省き、text block だけを role 付きで並べる。
 // 最後の user message は current として別タグに出し、モデルの「今答えるべきもの」を明示する。
-function buildChatPrompt(messages: ChatMessage[]): string {
+//
+// contextNodes: 今ターンで参照するコンテキストノード (issue #11)。
+// 履歴より下、current_user_message より上に <context_nodes> として埋め込む。
+// 履歴に積まないのは「ターンごとに添付し直しできる軽量な参照」という UX 設計のため。
+export function buildChatPrompt(messages: ChatMessage[], contextNodes: Node[] = []): string {
   const lines: string[] = [];
   const last = messages[messages.length - 1];
   const past = last?.role === 'user' ? messages.slice(0, -1) : messages;
@@ -472,6 +566,16 @@ function buildChatPrompt(messages: ChatMessage[]): string {
       }
     }
     lines.push('</conversation_history>');
+  }
+
+  if (contextNodes.length > 0) {
+    lines.push('<context_nodes>');
+    for (const node of contextNodes) {
+      lines.push('<node>');
+      lines.push(formatNodeForContext(node));
+      lines.push('</node>');
+    }
+    lines.push('</context_nodes>');
   }
 
   if (last && last.role === 'user') {
