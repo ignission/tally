@@ -14,7 +14,7 @@ import {
   type Node as RFNode,
   useReactFlow,
 } from '@xyflow/react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import '@xyflow/react/dist/style.css';
 
@@ -24,6 +24,32 @@ import { BulkAdoptDialog } from '../dialog/bulk-adopt-dialog';
 import { MermaidExportDialog } from '../dialog/mermaid-export-dialog';
 import { edgeTypes } from '../edges/typed-edge';
 import { nodeTypes } from '../nodes';
+
+// テキスト入力中かを判定する。Chat 入力 (textarea) や TextInput (input) で
+// Ctrl+Z を奪わないようにするためのガード。contentEditable のリッチエディタもケアする。
+// IME 変換中 (isComposing) も Undo を発火させない (確定操作と衝突するため)。
+function isEditableTarget(el: EventTarget | null): boolean {
+  if (!(el instanceof HTMLElement)) return false;
+  if (el.isContentEditable) return true;
+  const tag = el.tagName;
+  if (tag === 'TEXTAREA') return true;
+  if (tag === 'INPUT') {
+    // type=button/checkbox 等は除外。テキスト系のみ Undo を奪わせる。
+    const type = (el as HTMLInputElement).type.toLowerCase();
+    const editableTypes = new Set([
+      'text',
+      'search',
+      'url',
+      'tel',
+      'email',
+      'password',
+      'number',
+      '',
+    ]);
+    return editableTypes.has(type);
+  }
+  return false;
+}
 
 // Phase 3: ドラッグで位置変更、ハンドルドラッグで接続、選択でストア同期。
 export function Canvas() {
@@ -35,6 +61,37 @@ export function Canvas() {
   const autoLayout = useCanvasStore((s) => s.autoLayout);
   const expandAllNodes = useCanvasStore((s) => s.expandAllNodes);
   const collapseAllNodes = useCanvasStore((s) => s.collapseAllNodes);
+  const undoMoveNode = useCanvasStore((s) => s.undoMoveNode);
+
+  // issue #13: Ctrl+Z (mac は ⌘+Z) でノード移動を最大 3 回まで Undo する。
+  // - メインパネル (キャンバス) 操作時のみ動作させ、Chat 入力中などのテキスト入力フォーカス時は奪わない
+  // - IME 変換 Enter/Z 誤発火を防ぐため isComposing もケア
+  // - Shift 併用 (Redo) は今回の要件外なので無視
+  // - 履歴が空のときはブラウザ既定 Undo を握り潰さない (preventDefault しない)
+  // Zustand の action は安定参照のため ref ラップは不要。
+  // useEffect の依存配列に `undoMoveNode` を入れて直接呼ぶ。
+  useEffect(() => {
+    function handler(evt: KeyboardEvent) {
+      // ブラウザ既定の Undo は textarea/input の文字編集向けなので、
+      // 編集要素にフォーカスしている時はキャンバス側 Undo を発火させない。
+      if (isEditableTarget(evt.target)) return;
+      if (evt.isComposing) return;
+      if (evt.key !== 'z' && evt.key !== 'Z') return;
+      if (evt.shiftKey) return; // Redo (将来拡張) と区別。
+      const isUndo = evt.ctrlKey || evt.metaKey;
+      if (!isUndo) return;
+      // 履歴が空なら preventDefault せずブラウザ既定動作に委ねる。
+      // keydown ハンドラの preventDefault は同期呼び出しでないと効かないため、
+      // store から `moveHistory` を同期取得して判定する。
+      if (useCanvasStore.getState().moveHistory.length === 0) return;
+      evt.preventDefault();
+      undoMoveNode().catch((err) => {
+        console.error('undoMoveNode failed', err);
+      });
+    }
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [undoMoveNode]);
 
   const rfNodes = useMemo<RFNode[]>(
     () =>
