@@ -350,7 +350,7 @@ describe('ChatRunner', () => {
   });
 
   // contextNodeIds が空 (または省略) なら <context_nodes> ブロックは生成しない。
-  it('contextNodeIds 空のとき <context_nodes> は出ない (後方互換)', async () => {
+  it('contextNodeIds 空のとき <context_nodes> は出ない', async () => {
     const chatStore = new FileSystemChatStore(root);
     const projectStore = new FileSystemProjectStore(root);
     const thread = await chatStore.createChat({ projectId: 'proj-1', title: 't' });
