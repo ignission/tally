@@ -195,9 +195,10 @@ function CanvasInner(props: {
       nodesDraggable
       nodesConnectable
       elementsSelectable
-      // キャンバスの移動は DnD ではなくスクロールに統一する。
-      // 通常スクロール = 縦パン、Shift + スクロール = 横パン (React Flow が macOS 以外で deltaY を deltaX に振り替える)。
-      // ズームは Ctrl/Cmd + スクロールまたは Controls のボタンに集約し、誤操作を減らす。
+      // キャンバスの移動は DnD ではなくスクロールに統一する (issue #12)。
+      // 通常スクロール = 縦パン、Shift + スクロール = 横パン
+      // (React Flow が macOS 以外で deltaY を deltaX に振り替える)。
+      // ズームは Ctrl/Cmd + スクロール またはピンチ、Controls のボタンに集約する。
       panOnDrag={false}
       panOnScroll
       panOnScrollMode={PanOnScrollMode.Free}
