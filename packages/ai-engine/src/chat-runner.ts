@@ -27,6 +27,18 @@ export interface ChatRunnerDeps {
   threadId: string;
 }
 
+// 外部 MCP の tool_result output を YAML に永続化するときの上限 (Task 13)。
+// 大規模 epic 取り込み等で 1 ターンに 500KB+ 来うるので、永続化は 4KB に切る。
+// メモリ内 (event) は full を流すので、UI セッション内では全文展開可能。
+// リロード後は truncated 版だけ見える (dogfooding には十分)。
+const TOOL_RESULT_PERSIST_LIMIT = 4096;
+
+function truncateForPersistence(output: string): string {
+  if (output.length <= TOOL_RESULT_PERSIST_LIMIT) return output;
+  const head = output.slice(0, TOOL_RESULT_PERSIST_LIMIT);
+  return `${head}\n... (truncated, ${output.length} chars total)`;
+}
+
 // SDK の assistant / user message から抽出する block の単純化形。
 // Tally MCP の tool_use は MCP intercept 経路で処理されるので拾わない。
 // 外部 MCP (mcp__tally__ 以外) の tool_use / tool_result は永続化と UI 通知のためここで拾う (Task 12)。
@@ -209,11 +221,13 @@ export class ChatRunner {
                 input: b.input,
               });
             } else if (b.type === 'tool_result') {
+              // Task 13: 大規模 epic で tool_result が 500KB+ になり得るので、
+              // YAML 永続化は 4KB に切り詰める。event はフル (UI はメモリ内で全文展開可)。
               await chatStore.appendBlockToMessage(threadId, assistantMsgId, {
                 type: 'tool_result',
                 toolUseId: b.toolUseId,
                 ok: b.ok,
-                output: b.output,
+                output: truncateForPersistence(b.output),
               });
               queue.push({
                 type: 'chat_tool_external_result',
