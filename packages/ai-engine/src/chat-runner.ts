@@ -9,6 +9,8 @@ import {
 import type { ChatStore, ProjectStore } from '@tally/storage';
 
 import type { SdkLike } from './agent-runner';
+import { buildMcpServers } from './mcp/build-mcp-servers';
+import { redactMcpSecrets } from './mcp/redact';
 import type { ChatEvent, SdkMessageLike } from './stream';
 import { CreateEdgeInputSchema, createEdgeHandler } from './tools/create-edge';
 import { CreateNodeInputSchema, createNodeHandler } from './tools/create-node';
@@ -133,6 +135,27 @@ export class ChatRunner {
     const emit = (e: ChatEvent) => queue.push(e);
     const mcp = this.buildMcpServer(tools, emit, assistantMsgId);
 
+    // 4b. プロジェクト設定の mcpServers[] を Tally MCP と合成する (Task 11)。
+    //     毎ターン読むことで env / 設定変更がホットリロードされる。
+    //     env 未設定 (PAT 等) は buildMcpServers が throw するので、ここで補足し
+    //     error event を emit して early return する (sdk.query は呼ばない)。
+    const projectMeta = await projectStore.getProjectMeta();
+    const externalConfigs = projectMeta?.mcpServers ?? [];
+    let mcpServers: Record<string, unknown>;
+    let allowedTools: string[];
+    try {
+      const built = buildMcpServers({ tallyMcp: mcp, configs: externalConfigs });
+      mcpServers = built.mcpServers;
+      allowedTools = built.allowedTools;
+    } catch (err) {
+      yield {
+        type: 'error',
+        code: 'mcp_config_invalid',
+        message: err instanceof Error ? err.message : String(err),
+      };
+      return;
+    }
+
     const textBuffer: string[] = [];
 
     // 5. SDK query をバックグラウンドで走らせ、queue にイベントを push する。
@@ -143,14 +166,9 @@ export class ChatRunner {
           prompt,
           options: {
             systemPrompt,
-            mcpServers: { tally: mcp as unknown as Record<string, unknown> },
+            mcpServers,
             tools: [],
-            allowedTools: [
-              'mcp__tally__create_node',
-              'mcp__tally__create_edge',
-              'mcp__tally__find_related',
-              'mcp__tally__list_by_type',
-            ],
+            allowedTools,
             permissionMode: 'dontAsk',
             settingSources: [],
             cwd: projectDir,
@@ -161,7 +179,10 @@ export class ChatRunner {
         });
 
         for await (const msg of iter) {
-          console.log('[chat-runner] sdk msg:', JSON.stringify(msg).slice(0, 200));
+          console.log(
+            '[chat-runner] sdk msg:',
+            JSON.stringify(redactMcpSecrets(msg)).slice(0, 200),
+          );
           const blocks = extractAssistantBlocks(msg);
           for (const b of blocks) {
             if (b.type === 'text') {
