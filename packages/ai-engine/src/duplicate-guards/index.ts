@@ -71,3 +71,9 @@ export function notifyCreated(
 export function __resetGuardsForTest(): void {
   REGISTRY.clear();
 }
+
+import { coderefGuard } from './coderef';
+
+// 個別 guard を register する (module load 時の副作用)。
+// テストは __resetGuardsForTest でクリアした後、必要な guard を再登録すること。
+registerGuard(coderefGuard);
