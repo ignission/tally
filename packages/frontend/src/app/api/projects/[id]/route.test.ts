@@ -70,6 +70,86 @@ describe('PATCH /api/projects/:id', () => {
     expect(body.codebases).toEqual([{ id: 'web', label: 'Web', path: '/w' }]);
   });
 
+  it('mcpServers[] を全置換 (Task 16)', async () => {
+    const res = await PATCH(
+      new Request('http://localhost', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          mcpServers: [
+            {
+              id: 'atlassian',
+              name: 'Atlassian',
+              kind: 'atlassian',
+              url: 'https://x.test/mcp',
+              auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'JIRA_PAT' },
+              options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
+            },
+          ],
+        }),
+      }),
+      { params: Promise.resolve({ id: projectId }) },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { mcpServers: Array<{ id: string }> };
+    expect(body.mcpServers).toHaveLength(1);
+    expect(body.mcpServers[0]?.id).toBe('atlassian');
+  });
+
+  it('mcpServers の url が http (loopback 以外) なら 400 (Task 1 hardening)', async () => {
+    const res = await PATCH(
+      new Request('http://localhost', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          mcpServers: [
+            {
+              id: 'a',
+              name: 'A',
+              kind: 'atlassian',
+              url: 'http://example.com/mcp',
+              auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'X' },
+              options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
+            },
+          ],
+        }),
+      }),
+      { params: Promise.resolve({ id: projectId }) },
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('mcpServers を空配列で全消去できる', async () => {
+    // 事前に登録
+    await PATCH(
+      new Request('http://localhost', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          mcpServers: [
+            {
+              id: 'a',
+              name: 'A',
+              kind: 'atlassian',
+              url: 'https://x.test/mcp',
+              auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'X' },
+              options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
+            },
+          ],
+        }),
+      }),
+      { params: Promise.resolve({ id: projectId }) },
+    );
+    // 空配列で全消去
+    const res = await PATCH(
+      new Request('http://localhost', {
+        method: 'PATCH',
+        body: JSON.stringify({ mcpServers: [] }),
+      }),
+      { params: Promise.resolve({ id: projectId }) },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { mcpServers: unknown[] };
+    expect(body.mcpServers).toEqual([]);
+  });
+
   it('name を更新', async () => {
     const res = await PATCH(
       new Request('http://localhost', {
