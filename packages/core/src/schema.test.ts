@@ -777,4 +777,45 @@ describe('RequirementNodeSchema.sourceUrl', () => {
       }),
     ).toThrow();
   });
+
+  it('sourceUrl が http:// なら fail (https 強制、UI link でも cleartext は禁止)', () => {
+    expect(() =>
+      RequirementNodeSchema.parse({
+        id: 'n',
+        type: 'requirement',
+        x: 0,
+        y: 0,
+        title: 'R',
+        body: '',
+        sourceUrl: 'http://jira.test/browse/EPIC-1',
+      }),
+    ).toThrow();
+  });
+
+  it('sourceUrl が https:// なら pass', () => {
+    const n = RequirementNodeSchema.parse({
+      id: 'n',
+      type: 'requirement',
+      x: 0,
+      y: 0,
+      title: 'R',
+      body: '',
+      sourceUrl: 'https://jira.test/browse/EPIC-1',
+    });
+    expect(n.sourceUrl).toBe('https://jira.test/browse/EPIC-1');
+  });
+
+  it('sourceUrl が ftp:// なら fail', () => {
+    expect(() =>
+      RequirementNodeSchema.parse({
+        id: 'n',
+        type: 'requirement',
+        x: 0,
+        y: 0,
+        title: 'R',
+        body: '',
+        sourceUrl: 'ftp://jira.test/EPIC-1',
+      }),
+    ).toThrow();
+  });
 });
