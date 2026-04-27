@@ -54,7 +54,22 @@ export const RequirementNodeSchema = z.object({
   qualityCategory: z.enum(QUALITY_CATEGORIES).optional(),
   priority: z.enum(REQUIREMENT_PRIORITIES).optional(),
   // 外部 MCP (Atlassian 等) から取り込んだ場合の元情報 URL。Phase 6+ で UI から開けるようにする予定。
-  sourceUrl: z.string().url().optional(),
+  // UI link 経由で credential が漏れる構図を排除するため https-only。
+  // McpServerConfig.url と異なり loopback 例外は不要 (Jira issue URL に loopback はあり得ない)。
+  sourceUrl: z
+    .string()
+    .url()
+    .refine(
+      (u) => {
+        try {
+          return new URL(u).protocol === 'https:';
+        } catch {
+          return false;
+        }
+      },
+      { message: 'sourceUrl は https で始まる必要があります' },
+    )
+    .optional(),
 });
 
 export const UseCaseNodeSchema = z.object({
