@@ -391,3 +391,180 @@ describe('McpServerConfigSchema', () => {
     ).toThrow();
   });
 });
+
+describe('McpServerConfigSchema hardening', () => {
+  // hardening test の共通 valid base。テスト対象のフィールドだけを上書きする。
+  const validBase = {
+    id: 'atlassian',
+    name: 'Atlassian',
+    kind: 'atlassian' as const,
+    url: 'https://mcp.atlassian.example/v1/mcp',
+    auth: {
+      type: 'pat' as const,
+      scheme: 'bearer' as const,
+      tokenEnvVar: 'JIRA_PAT',
+    },
+  };
+
+  describe('url: https 強制 + loopback 例外', () => {
+    it('https スキームは pass', () => {
+      expect(() =>
+        McpServerConfigSchema.parse({ ...validBase, url: 'https://x.test/mcp' }),
+      ).not.toThrow();
+    });
+
+    it('http://localhost は pass (sooperset セルフホスト想定)', () => {
+      expect(() =>
+        McpServerConfigSchema.parse({ ...validBase, url: 'http://localhost:9000/mcp' }),
+      ).not.toThrow();
+    });
+
+    it('http://127.0.0.1 は pass', () => {
+      expect(() =>
+        McpServerConfigSchema.parse({ ...validBase, url: 'http://127.0.0.1:9000/mcp' }),
+      ).not.toThrow();
+    });
+
+    it('http://example.com は fail (cleartext で credential が漏れる)', () => {
+      expect(() =>
+        McpServerConfigSchema.parse({ ...validBase, url: 'http://example.com/mcp' }),
+      ).toThrow();
+    });
+
+    it('ftp:// は fail', () => {
+      expect(() =>
+        McpServerConfigSchema.parse({ ...validBase, url: 'ftp://x.test/mcp' }),
+      ).toThrow();
+    });
+  });
+
+  describe('id: charset 制約 (CodebaseSchema.id と同じ regex)', () => {
+    it("'atlassian' は pass", () => {
+      expect(() => McpServerConfigSchema.parse({ ...validBase, id: 'atlassian' })).not.toThrow();
+    });
+
+    it("'atlassian-cloud' は pass", () => {
+      expect(() =>
+        McpServerConfigSchema.parse({ ...validBase, id: 'atlassian-cloud' }),
+      ).not.toThrow();
+    });
+
+    it("'a' は pass (1 文字)", () => {
+      expect(() => McpServerConfigSchema.parse({ ...validBase, id: 'a' })).not.toThrow();
+    });
+
+    it("'Atlassian' は fail (大文字)", () => {
+      expect(() => McpServerConfigSchema.parse({ ...validBase, id: 'Atlassian' })).toThrow();
+    });
+
+    it("'1abc' は fail (数字始まり)", () => {
+      expect(() => McpServerConfigSchema.parse({ ...validBase, id: '1abc' })).toThrow();
+    });
+
+    it("'a_b' は fail (アンダースコア含む)", () => {
+      expect(() => McpServerConfigSchema.parse({ ...validBase, id: 'a_b' })).toThrow();
+    });
+
+    it("'a.b' は fail (ドット含む)", () => {
+      expect(() => McpServerConfigSchema.parse({ ...validBase, id: 'a.b' })).toThrow();
+    });
+
+    it('33 文字は fail (上限超過)', () => {
+      expect(() => McpServerConfigSchema.parse({ ...validBase, id: 'a'.repeat(33) })).toThrow();
+    });
+  });
+
+  describe('emailEnvVar / tokenEnvVar: env var 名 regex', () => {
+    const baseBasic = {
+      ...validBase,
+      auth: {
+        type: 'pat' as const,
+        scheme: 'basic' as const,
+        emailEnvVar: 'ATLASSIAN_EMAIL',
+        tokenEnvVar: 'ATLASSIAN_API_TOKEN',
+      },
+    };
+
+    it("'ATLASSIAN_PAT' は pass", () => {
+      expect(() =>
+        McpServerConfigSchema.parse({
+          ...validBase,
+          auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'ATLASSIAN_PAT' },
+        }),
+      ).not.toThrow();
+    });
+
+    it("'JIRA_PAT_1' は pass (数字含む OK)", () => {
+      expect(() =>
+        McpServerConfigSchema.parse({
+          ...validBase,
+          auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'JIRA_PAT_1' },
+        }),
+      ).not.toThrow();
+    });
+
+    it("'A' は pass (1 文字大文字)", () => {
+      expect(() =>
+        McpServerConfigSchema.parse({
+          ...validBase,
+          auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'A' },
+        }),
+      ).not.toThrow();
+    });
+
+    it("'lowercase' は fail", () => {
+      expect(() =>
+        McpServerConfigSchema.parse({
+          ...validBase,
+          auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'lowercase' },
+        }),
+      ).toThrow();
+    });
+
+    it("'foo@bar.com' は fail (実値混入を防ぐ)", () => {
+      expect(() =>
+        McpServerConfigSchema.parse({
+          ...baseBasic,
+          auth: {
+            type: 'pat',
+            scheme: 'basic',
+            emailEnvVar: 'foo@bar.com',
+            tokenEnvVar: 'ATLASSIAN_API_TOKEN',
+          },
+        }),
+      ).toThrow();
+    });
+
+    it("'1ABC' は fail (数字始まり)", () => {
+      expect(() =>
+        McpServerConfigSchema.parse({
+          ...validBase,
+          auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: '1ABC' },
+        }),
+      ).toThrow();
+    });
+
+    it("'' (空文字) は fail", () => {
+      expect(() =>
+        McpServerConfigSchema.parse({
+          ...validBase,
+          auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: '' },
+        }),
+      ).toThrow();
+    });
+
+    it('basic auth の emailEnvVar も同じ regex を要求', () => {
+      expect(() =>
+        McpServerConfigSchema.parse({
+          ...baseBasic,
+          auth: {
+            type: 'pat',
+            scheme: 'basic',
+            emailEnvVar: 'lowercase',
+            tokenEnvVar: 'ATLASSIAN_API_TOKEN',
+          },
+        }),
+      ).toThrow();
+    });
+  });
+});
