@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import type { Node } from '@tally/core';
+import type { ChatMessage, Node } from '@tally/core';
 import { newChatMessageId } from '@tally/core';
 import { FileSystemChatStore, FileSystemProjectStore } from '@tally/storage';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -1052,5 +1052,136 @@ describe('ChatRunner — 外部 MCP tool_use/tool_result 永続化 (Task 12)', (
     }
 
     rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe('buildChatPrompt — tool_use/tool_result replay (Task 14, T4 fix)', () => {
+  it('過去 turn の text + tool_use + tool_result が conversation_history に含まれる', () => {
+    const messages: ChatMessage[] = [
+      {
+        id: 'u1',
+        role: 'user',
+        blocks: [{ type: 'text', text: '@JIRA EPIC-1 を読んで' }],
+        createdAt: '2026-04-24T00:00:00Z',
+      },
+      {
+        id: 'a1',
+        role: 'assistant',
+        blocks: [
+          { type: 'text', text: 'Jira を読みます' },
+          {
+            type: 'tool_use',
+            toolUseId: 'tu-1',
+            name: 'mcp__atlassian__jira_get_issue',
+            input: { key: 'EPIC-1' },
+            source: 'external',
+          },
+          { type: 'tool_result', toolUseId: 'tu-1', ok: true, output: '{"summary":"Epic X"}' },
+          { type: 'text', text: '読みました。Epic X です' },
+        ],
+        createdAt: '2026-04-24T00:01:00Z',
+      },
+      {
+        id: 'u2',
+        role: 'user',
+        blocks: [{ type: 'text', text: '続けて子チケット STORY-42 を読んで' }],
+        createdAt: '2026-04-24T00:02:00Z',
+      },
+    ];
+
+    const prompt = buildChatPrompt(messages);
+
+    // 過去 turn の Jira 内容が prompt に含まれる (T4 fix の核)
+    expect(prompt).toContain('Epic X');
+    expect(prompt).toContain('mcp__atlassian__jira_get_issue');
+    expect(prompt).toContain('source="external"');
+    // 直近 user message は current_user_message として独立
+    expect(prompt).toContain('<current_user_message>');
+    expect(prompt).toContain('STORY-42');
+    // tool_use / tool_result タグが正しく出る
+    expect(prompt).toContain('<tool_use');
+    expect(prompt).toContain('<tool_result');
+  });
+
+  it('source 未指定 (internal) の tool_use は source 属性が出ない', () => {
+    const messages: ChatMessage[] = [
+      {
+        id: 'u1',
+        role: 'user',
+        blocks: [{ type: 'text', text: '作って' }],
+        createdAt: '2026-04-24T00:00:00Z',
+      },
+      {
+        id: 'a1',
+        role: 'assistant',
+        blocks: [
+          {
+            type: 'tool_use',
+            toolUseId: 'tu-1',
+            name: 'mcp__tally__create_node',
+            input: {},
+            source: 'internal',
+            approval: 'approved',
+          },
+        ],
+        createdAt: '2026-04-24T00:01:00Z',
+      },
+      {
+        id: 'u2',
+        role: 'user',
+        blocks: [{ type: 'text', text: 'next' }],
+        createdAt: '2026-04-24T00:02:00Z',
+      },
+    ];
+
+    const prompt = buildChatPrompt(messages);
+    expect(prompt).toContain('mcp__tally__create_node');
+    expect(prompt).not.toContain('source="external"');
+    expect(prompt).not.toContain('source="internal"');
+  });
+
+  it('blocks が空の message は省く (履歴前段の空 assistant 想定)', () => {
+    const messages: ChatMessage[] = [
+      {
+        id: 'u1',
+        role: 'user',
+        blocks: [{ type: 'text', text: 'hello' }],
+        createdAt: '2026-04-24T00:00:00Z',
+      },
+      {
+        id: 'a-empty',
+        role: 'assistant',
+        blocks: [],
+        createdAt: '2026-04-24T00:01:00Z',
+      },
+      {
+        id: 'u2',
+        role: 'user',
+        blocks: [{ type: 'text', text: 'continue' }],
+        createdAt: '2026-04-24T00:02:00Z',
+      },
+    ];
+    const prompt = buildChatPrompt(messages);
+    // 空 assistant は省かれる
+    const messageOpens = prompt.match(/<message role="assistant">/g) ?? [];
+    expect(messageOpens.length).toBe(0);
+    // user の "hello" は履歴に残る
+    expect(prompt).toContain('hello');
+    expect(prompt).toContain('continue');
+  });
+
+  it('過去 turn が無く current user のみのケース (初回 turn)', () => {
+    const messages: ChatMessage[] = [
+      {
+        id: 'u1',
+        role: 'user',
+        blocks: [{ type: 'text', text: '初回' }],
+        createdAt: '2026-04-24T00:00:00Z',
+      },
+    ];
+    const prompt = buildChatPrompt(messages);
+    expect(prompt).not.toContain('<conversation_history>');
+    expect(prompt).toContain('<current_user_message>');
+    expect(prompt).toContain('初回');
   });
 });

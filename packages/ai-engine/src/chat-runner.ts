@@ -613,12 +613,18 @@ export function formatNodeForContext(node: Node): string {
 }
 
 // チャット履歴を単一 prompt にエンコードする。
-// tool_use / tool_result は冗長なので省き、text block だけを role 付きで並べる。
-// 最後の user message は current として別タグに出し、モデルの「今答えるべきもの」を明示する。
+// 各 block を順に replay する:
+// - text: そのまま (assistant / user の自然言語)
+// - tool_use: <tool_use id="..." name="..." source="..."> ... </tool_use>
+// - tool_result: <tool_result id="..." ok="..."> ... </tool_result>
+//
+// T4 fix (Task 14): 旧版は text block だけ replay していたが、これだと AI が
+// 2 ターン目以降で前ターンの外部 MCP tool_result (= Jira 等の読み取り内容) を忘れてしまい、
+// multi-turn 対話が成立しなかった。tool_use / tool_result も replay することで
+// 「@JIRA EPIC-1 を読んで → 続けて子チケット STORY-2 も見て」が動く。
 //
 // contextNodes: 今ターンで参照するコンテキストノード (issue #11)。
 // 履歴より下、current_user_message より上に <context_nodes> として埋め込む。
-// 履歴に積まないのは「ターンごとに添付し直しできる軽量な参照」という UX 設計のため。
 export function buildChatPrompt(messages: ChatMessage[], contextNodes: Node[] = []): string {
   const lines: string[] = [];
   const last = messages[messages.length - 1];
@@ -627,14 +633,24 @@ export function buildChatPrompt(messages: ChatMessage[], contextNodes: Node[] = 
   if (past.length > 0) {
     lines.push('<conversation_history>');
     for (const m of past) {
-      const texts = m.blocks
-        .filter((b): b is Extract<ChatBlock, { type: 'text' }> => b.type === 'text')
-        .map((b) => b.text);
-      if (texts.length > 0) {
-        lines.push(`<message role="${m.role}">`);
-        lines.push(texts.join('\n'));
-        lines.push('</message>');
+      // block が 1 つも無い空 message は省く (空 assistant の preliminary append 等)
+      if (m.blocks.length === 0) continue;
+      lines.push(`<message role="${m.role}">`);
+      for (const b of m.blocks) {
+        if (b.type === 'text') {
+          lines.push(b.text);
+        } else if (b.type === 'tool_use') {
+          // source は default 'internal'。external も含めて全部 replay する
+          // (AI に「外部 source を読んだ」事実を context として伝えるため)
+          const sourceAttr = b.source === 'external' ? ' source="external"' : '';
+          lines.push(
+            `<tool_use id="${b.toolUseId}" name="${b.name}"${sourceAttr}>${JSON.stringify(b.input)}</tool_use>`,
+          );
+        } else if (b.type === 'tool_result') {
+          lines.push(`<tool_result id="${b.toolUseId}" ok="${b.ok}">${b.output}</tool_result>`);
+        }
       }
+      lines.push('</message>');
     }
     lines.push('</conversation_history>');
   }
