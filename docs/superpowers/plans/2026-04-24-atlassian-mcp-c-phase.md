@@ -78,6 +78,8 @@
 - Modify: `packages/core/src/types.ts`
 - Test: `packages/core/src/schema.test.ts`
 
+**Spike 0a の結果を反映**: auth は Basic (Cloud) / Bearer (Server/DC) の 2 scheme。Basic の場合は email + token の両方が必要なので、envVar を `emailEnvVar` + `tokenEnvVar` に分離した discriminated union。
+
 - [ ] **Step 1-1: failing test を書く — `McpServerConfigSchema` の round-trip**
 
 `packages/core/src/schema.test.ts` に追記:
@@ -86,26 +88,56 @@
 import { McpServerConfigSchema } from './schema';
 
 describe('McpServerConfigSchema', () => {
-  it('atlassian kind + PAT auth の round-trip が通る', () => {
+  it('Cloud (basic) auth の round-trip が通る', () => {
     const raw = {
-      id: 'atlassian-main',
+      id: 'atlassian-cloud',
       name: 'Atlassian Cloud',
       kind: 'atlassian' as const,
-      url: 'https://mcp.atlassian.example/mcp',
-      auth: { type: 'pat' as const, envVar: 'ATLASSIAN_PAT' },
+      url: 'https://mcp.atlassian.example/v1/mcp',
+      auth: {
+        type: 'pat' as const,
+        scheme: 'basic' as const,
+        emailEnvVar: 'ATLASSIAN_EMAIL',
+        tokenEnvVar: 'ATLASSIAN_API_TOKEN',
+      },
       options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
     };
     const parsed = McpServerConfigSchema.parse(raw);
     expect(parsed).toEqual(raw);
   });
 
+  it('Server/DC (bearer) auth の round-trip が通る', () => {
+    const raw = {
+      id: 'atlassian-onprem',
+      name: 'Atlassian On-Prem',
+      kind: 'atlassian' as const,
+      url: 'https://jira.example.com/mcp',
+      auth: {
+        type: 'pat' as const,
+        scheme: 'bearer' as const,
+        tokenEnvVar: 'JIRA_PAT',
+      },
+      options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
+    };
+    const parsed = McpServerConfigSchema.parse(raw);
+    expect(parsed).toEqual(raw);
+  });
+
+  it('basic で emailEnvVar 無しは fail', () => {
+    expect(() =>
+      McpServerConfigSchema.parse({
+        id: 'a', name: 'A', kind: 'atlassian',
+        url: 'https://x.test/mcp',
+        auth: { type: 'pat', scheme: 'basic', tokenEnvVar: 'T' },
+      }),
+    ).toThrow();
+  });
+
   it('options 未指定なら default が入る', () => {
     const parsed = McpServerConfigSchema.parse({
-      id: 'a',
-      name: 'A',
-      kind: 'atlassian',
+      id: 'a', name: 'A', kind: 'atlassian',
       url: 'https://x.test/mcp',
-      auth: { type: 'pat', envVar: 'X_PAT' },
+      auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'X_PAT' },
     });
     expect(parsed.options.maxChildIssues).toBe(30);
     expect(parsed.options.maxCommentsPerIssue).toBe(5);
@@ -115,7 +147,7 @@ describe('McpServerConfigSchema', () => {
     expect(() =>
       McpServerConfigSchema.parse({
         id: 'a', name: 'A', kind: 'atlassian', url: 'not a url',
-        auth: { type: 'pat', envVar: 'X' },
+        auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'X' },
       }),
     ).toThrow();
   });
@@ -132,15 +164,28 @@ Expected: FAIL with "McpServerConfigSchema is not exported"
 既存 `ProjectSchema` の直前に追加:
 
 ```typescript
+// Atlassian Cloud は Basic (base64(email:token))、Server/DC は Bearer (pat) の 2 scheme。
+// どちらも PAT ベースの認証 (OAuth は MVP 非対応、Premise 9)。
+const McpAuthSchema = z.discriminatedUnion('scheme', [
+  z.object({
+    type: z.literal('pat'),
+    scheme: z.literal('basic'),
+    emailEnvVar: z.string().min(1), // 例 "ATLASSIAN_EMAIL"
+    tokenEnvVar: z.string().min(1), // 例 "ATLASSIAN_API_TOKEN"
+  }),
+  z.object({
+    type: z.literal('pat'),
+    scheme: z.literal('bearer'),
+    tokenEnvVar: z.string().min(1), // 例 "JIRA_PAT"
+  }),
+]);
+
 export const McpServerConfigSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   kind: z.literal('atlassian'),
   url: z.string().url(),
-  auth: z.object({
-    type: z.literal('pat'),
-    envVar: z.string().min(1),
-  }),
+  auth: McpAuthSchema,
   options: z
     .object({
       maxChildIssues: z.number().int().positive().default(30),
@@ -457,11 +502,13 @@ git commit -m "feat(ai-engine): redactMcpSecrets を追加 (Authorization header
 - Create: `packages/ai-engine/src/mcp/build-mcp-servers.ts`
 - Create: `packages/ai-engine/src/mcp/build-mcp-servers.test.ts`
 
+**Spike 0a/0b の結果を反映**: auth.scheme で Basic/Bearer 分岐、Basic は `base64(email:token)`。allowedTools は wildcard `mcp__<id>__*` を使用 (Spike 0b で確認)。
+
 - [ ] **Step 5-1: failing test**
 
 ```typescript
 // packages/ai-engine/src/mcp/build-mcp-servers.test.ts
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { buildMcpServers } from './build-mcp-servers';
 
 describe('buildMcpServers', () => {
@@ -476,29 +523,52 @@ describe('buildMcpServers', () => {
     expect(result.allowedTools).toEqual(['mcp__tally__*']);
   });
 
-  it('atlassian 1 個 + env 設定済み → HTTP config + allowedTools 合成', () => {
-    process.env.ATLASSIAN_PAT = 'secret-xyz';
+  it('Bearer (Server/DC) → Authorization: Bearer <token>', () => {
+    process.env.JIRA_PAT = 'secret-xyz';
     const result = buildMcpServers({
       tallyMcp: { type: 'sdk' } as any,
       configs: [
         {
-          id: 'atlassian-main', name: 'A', kind: 'atlassian',
-          url: 'https://x.test/mcp',
-          auth: { type: 'pat', envVar: 'ATLASSIAN_PAT' },
+          id: 'atlassian-dc', name: 'A', kind: 'atlassian',
+          url: 'https://jira.test/mcp',
+          auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'JIRA_PAT' },
           options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
         },
       ],
     });
-    const atlassian = result.mcpServers['atlassian-main'] as any;
+    const atlassian = result.mcpServers['atlassian-dc'] as any;
     expect(atlassian.type).toBe('http');
-    expect(atlassian.url).toBe('https://x.test/mcp');
+    expect(atlassian.url).toBe('https://jira.test/mcp');
     expect(atlassian.headers.Authorization).toBe('Bearer secret-xyz');
     expect(result.allowedTools).toContain('mcp__tally__*');
-    expect(result.allowedTools).toContain('mcp__atlassian-main__*');
+    expect(result.allowedTools).toContain('mcp__atlassian-dc__*');
   });
 
-  it('env 未設定 → throw', () => {
-    delete process.env.ATLASSIAN_PAT;
+  it('Basic (Cloud) → Authorization: Basic <base64(email:token)>', () => {
+    process.env.ATLASSIAN_EMAIL = 'user@example.com';
+    process.env.ATLASSIAN_API_TOKEN = 'api-token-xyz';
+    const result = buildMcpServers({
+      tallyMcp: { type: 'sdk' } as any,
+      configs: [
+        {
+          id: 'atlassian-cloud', name: 'A', kind: 'atlassian',
+          url: 'https://x.test/mcp',
+          auth: {
+            type: 'pat', scheme: 'basic',
+            emailEnvVar: 'ATLASSIAN_EMAIL',
+            tokenEnvVar: 'ATLASSIAN_API_TOKEN',
+          },
+          options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
+        },
+      ],
+    });
+    const atlassian = result.mcpServers['atlassian-cloud'] as any;
+    const expected = Buffer.from('user@example.com:api-token-xyz').toString('base64');
+    expect(atlassian.headers.Authorization).toBe(`Basic ${expected}`);
+  });
+
+  it('Bearer の tokenEnvVar 未設定 → throw', () => {
+    delete process.env.JIRA_PAT;
     expect(() =>
       buildMcpServers({
         tallyMcp: { type: 'sdk' } as any,
@@ -506,16 +576,17 @@ describe('buildMcpServers', () => {
           {
             id: 'a', name: 'A', kind: 'atlassian',
             url: 'https://x.test/mcp',
-            auth: { type: 'pat', envVar: 'ATLASSIAN_PAT' },
+            auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'JIRA_PAT' },
             options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
           },
         ],
       }),
-    ).toThrowError(/ATLASSIAN_PAT/);
+    ).toThrowError(/JIRA_PAT/);
   });
 
-  it('env が空文字 → throw', () => {
-    process.env.ATLASSIAN_PAT = '';
+  it('Basic の emailEnvVar 未設定 → throw', () => {
+    delete process.env.ATLASSIAN_EMAIL;
+    process.env.ATLASSIAN_API_TOKEN = 'x';
     expect(() =>
       buildMcpServers({
         tallyMcp: { type: 'sdk' } as any,
@@ -523,12 +594,32 @@ describe('buildMcpServers', () => {
           {
             id: 'a', name: 'A', kind: 'atlassian',
             url: 'https://x.test/mcp',
-            auth: { type: 'pat', envVar: 'ATLASSIAN_PAT' },
+            auth: {
+              type: 'pat', scheme: 'basic',
+              emailEnvVar: 'ATLASSIAN_EMAIL', tokenEnvVar: 'ATLASSIAN_API_TOKEN',
+            },
             options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
           },
         ],
       }),
-    ).toThrowError(/ATLASSIAN_PAT/);
+    ).toThrowError(/ATLASSIAN_EMAIL/);
+  });
+
+  it('env 値が空文字でも → throw', () => {
+    process.env.JIRA_PAT = '';
+    expect(() =>
+      buildMcpServers({
+        tallyMcp: { type: 'sdk' } as any,
+        configs: [
+          {
+            id: 'a', name: 'A', kind: 'atlassian',
+            url: 'https://x.test/mcp',
+            auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'JIRA_PAT' },
+            options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
+          },
+        ],
+      }),
+    ).toThrowError(/JIRA_PAT/);
   });
 });
 ```
@@ -538,14 +629,14 @@ describe('buildMcpServers', () => {
 Run: `pnpm -F @tally/ai-engine test -- build-mcp-servers.test`
 Expected: FAIL (未実装)
 
-- [ ] **Step 5-3: 実装 — wildcard 版 (Spike 0b で wildcard OK だった場合)**
+- [ ] **Step 5-3: 実装**
 
 ```typescript
 // packages/ai-engine/src/mcp/build-mcp-servers.ts
 import type { McpServerConfig } from '@tally/core';
 
-// SDK の型に縛らず、chat-runner / agent-runner が共通で使える shape にする。
 // SDK の mcpServers は Record<string, McpServerConfig> を受ける (sdk.d.ts:1386 参照)。
+// chat-runner / agent-runner が共通で使える shape にする。
 export interface BuildMcpServersInput {
   // createSdkMcpServer で組み立てた Tally MCP。ここでは opaque。
   tallyMcp: unknown;
@@ -558,9 +649,31 @@ export interface BuildMcpServersResult {
   allowedTools: string[];
 }
 
-// SDK 設定と allowedTools を組み立てる。env var 未設定なら throw。
-// 呼び出し元 (chat-runner / agent-runner) は runUserTurn の都度これを呼ぶ
-// → env 変更がホットリロードされる。
+function requireEnv(varName: string, contextId: string): string {
+  const v = process.env[varName];
+  if (v === undefined || v === '') {
+    throw new Error(
+      `MCP 設定 "${contextId}" の env var "${varName}" が未設定または空です`,
+    );
+  }
+  return v;
+}
+
+function buildAuthHeader(auth: McpServerConfig['auth'], contextId: string): string {
+  if (auth.scheme === 'bearer') {
+    const token = requireEnv(auth.tokenEnvVar, contextId);
+    return `Bearer ${token}`;
+  }
+  // basic
+  const email = requireEnv(auth.emailEnvVar, contextId);
+  const token = requireEnv(auth.tokenEnvVar, contextId);
+  const b64 = Buffer.from(`${email}:${token}`).toString('base64');
+  return `Basic ${b64}`;
+}
+
+// SDK 設定と allowedTools を組み立てる。env 未設定は throw。
+// 呼び出し元は runUserTurn の都度これを呼ぶ → env 変更がホットリロードされる。
+// allowedTools は wildcard `mcp__<id>__*` を使用 (Spike 0b で SDK サポート確認済み)。
 export function buildMcpServers(input: BuildMcpServersInput): BuildMcpServersResult {
   const { tallyMcp, configs } = input;
 
@@ -568,16 +681,11 @@ export function buildMcpServers(input: BuildMcpServersInput): BuildMcpServersRes
   const allowedTools: string[] = ['mcp__tally__*'];
 
   for (const cfg of configs) {
-    const token = process.env[cfg.auth.envVar];
-    if (token === undefined || token === '') {
-      throw new Error(
-        `MCP 設定 "${cfg.id}" の env var "${cfg.auth.envVar}" が未設定です`,
-      );
-    }
+    const authHeader = buildAuthHeader(cfg.auth, cfg.id);
     mcpServers[cfg.id] = {
       type: 'http' as const,
       url: cfg.url,
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: authHeader },
     };
     allowedTools.push(`mcp__${cfg.id}__*`);
   }
@@ -585,8 +693,6 @@ export function buildMcpServers(input: BuildMcpServersInput): BuildMcpServersRes
   return { mcpServers, allowedTools };
 }
 ```
-
-**注記:** Spike 0b で wildcard が効かないと判明したら、`allowedTools` 生成部を `cfg` に応じた実 tool 名列挙に置き換える。tool 名一覧は Spike 0a で記録した design doc 末尾 Footnote を参照。kind 別の tool リストを map にして、`cfg.kind === 'atlassian'` なら `ATLASSIAN_TOOLS.map(t => \`mcp__\${cfg.id}__\${t}\`)` を push する形。
 
 - [ ] **Step 5-4: test pass**
 
