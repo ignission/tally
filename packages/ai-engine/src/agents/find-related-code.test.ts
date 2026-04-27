@@ -52,6 +52,7 @@ describe('findRelatedCodeAgent.validateInput', () => {
       id: 'proj-frc',
       name: 'FRC',
       codebases: [{ id: 'main', label: 'Main', path: codebaseDir }],
+      mcpServers: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
@@ -106,6 +107,7 @@ describe('findRelatedCodeAgent.validateInput', () => {
       id: 'proj-frc',
       name: 'FRC',
       codebases: [],
+      mcpServers: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
@@ -122,6 +124,7 @@ describe('findRelatedCodeAgent.validateInput', () => {
       id: 'proj-frc',
       name: 'FRC',
       codebases: [{ id: 'main', label: 'Main', path: filePath }],
+      mcpServers: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
@@ -136,6 +139,7 @@ describe('findRelatedCodeAgent.validateInput', () => {
       id: 'proj-frc',
       name: 'FRC',
       codebases: [{ id: 'main', label: 'Main', path: '../nonexistent-xyz' }],
+      mcpServers: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });

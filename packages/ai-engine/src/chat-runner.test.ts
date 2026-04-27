@@ -21,6 +21,7 @@ describe('ChatRunner', () => {
       id: 'proj-1',
       name: 'P',
       codebases: [],
+      mcpServers: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });

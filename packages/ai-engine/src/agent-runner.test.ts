@@ -228,6 +228,7 @@ describe('runAgent', () => {
         id: 'proj-test',
         name: 'FRC integration',
         codebases: [{ id: 'main', label: 'Main', path: codebaseDir }],
+        mcpServers: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       });
@@ -288,6 +289,7 @@ describe('runAgent', () => {
       id: 'proj-test',
       name: 'P',
       codebases: [{ id: 'main', label: 'Main', path: codebaseDir }],
+      mcpServers: [],
       createdAt: '2026-04-18T00:00:00Z',
       updatedAt: '2026-04-18T00:00:00Z',
     });

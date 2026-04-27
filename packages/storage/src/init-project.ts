@@ -71,6 +71,7 @@ export async function initProject(input: InitProjectInput): Promise<InitProjectR
     name,
     ...(input.description ? { description: input.description } : {}),
     codebases: input.codebases,
+    mcpServers: [],
     createdAt: now,
     updatedAt: now,
   });
