@@ -475,3 +475,213 @@ describe('formatNodeForContext / buildChatPrompt', () => {
     expect(out.slice(curIdx)).not.toContain('過去質問');
   });
 });
+
+describe('ChatRunner — buildMcpServers 統合 (Task 11)', () => {
+  const ORIGINAL_ENV = { ...process.env };
+  afterEach(() => {
+    process.env = { ...ORIGINAL_ENV };
+  });
+
+  it('プロジェクト設定の mcpServers[] を sdk.query に動的に渡す (Bearer)', async () => {
+    process.env.TEST_PAT = 'secret';
+    const root = mkdtempSync(path.join(tmpdir(), 'tally-task11-'));
+    const ps = new FileSystemProjectStore(root);
+    await ps.saveProjectMeta({
+      id: 'proj-1',
+      name: 'P',
+      codebases: [],
+      mcpServers: [
+        {
+          id: 'test-mcp',
+          name: 'T',
+          kind: 'atlassian',
+          url: 'https://t.test/mcp',
+          auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'TEST_PAT' },
+          options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
+        },
+      ],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    const chatStore = new FileSystemChatStore(root);
+    const projectStore = new FileSystemProjectStore(root);
+    const thread = await chatStore.createChat({ projectId: 'proj-1', title: 't' });
+
+    const querySpy = vi.fn(() =>
+      (async function* () {
+        yield { type: 'result', subtype: 'success', result: 'ok' } as unknown as SdkMessageLike;
+      })(),
+    );
+    const sdk: SdkLike = { query: querySpy };
+    const runner = new ChatRunner({
+      sdk,
+      chatStore,
+      projectStore,
+      projectDir: root,
+      threadId: thread.id,
+    });
+    for await (const _ of runner.runUserTurn('hi')) {
+      /* drain */
+    }
+
+    expect(querySpy).toHaveBeenCalled();
+    const callArg = (querySpy.mock.calls as unknown[][])[0]?.[0] as unknown as {
+      options?: {
+        mcpServers?: Record<string, { headers?: Record<string, string> }>;
+        allowedTools?: string[];
+      };
+    };
+    expect(Object.keys(callArg.options?.mcpServers ?? {})).toEqual(
+      expect.arrayContaining(['tally', 'test-mcp']),
+    );
+    const testMcp = callArg.options?.mcpServers?.['test-mcp'];
+    expect(testMcp?.headers?.Authorization).toBe('Bearer secret');
+    expect(callArg.options?.allowedTools).toContain('mcp__tally__*');
+    expect(callArg.options?.allowedTools).toContain('mcp__test-mcp__*');
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('mcpServers[] が空配列なら tally のみ (退行なし)', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'tally-task11b-'));
+    const ps = new FileSystemProjectStore(root);
+    await ps.saveProjectMeta({
+      id: 'proj-1',
+      name: 'P',
+      codebases: [],
+      mcpServers: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    const chatStore = new FileSystemChatStore(root);
+    const projectStore = new FileSystemProjectStore(root);
+    const thread = await chatStore.createChat({ projectId: 'proj-1', title: 't' });
+    const querySpy = vi.fn(() =>
+      (async function* () {
+        yield { type: 'result', subtype: 'success', result: 'ok' } as unknown as SdkMessageLike;
+      })(),
+    );
+    const sdk: SdkLike = { query: querySpy };
+    const runner = new ChatRunner({
+      sdk,
+      chatStore,
+      projectStore,
+      projectDir: root,
+      threadId: thread.id,
+    });
+    for await (const _ of runner.runUserTurn('hi')) {
+      /* drain */
+    }
+
+    const callArg = (querySpy.mock.calls as unknown[][])[0]?.[0] as unknown as {
+      options?: { mcpServers?: Record<string, unknown>; allowedTools?: string[] };
+    };
+    expect(Object.keys(callArg.options?.mcpServers ?? {})).toEqual(['tally']);
+    expect(callArg.options?.allowedTools).toEqual(['mcp__tally__*']);
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('env 未設定なら error event を emit、sdk.query は呼ばない', async () => {
+    delete process.env.MISSING_PAT;
+    const root = mkdtempSync(path.join(tmpdir(), 'tally-task11c-'));
+    const ps = new FileSystemProjectStore(root);
+    await ps.saveProjectMeta({
+      id: 'proj-1',
+      name: 'P',
+      codebases: [],
+      mcpServers: [
+        {
+          id: 'a',
+          name: 'A',
+          kind: 'atlassian',
+          url: 'https://t.test/mcp',
+          auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'MISSING_PAT' },
+          options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
+        },
+      ],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    const chatStore = new FileSystemChatStore(root);
+    const projectStore = new FileSystemProjectStore(root);
+    const thread = await chatStore.createChat({ projectId: 'proj-1', title: 't' });
+    const querySpy = vi.fn();
+    const sdk: SdkLike = { query: querySpy };
+    const runner = new ChatRunner({
+      sdk,
+      chatStore,
+      projectStore,
+      projectDir: root,
+      threadId: thread.id,
+    });
+
+    const events: ChatEvent[] = [];
+    for await (const e of runner.runUserTurn('hi')) events.push(e);
+
+    expect(querySpy).not.toHaveBeenCalled();
+    const errorEvent = events.find((e) => e.type === 'error');
+    expect(errorEvent).toBeDefined();
+    if (errorEvent && errorEvent.type === 'error') {
+      expect(errorEvent.message).toMatch(/MISSING_PAT/);
+    }
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('Basic auth (Cloud) でも正しく Authorization header が組まれる', async () => {
+    process.env.ATLASSIAN_EMAIL = 'user@example.com';
+    process.env.ATLASSIAN_API_TOKEN = 'token-xyz';
+    const root = mkdtempSync(path.join(tmpdir(), 'tally-task11d-'));
+    const ps = new FileSystemProjectStore(root);
+    await ps.saveProjectMeta({
+      id: 'proj-1',
+      name: 'P',
+      codebases: [],
+      mcpServers: [
+        {
+          id: 'cloud',
+          name: 'C',
+          kind: 'atlassian',
+          url: 'https://api.atlassian.test/mcp',
+          auth: {
+            type: 'pat',
+            scheme: 'basic',
+            emailEnvVar: 'ATLASSIAN_EMAIL',
+            tokenEnvVar: 'ATLASSIAN_API_TOKEN',
+          },
+          options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
+        },
+      ],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    const chatStore = new FileSystemChatStore(root);
+    const projectStore = new FileSystemProjectStore(root);
+    const thread = await chatStore.createChat({ projectId: 'proj-1', title: 't' });
+    const querySpy = vi.fn(() =>
+      (async function* () {
+        yield { type: 'result', subtype: 'success', result: 'ok' } as unknown as SdkMessageLike;
+      })(),
+    );
+    const sdk: SdkLike = { query: querySpy };
+    const runner = new ChatRunner({
+      sdk,
+      chatStore,
+      projectStore,
+      projectDir: root,
+      threadId: thread.id,
+    });
+    for await (const _ of runner.runUserTurn('hi')) {
+      /* drain */
+    }
+
+    const callArg = (querySpy.mock.calls as unknown[][])[0]?.[0] as unknown as {
+      options?: { mcpServers?: Record<string, { headers?: Record<string, string> }> };
+    };
+    const expected = Buffer.from('user@example.com:token-xyz').toString('base64');
+    expect(callArg.options?.mcpServers?.cloud?.headers?.Authorization).toBe(`Basic ${expected}`);
+
+    rmSync(root, { recursive: true, force: true });
+  });
+});
