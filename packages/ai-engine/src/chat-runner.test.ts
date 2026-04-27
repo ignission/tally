@@ -685,3 +685,235 @@ describe('ChatRunner — buildMcpServers 統合 (Task 11)', () => {
     rmSync(root, { recursive: true, force: true });
   });
 });
+
+describe('ChatRunner — 外部 MCP tool_use/tool_result 永続化 (Task 12)', () => {
+  const ORIGINAL_ENV = { ...process.env };
+  afterEach(() => {
+    process.env = { ...ORIGINAL_ENV };
+  });
+
+  it('外部 MCP の tool_use を source=external で永続化、chat_tool_external_use event を emit', async () => {
+    process.env.TEST_PAT = 'secret';
+    const root = mkdtempSync(path.join(tmpdir(), 'tally-task12a-'));
+    const ps = new FileSystemProjectStore(root);
+    await ps.saveProjectMeta({
+      id: 'proj-1',
+      name: 'P',
+      codebases: [],
+      mcpServers: [
+        {
+          id: 'atlassian',
+          name: 'A',
+          kind: 'atlassian',
+          url: 'https://t.test/mcp',
+          auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'TEST_PAT' },
+          options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
+        },
+      ],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    const chatStore = new FileSystemChatStore(root);
+    const projectStore = new FileSystemProjectStore(root);
+    const thread = await chatStore.createChat({ projectId: 'proj-1', title: 't' });
+
+    const sdk: SdkLike = {
+      query: () =>
+        (async function* () {
+          yield {
+            type: 'assistant',
+            message: {
+              content: [
+                { type: 'text', text: 'Jira を読みます' },
+                {
+                  type: 'tool_use',
+                  id: 'atlassian-tu-1',
+                  name: 'mcp__atlassian__jira_get_issue',
+                  input: { issueKey: 'EPIC-1' },
+                },
+              ],
+            },
+          } as unknown as SdkMessageLike;
+          yield {
+            type: 'user',
+            message: {
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: 'atlassian-tu-1',
+                  content: [{ type: 'text', text: '{"summary":"Epic title"}' }],
+                },
+              ],
+            },
+          } as unknown as SdkMessageLike;
+          yield { type: 'result', subtype: 'success', result: 'ok' } as unknown as SdkMessageLike;
+        })(),
+    };
+    const runner = new ChatRunner({
+      sdk,
+      chatStore,
+      projectStore,
+      projectDir: root,
+      threadId: thread.id,
+    });
+    const events: ChatEvent[] = [];
+    for await (const e of runner.runUserTurn('@JIRA EPIC-1')) events.push(e);
+
+    const useEvent = events.find((e) => e.type === 'chat_tool_external_use');
+    expect(useEvent).toBeDefined();
+    if (useEvent && useEvent.type === 'chat_tool_external_use') {
+      expect(useEvent.toolUseId).toBe('atlassian-tu-1');
+      expect(useEvent.name).toBe('mcp__atlassian__jira_get_issue');
+    }
+    const resultEvent = events.find((e) => e.type === 'chat_tool_external_result');
+    expect(resultEvent).toBeDefined();
+    if (resultEvent && resultEvent.type === 'chat_tool_external_result') {
+      expect(resultEvent.toolUseId).toBe('atlassian-tu-1');
+      expect(resultEvent.ok).toBe(true);
+      expect(resultEvent.output).toContain('Epic title');
+    }
+
+    const reloaded = await chatStore.getChat(thread.id);
+    const asstMsg = reloaded?.messages.find((m) => m.role === 'assistant');
+    const toolUse = asstMsg?.blocks.find((b) => b.type === 'tool_use');
+    expect(toolUse).toBeDefined();
+    if (toolUse?.type === 'tool_use') {
+      expect(toolUse.source).toBe('external');
+      expect(toolUse.name).toBe('mcp__atlassian__jira_get_issue');
+      expect(toolUse.approval).toBeUndefined();
+    }
+    const toolResult = asstMsg?.blocks.find((b) => b.type === 'tool_result');
+    expect(toolResult).toBeDefined();
+    if (toolResult?.type === 'tool_result') {
+      expect(toolResult.ok).toBe(true);
+      expect(toolResult.output).toContain('Epic title');
+    }
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('mcp__tally__ で始まる tool_use は無視 (intercept 経路で処理されるため)', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'tally-task12b-'));
+    const ps = new FileSystemProjectStore(root);
+    await ps.saveProjectMeta({
+      id: 'proj-1',
+      name: 'P',
+      codebases: [],
+      mcpServers: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    const chatStore = new FileSystemChatStore(root);
+    const projectStore = new FileSystemProjectStore(root);
+    const thread = await chatStore.createChat({ projectId: 'proj-1', title: 't' });
+    const sdk: SdkLike = {
+      query: () =>
+        (async function* () {
+          yield {
+            type: 'assistant',
+            message: {
+              content: [
+                { type: 'text', text: '作ります' },
+                {
+                  type: 'tool_use',
+                  id: 'tally-tu',
+                  name: 'mcp__tally__create_node',
+                  input: {},
+                },
+              ],
+            },
+          } as unknown as SdkMessageLike;
+          yield { type: 'result', subtype: 'success', result: 'ok' } as unknown as SdkMessageLike;
+        })(),
+    };
+    const runner = new ChatRunner({
+      sdk,
+      chatStore,
+      projectStore,
+      projectDir: root,
+      threadId: thread.id,
+    });
+    const events: ChatEvent[] = [];
+    for await (const e of runner.runUserTurn('hi')) events.push(e);
+
+    expect(events.find((e) => e.type === 'chat_tool_external_use')).toBeUndefined();
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('外部 tool_result が is_error=true なら ok=false で記録', async () => {
+    process.env.TEST_PAT = 'secret';
+    const root = mkdtempSync(path.join(tmpdir(), 'tally-task12c-'));
+    const ps = new FileSystemProjectStore(root);
+    await ps.saveProjectMeta({
+      id: 'proj-1',
+      name: 'P',
+      codebases: [],
+      mcpServers: [
+        {
+          id: 'atlassian',
+          name: 'A',
+          kind: 'atlassian',
+          url: 'https://t.test/mcp',
+          auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'TEST_PAT' },
+          options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
+        },
+      ],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    const chatStore = new FileSystemChatStore(root);
+    const projectStore = new FileSystemProjectStore(root);
+    const thread = await chatStore.createChat({ projectId: 'proj-1', title: 't' });
+    const sdk: SdkLike = {
+      query: () =>
+        (async function* () {
+          yield {
+            type: 'assistant',
+            message: {
+              content: [
+                {
+                  type: 'tool_use',
+                  id: 'err-tu',
+                  name: 'mcp__atlassian__jira_get_issue',
+                  input: { issueKey: 'BOGUS' },
+                },
+              ],
+            },
+          } as unknown as SdkMessageLike;
+          yield {
+            type: 'user',
+            message: {
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: 'err-tu',
+                  content: [{ type: 'text', text: '404 not found' }],
+                  is_error: true,
+                },
+              ],
+            },
+          } as unknown as SdkMessageLike;
+          yield { type: 'result', subtype: 'success', result: 'ok' } as unknown as SdkMessageLike;
+        })(),
+    };
+    const runner = new ChatRunner({
+      sdk,
+      chatStore,
+      projectStore,
+      projectDir: root,
+      threadId: thread.id,
+    });
+    const events: ChatEvent[] = [];
+    for await (const e of runner.runUserTurn('q')) events.push(e);
+
+    const evt = events.find((e) => e.type === 'chat_tool_external_result');
+    expect(evt).toBeDefined();
+    if (evt && evt.type === 'chat_tool_external_result') {
+      expect(evt.ok).toBe(false);
+      expect(evt.output).toContain('404');
+    }
+
+    rmSync(root, { recursive: true, force: true });
+  });
+});
