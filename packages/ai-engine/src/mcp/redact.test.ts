@@ -96,4 +96,22 @@ describe('redactMcpSecrets', () => {
     expect(redactMcpSecrets('string')).toBe('string');
     expect(redactMcpSecrets([1, 2, 3])).toEqual([1, 2, 3]);
   });
+
+  it('Authorization 値が配列等の非 string でも redact される (安全側に倒す)', () => {
+    const input = {
+      mcpServers: {
+        atlassian: {
+          type: 'http',
+          url: 'https://x.test/mcp',
+          headers: {
+            Authorization: ['Bearer xxx'] as unknown as string,
+          },
+        },
+      },
+    };
+    const out = redactMcpSecrets(input) as {
+      mcpServers: { atlassian: { headers: Record<string, unknown> } };
+    };
+    expect(out.mcpServers.atlassian.headers.Authorization).toBe('***');
+  });
 });
