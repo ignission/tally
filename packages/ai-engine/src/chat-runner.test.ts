@@ -841,6 +841,143 @@ describe('ChatRunner — 外部 MCP tool_use/tool_result 永続化 (Task 12)', (
     rmSync(root, { recursive: true, force: true });
   });
 
+  it('tool_result output が 4KB 超えると永続化時に truncate、event は full (Task 13)', async () => {
+    process.env.TEST_PAT = 'secret';
+    const root = mkdtempSync(path.join(tmpdir(), 'tally-task13-'));
+    const ps = new FileSystemProjectStore(root);
+    await ps.saveProjectMeta({
+      id: 'proj-1',
+      name: 'P',
+      codebases: [],
+      mcpServers: [
+        {
+          id: 'atlassian',
+          name: 'A',
+          kind: 'atlassian',
+          url: 'https://t.test/mcp',
+          auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'TEST_PAT' },
+          options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
+        },
+      ],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    const chatStore = new FileSystemChatStore(root);
+    const projectStore = new FileSystemProjectStore(root);
+    const thread = await chatStore.createChat({ projectId: 'proj-1', title: 't' });
+    const bigOutput = 'X'.repeat(10_000);
+    const sdk: SdkLike = {
+      query: () =>
+        (async function* () {
+          yield {
+            type: 'user',
+            message: {
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: 'big-1',
+                  content: [{ type: 'text', text: bigOutput }],
+                },
+              ],
+            },
+          } as unknown as SdkMessageLike;
+          yield { type: 'result', subtype: 'success', result: 'ok' } as unknown as SdkMessageLike;
+        })(),
+    };
+    const runner = new ChatRunner({
+      sdk,
+      chatStore,
+      projectStore,
+      projectDir: root,
+      threadId: thread.id,
+    });
+    const events: ChatEvent[] = [];
+    for await (const e of runner.runUserTurn('q')) events.push(e);
+
+    // event はフル
+    const evt = events.find((e) => e.type === 'chat_tool_external_result');
+    expect(evt).toBeDefined();
+    if (evt && evt.type === 'chat_tool_external_result') {
+      expect(evt.output.length).toBe(10_000);
+    }
+
+    // YAML 永続化は truncate
+    const reloaded = await chatStore.getChat(thread.id);
+    const tr = reloaded?.messages.flatMap((m) => m.blocks).find((b) => b.type === 'tool_result');
+    expect(tr).toBeDefined();
+    if (tr?.type === 'tool_result') {
+      expect(tr.output.length).toBeLessThanOrEqual(4200);
+      expect(tr.output).toContain('(truncated');
+      expect(tr.output).toContain('10000');
+    }
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('tool_result output が 4KB 以下なら truncate しない', async () => {
+    process.env.TEST_PAT = 'secret';
+    const root = mkdtempSync(path.join(tmpdir(), 'tally-task13b-'));
+    const ps = new FileSystemProjectStore(root);
+    await ps.saveProjectMeta({
+      id: 'proj-1',
+      name: 'P',
+      codebases: [],
+      mcpServers: [
+        {
+          id: 'atlassian',
+          name: 'A',
+          kind: 'atlassian',
+          url: 'https://t.test/mcp',
+          auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'TEST_PAT' },
+          options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
+        },
+      ],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    const chatStore = new FileSystemChatStore(root);
+    const projectStore = new FileSystemProjectStore(root);
+    const thread = await chatStore.createChat({ projectId: 'proj-1', title: 't' });
+    const smallOutput = 'small result';
+    const sdk: SdkLike = {
+      query: () =>
+        (async function* () {
+          yield {
+            type: 'user',
+            message: {
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: 'small-1',
+                  content: [{ type: 'text', text: smallOutput }],
+                },
+              ],
+            },
+          } as unknown as SdkMessageLike;
+          yield { type: 'result', subtype: 'success', result: 'ok' } as unknown as SdkMessageLike;
+        })(),
+    };
+    const runner = new ChatRunner({
+      sdk,
+      chatStore,
+      projectStore,
+      projectDir: root,
+      threadId: thread.id,
+    });
+    for await (const _ of runner.runUserTurn('q')) {
+      /* drain */
+    }
+
+    const reloaded = await chatStore.getChat(thread.id);
+    const tr = reloaded?.messages.flatMap((m) => m.blocks).find((b) => b.type === 'tool_result');
+    if (tr?.type === 'tool_result') {
+      expect(tr.output).toBe(smallOutput);
+      expect(tr.output).not.toContain('truncated');
+    }
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
   it('外部 tool_result が is_error=true なら ok=false で記録', async () => {
     process.env.TEST_PAT = 'secret';
     const root = mkdtempSync(path.join(tmpdir(), 'tally-task12c-'));
