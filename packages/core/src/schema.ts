@@ -304,12 +304,13 @@ export const ProjectSchema = z
   })
   .superRefine((p, ctx) => checkUniqueCodebaseIds(p.codebases, ctx));
 
-// PATCH /api/projects/:id の body スキーマ。codebases 全置換のみ許可（部分更新はしない）。
+// PATCH /api/projects/:id の body スキーマ。codebases / mcpServers は全置換のみ (部分更新はしない)。
 export const ProjectMetaPatchSchema = z
   .object({
     name: z.string().min(1).optional(),
     description: z.string().nullable().optional(),
     codebases: z.array(CodebaseSchema).optional(),
+    mcpServers: z.array(McpServerConfigSchema).optional(),
   })
   .strict()
   .superRefine((patch, ctx) => checkUniqueCodebaseIds(patch.codebases, ctx));
