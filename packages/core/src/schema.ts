@@ -53,6 +53,8 @@ export const RequirementNodeSchema = z.object({
   kind: z.enum(REQUIREMENT_KINDS).optional(),
   qualityCategory: z.enum(QUALITY_CATEGORIES).optional(),
   priority: z.enum(REQUIREMENT_PRIORITIES).optional(),
+  // 外部 MCP (Atlassian 等) から取り込んだ場合の元情報 URL。Phase 6+ で UI から開けるようにする予定。
+  sourceUrl: z.string().url().optional(),
 });
 
 export const UseCaseNodeSchema = z.object({
@@ -303,13 +305,20 @@ export const ProjectMetaPatchSchema = z
 
 export const ChatBlockSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('text'), text: z.string() }),
-  z.object({
-    type: z.literal('tool_use'),
-    toolUseId: z.string().min(1),
-    name: z.string().min(1),
-    input: z.unknown(),
-    approval: z.enum(['pending', 'approved', 'rejected']),
-  }),
+  z
+    .object({
+      type: z.literal('tool_use'),
+      toolUseId: z.string().min(1),
+      name: z.string().min(1),
+      input: z.unknown(),
+      // 'internal' = Tally MCP (人間承認が必要)、'external' = Atlassian 等の外部 MCP (承認概念なし)。
+      // 既存 YAML (source 無し) は default 'internal' で読めるよう後方互換を保つ。
+      source: z.enum(['internal', 'external']).default('internal'),
+      approval: z.enum(['pending', 'approved', 'rejected']).optional(),
+    })
+    .refine((b) => b.source === 'external' || b.approval !== undefined, {
+      message: 'internal tool_use には approval が必要',
+    }),
   z.object({
     type: z.literal('tool_result'),
     toolUseId: z.string().min(1),

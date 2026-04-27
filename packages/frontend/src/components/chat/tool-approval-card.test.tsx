@@ -20,6 +20,7 @@ describe('ToolApprovalCard', () => {
           toolUseId: 'tool-abc',
           name: 'mcp__tally__create_node',
           input: { adoptAs: 'requirement', title: 'X', body: '' },
+          source: 'internal',
           approval: 'pending',
         }}
       />,
@@ -38,6 +39,7 @@ describe('ToolApprovalCard', () => {
           toolUseId: 'tool-xyz',
           name: 'mcp__tally__create_edge',
           input: { from: 'a', to: 'b', type: 'derive' },
+          source: 'internal',
           approval: 'pending',
         }}
       />,
@@ -55,6 +57,7 @@ describe('ToolApprovalCard', () => {
           toolUseId: 'tool-1',
           name: 'mcp__tally__create_node',
           input: {},
+          source: 'internal',
           approval: 'pending',
         }}
       />,

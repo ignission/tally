@@ -642,3 +642,139 @@ describe('ProjectMetaSchema.mcpServers', () => {
     expect(meta.mcpServers).toEqual([]);
   });
 });
+
+describe('ChatBlockSchema.tool_use.source', () => {
+  it('source 未指定の古いデータが "internal" に defaults', () => {
+    const b = ChatBlockSchema.parse({
+      type: 'tool_use',
+      toolUseId: 'tu-1',
+      name: 'mcp__tally__create_node',
+      input: { x: 1 },
+      approval: 'approved',
+    });
+    expect(b.type).toBe('tool_use');
+    if (b.type === 'tool_use') expect(b.source).toBe('internal');
+  });
+
+  it('source = "external" は承認不要 (approval optional)', () => {
+    const b = ChatBlockSchema.parse({
+      type: 'tool_use',
+      toolUseId: 'tu-2',
+      name: 'mcp__atlassian__jira_get_issue',
+      input: { issueKey: 'EPIC-1' },
+      source: 'external',
+    });
+    if (b.type === 'tool_use') {
+      expect(b.source).toBe('external');
+      expect(b.approval).toBeUndefined();
+    }
+  });
+
+  it('source = "external" + approval 指定もできる (任意で記録可)', () => {
+    const b = ChatBlockSchema.parse({
+      type: 'tool_use',
+      toolUseId: 'tu-3',
+      name: 'mcp__atlassian__jira_search',
+      input: {},
+      source: 'external',
+      approval: 'approved',
+    });
+    if (b.type === 'tool_use') {
+      expect(b.source).toBe('external');
+      expect(b.approval).toBe('approved');
+    }
+  });
+
+  it('source = "internal" で approval 無しは fail', () => {
+    expect(() =>
+      ChatBlockSchema.parse({
+        type: 'tool_use',
+        toolUseId: 'tu-4',
+        name: 'mcp__tally__create_node',
+        input: {},
+        source: 'internal',
+      }),
+    ).toThrow();
+  });
+
+  it('source 未指定 (= internal default) で approval 無しは fail', () => {
+    expect(() =>
+      ChatBlockSchema.parse({
+        type: 'tool_use',
+        toolUseId: 'tu-5',
+        name: 'mcp__tally__create_node',
+        input: {},
+      }),
+    ).toThrow();
+  });
+
+  it('既存の internal + approval=pending/approved/rejected は引き続き valid', () => {
+    for (const a of ['pending', 'approved', 'rejected'] as const) {
+      const b = ChatBlockSchema.parse({
+        type: 'tool_use',
+        toolUseId: `tu-${a}`,
+        name: 'mcp__tally__create_node',
+        input: {},
+        approval: a,
+      });
+      if (b.type === 'tool_use') {
+        expect(b.source).toBe('internal');
+        expect(b.approval).toBe(a);
+      }
+    }
+  });
+
+  it('source の不正値 (例 "auto") は fail', () => {
+    expect(() =>
+      ChatBlockSchema.parse({
+        type: 'tool_use',
+        toolUseId: 'tu-bad',
+        name: 'mcp__tally__create_node',
+        input: {},
+        source: 'auto',
+        approval: 'approved',
+      }),
+    ).toThrow();
+  });
+});
+
+describe('RequirementNodeSchema.sourceUrl', () => {
+  it('sourceUrl 未指定は optional (既存互換)', () => {
+    const n = RequirementNodeSchema.parse({
+      id: 'n',
+      type: 'requirement',
+      x: 0,
+      y: 0,
+      title: 'R',
+      body: '',
+    });
+    expect(n.sourceUrl).toBeUndefined();
+  });
+
+  it('sourceUrl 指定で保持', () => {
+    const n = RequirementNodeSchema.parse({
+      id: 'n',
+      type: 'requirement',
+      x: 0,
+      y: 0,
+      title: 'R',
+      body: '',
+      sourceUrl: 'https://jira.test/browse/EPIC-1',
+    });
+    expect(n.sourceUrl).toBe('https://jira.test/browse/EPIC-1');
+  });
+
+  it('sourceUrl が URL でないと fail', () => {
+    expect(() =>
+      RequirementNodeSchema.parse({
+        id: 'n',
+        type: 'requirement',
+        x: 0,
+        y: 0,
+        title: 'R',
+        body: '',
+        sourceUrl: 'not a url',
+      }),
+    ).toThrow();
+  });
+});
