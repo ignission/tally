@@ -9,6 +9,7 @@ import type {
   Codebase,
   Edge,
   EdgeType,
+  McpServerConfig,
   Node,
   NodeType,
   Project,
@@ -113,6 +114,7 @@ interface CanvasState {
     name?: string;
     description?: string | null;
     codebases?: Codebase[];
+    mcpServers?: McpServerConfig[];
   }) => Promise<void>;
 
   // Phase 6: チャットスレッド管理。
