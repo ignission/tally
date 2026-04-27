@@ -66,7 +66,7 @@ pnpm dev
 ```
 
 - frontend: http://localhost:3000
-- ai-engine: ws://localhost:4000/agent
+- ai-engine: ws://localhost:5050/agent
 
 `pnpm dev` は `pnpm -r --parallel dev` を呼び、frontend (Next.js dev) と ai-engine (tsx watch) を並列起動する。
 
