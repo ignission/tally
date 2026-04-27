@@ -64,4 +64,42 @@ describe('ToolApprovalCard', () => {
     );
     expect(screen.getByText(/^create_node$/)).toBeDefined();
   });
+
+  it('source=external の tool_use は承認 / 却下ボタンを表示しない (Task 18)', () => {
+    useCanvasStore.setState({ approveChatTool: vi.fn() } as never);
+    render(
+      <ToolApprovalCard
+        block={{
+          type: 'tool_use',
+          toolUseId: 'tool-ext',
+          name: 'mcp__atlassian__jira_get_issue',
+          input: { issueKey: 'EPIC-1' },
+          source: 'external',
+        }}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /^承認$/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^却下$/ })).toBeNull();
+    // 外部ソース表示は AI が読んだ tool 名を含む
+    expect(screen.getByText(/外部ソース/)).toBeInTheDocument();
+    expect(screen.getByText(/atlassian: jira_get_issue/)).toBeInTheDocument();
+  });
+
+  it('source=external は折り畳み (details) で input を隠す (Task 18)', () => {
+    useCanvasStore.setState({ approveChatTool: vi.fn() } as never);
+    const { container } = render(
+      <ToolApprovalCard
+        block={{
+          type: 'tool_use',
+          toolUseId: 'tool-ext-2',
+          name: 'mcp__atlassian__jira_search',
+          input: { jql: 'project = TALLY' },
+          source: 'external',
+        }}
+      />,
+    );
+    // <details> 要素が存在
+    const details = container.querySelector('details');
+    expect(details).not.toBeNull();
+  });
 });
