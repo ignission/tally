@@ -438,7 +438,9 @@ describe('runAgent', () => {
   it('ingest-document: anchor 無しで起動し、tool_use を素通しする', async () => {
     const store = {
       getNode: vi.fn(),
-      getProjectMeta: vi.fn(),
+      // Task 15: agent-runner は mcpServers[] を取得するため毎ターン getProjectMeta を呼ぶ。
+      // 空 (mcpServers なし) を返して既存挙動と同等にする。
+      getProjectMeta: vi.fn().mockResolvedValue(null),
       addNode: vi.fn(),
       listNodes: vi.fn().mockResolvedValue([]),
       findRelatedNodes: vi.fn().mockResolvedValue([]),
@@ -491,8 +493,150 @@ describe('runAgent', () => {
     expect(events.some((e) => e.type === 'error')).toBe(false);
     const toolUseEvents = events.filter((e) => e.type === 'tool_use');
     expect(toolUseEvents.length).toBeGreaterThan(0);
-    // anchor 無しなので store.getNode / getProjectMeta は呼ばれない
+    // anchor 無しなので store.getNode は呼ばれない
     expect(store.getNode).not.toHaveBeenCalled();
-    expect(store.getProjectMeta).not.toHaveBeenCalled();
+    // Task 15: getProjectMeta は mcpServers[] を取るため必ず呼ばれる
+    expect(store.getProjectMeta).toHaveBeenCalled();
+  });
+
+  describe('Task 15: agent-runner で buildMcpServers を共有', () => {
+    const ORIGINAL_ENV = { ...process.env };
+    afterEach(() => {
+      process.env = { ...ORIGINAL_ENV };
+    });
+
+    it('プロジェクト mcpServers[] を sdk.query に動的に渡す (chat-runner と同じ utility 共有)', async () => {
+      process.env.TEST_PAT = 'secret';
+      const store = {
+        getNode: vi.fn().mockResolvedValue({
+          id: 'uc-1',
+          type: 'usecase',
+          x: 0,
+          y: 0,
+          title: 'UC',
+          body: '',
+        }),
+        getProjectMeta: vi.fn().mockResolvedValue({
+          id: 'p',
+          name: 'P',
+          codebases: [],
+          mcpServers: [
+            {
+              id: 'atlassian',
+              name: 'A',
+              kind: 'atlassian',
+              url: 'https://t.test/mcp',
+              auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'TEST_PAT' },
+              options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
+            },
+          ],
+          createdAt: '2026-04-24T00:00:00Z',
+          updatedAt: '2026-04-24T00:00:00Z',
+        }),
+        addNode: vi.fn(),
+        listNodes: vi.fn().mockResolvedValue([]),
+        findRelatedNodes: vi.fn().mockResolvedValue([]),
+        addEdge: vi.fn(),
+      } as unknown as ProjectStore;
+
+      const querySpy = vi.fn(() =>
+        (async function* () {
+          yield {
+            type: 'result',
+            subtype: 'success',
+            result: 'ok',
+          } as unknown as SdkMessageLike;
+        })(),
+      );
+      const sdk: SdkLike = { query: querySpy };
+
+      for await (const _ of runAgent({
+        sdk,
+        store,
+        projectDir: '/ws',
+        req: {
+          type: 'start',
+          agent: 'extract-questions',
+          projectId: 'p',
+          input: { nodeId: 'uc-1' },
+        },
+      })) {
+        /* drain */
+      }
+
+      const callArg = (querySpy.mock.calls as unknown[][])[0]?.[0] as unknown as {
+        options?: {
+          mcpServers?: Record<string, { headers?: Record<string, string> }>;
+          allowedTools?: string[];
+        };
+      };
+      expect(Object.keys(callArg.options?.mcpServers ?? {})).toEqual(
+        expect.arrayContaining(['tally', 'atlassian']),
+      );
+      const atlassian = callArg.options?.mcpServers?.atlassian;
+      expect(atlassian?.headers?.Authorization).toBe('Bearer secret');
+      // agent 固有の allowedTools (mcp__tally__find_related 等) + 外部 MCP wildcard
+      expect(callArg.options?.allowedTools).toContain('mcp__atlassian__*');
+    });
+
+    it('env 未設定なら error event を emit、sdk.query は呼ばない', async () => {
+      delete process.env.MISSING_PAT;
+      const store = {
+        getNode: vi.fn().mockResolvedValue({
+          id: 'uc-1',
+          type: 'usecase',
+          x: 0,
+          y: 0,
+          title: 'UC',
+          body: '',
+        }),
+        getProjectMeta: vi.fn().mockResolvedValue({
+          id: 'p',
+          name: 'P',
+          codebases: [],
+          mcpServers: [
+            {
+              id: 'a',
+              name: 'A',
+              kind: 'atlassian',
+              url: 'https://t.test/mcp',
+              auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'MISSING_PAT' },
+              options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
+            },
+          ],
+          createdAt: '2026-04-24T00:00:00Z',
+          updatedAt: '2026-04-24T00:00:00Z',
+        }),
+        addNode: vi.fn(),
+        listNodes: vi.fn().mockResolvedValue([]),
+        findRelatedNodes: vi.fn().mockResolvedValue([]),
+        addEdge: vi.fn(),
+      } as unknown as ProjectStore;
+
+      const querySpy = vi.fn();
+      const sdk: SdkLike = { query: querySpy };
+      const events: AgentEvent[] = [];
+      for await (const e of runAgent({
+        sdk,
+        store,
+        projectDir: '/ws',
+        req: {
+          type: 'start',
+          agent: 'extract-questions',
+          projectId: 'p',
+          input: { nodeId: 'uc-1' },
+        },
+      })) {
+        events.push(e);
+      }
+
+      // buildMcpServers の throw が catch (err) で error event に流れる
+      expect(querySpy).not.toHaveBeenCalled();
+      const errorEvent = events.find((e) => e.type === 'error');
+      expect(errorEvent).toBeDefined();
+      if (errorEvent && errorEvent.type === 'error') {
+        expect(errorEvent.message).toMatch(/MISSING_PAT/);
+      }
+    });
   });
 });
