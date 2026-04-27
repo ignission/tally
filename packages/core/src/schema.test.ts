@@ -11,6 +11,7 @@ import {
   McpServerConfigSchema,
   NodeSchema,
   ProjectMetaSchema,
+  ProjectSchema,
   ProposalNodeSchema,
   QuestionNodeSchema,
   RequirementNodeSchema,
@@ -566,5 +567,78 @@ describe('McpServerConfigSchema hardening', () => {
         }),
       ).toThrow();
     });
+  });
+});
+
+describe('ProjectSchema.mcpServers', () => {
+  it('mcpServers 未指定なら default の空配列', () => {
+    const p = ProjectSchema.parse({
+      id: 'p',
+      name: 'P',
+      codebases: [],
+      createdAt: '2026-04-24T00:00:00Z',
+      updatedAt: '2026-04-24T00:00:00Z',
+      nodes: [],
+      edges: [],
+    });
+    expect(p.mcpServers).toEqual([]);
+  });
+
+  it('mcpServers 指定で round-trip する', () => {
+    const input = {
+      id: 'p',
+      name: 'P',
+      codebases: [],
+      createdAt: '2026-04-24T00:00:00Z',
+      updatedAt: '2026-04-24T00:00:00Z',
+      nodes: [],
+      edges: [],
+      mcpServers: [
+        {
+          id: 'atlassian',
+          name: 'A',
+          kind: 'atlassian' as const,
+          url: 'https://x.test/mcp',
+          auth: { type: 'pat' as const, scheme: 'bearer' as const, tokenEnvVar: 'JIRA_PAT' },
+        },
+      ],
+    };
+    const p = ProjectSchema.parse(input);
+    expect(p.mcpServers).toHaveLength(1);
+    expect(p.mcpServers[0]?.options.maxChildIssues).toBe(30);
+    expect(p.mcpServers[0]?.id).toBe('atlassian');
+  });
+});
+
+describe('ProjectMetaSchema.mcpServers', () => {
+  it('ProjectMetaSchema にも mcpServers が乗る (project.yaml の meta との整合)', () => {
+    const meta = ProjectMetaSchema.parse({
+      id: 'p',
+      name: 'P',
+      codebases: [],
+      createdAt: '2026-04-24T00:00:00Z',
+      updatedAt: '2026-04-24T00:00:00Z',
+      mcpServers: [
+        {
+          id: 'atlassian',
+          name: 'A',
+          kind: 'atlassian' as const,
+          url: 'https://x.test/mcp',
+          auth: { type: 'pat' as const, scheme: 'bearer' as const, tokenEnvVar: 'JIRA_PAT' },
+        },
+      ],
+    });
+    expect(meta.mcpServers).toHaveLength(1);
+  });
+
+  it('既存 YAML (mcpServers 無し) は default [] で読める (後方互換)', () => {
+    const meta = ProjectMetaSchema.parse({
+      id: 'p',
+      name: 'P',
+      codebases: [],
+      createdAt: '2026-04-24T00:00:00Z',
+      updatedAt: '2026-04-24T00:00:00Z',
+    });
+    expect(meta.mcpServers).toEqual([]);
   });
 });
