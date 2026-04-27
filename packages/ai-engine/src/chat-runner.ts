@@ -27,9 +27,13 @@ export interface ChatRunnerDeps {
   threadId: string;
 }
 
-// SDK の assistant message から抽出する block の単純化形。
-// MCP 経路に一本化したため tool_use は拾わないが、将来のデバッグ用に型定義は保持。
-type ExtractedBlock = { type: 'text'; text: string };
+// SDK の assistant / user message から抽出する block の単純化形。
+// Tally MCP の tool_use は MCP intercept 経路で処理されるので拾わない。
+// 外部 MCP (mcp__tally__ 以外) の tool_use / tool_result は永続化と UI 通知のためここで拾う (Task 12)。
+type ExtractedBlock =
+  | { type: 'text'; text: string }
+  | { type: 'tool_use'; toolUseId: string; name: string; input: unknown }
+  | { type: 'tool_result'; toolUseId: string; ok: boolean; output: string };
 
 // MCP ツール名と、そのハンドラ (承認必要かどうか) を束ねるエントリ。
 // 承認必須のツールは create_* 系 (書き込み)、承認不要は find_related / list_by_type (読み取り)。
@@ -188,6 +192,36 @@ export class ChatRunner {
             if (b.type === 'text') {
               textBuffer.push(b.text);
               queue.push({ type: 'chat_text_delta', messageId: assistantMsgId, text: b.text });
+            } else if (b.type === 'tool_use') {
+              // 外部 MCP の tool_use: source='external' で永続化、承認 UI なし (Task 12)。
+              await chatStore.appendBlockToMessage(threadId, assistantMsgId, {
+                type: 'tool_use',
+                toolUseId: b.toolUseId,
+                name: b.name,
+                input: b.input,
+                source: 'external',
+              });
+              queue.push({
+                type: 'chat_tool_external_use',
+                messageId: assistantMsgId,
+                toolUseId: b.toolUseId,
+                name: b.name,
+                input: b.input,
+              });
+            } else if (b.type === 'tool_result') {
+              await chatStore.appendBlockToMessage(threadId, assistantMsgId, {
+                type: 'tool_result',
+                toolUseId: b.toolUseId,
+                ok: b.ok,
+                output: b.output,
+              });
+              queue.push({
+                type: 'chat_tool_external_result',
+                messageId: assistantMsgId,
+                toolUseId: b.toolUseId,
+                ok: b.ok,
+                output: b.output,
+              });
             }
           }
         }
@@ -613,20 +647,62 @@ export function buildChatPrompt(messages: ChatMessage[], contextNodes: Node[] = 
   return lines.join('\n');
 }
 
-// SDK から流れてくる assistant message の content 配列から text を取り出す。
-// tool_use は MCP 経路が処理するのでここでは無視する (重複処理を避ける)。
+// SDK から流れてくる assistant message + user message (tool_result を含む) から block 抽出。
+// 拾うもの:
+// - assistant.text (existing 動作維持)
+// - tool_use で name が mcp__tally__ で始まらないもの (= 外部 MCP、Task 12)
+// - tool_result 全部 (外部 MCP の応答、user message に含まれる)
+//
+// Tally MCP (mcp__tally__*) の tool_use は createSdkMcpServer の intercept 経路で
+// invokeInterceptedTool が処理するので、ここで拾うと二重処理になる。よって除外。
 // 実行時 duck typing (agent-runner.ts の sdkMessageToAgentEvent と同じパターン)。
 function extractAssistantBlocks(msg: SdkMessageLike): ExtractedBlock[] {
   const m = msg as unknown as { type?: string; message?: { content?: unknown[] } };
-  if (m.type !== 'assistant' || !m.message?.content) return [];
+  if ((m.type !== 'assistant' && m.type !== 'user') || !m.message?.content) return [];
   const out: ExtractedBlock[] = [];
   for (const block of m.message.content) {
     const b = block as {
       type?: string;
       text?: string;
+      id?: string;
+      name?: string;
+      input?: unknown;
+      tool_use_id?: string;
+      content?: unknown;
+      is_error?: boolean;
     };
-    if (b.type === 'text' && typeof b.text === 'string') {
+    if (b.type === 'text' && typeof b.text === 'string' && m.type === 'assistant') {
       out.push({ type: 'text', text: b.text });
+    } else if (
+      b.type === 'tool_use' &&
+      typeof b.id === 'string' &&
+      typeof b.name === 'string' &&
+      !b.name.startsWith('mcp__tally__')
+    ) {
+      out.push({
+        type: 'tool_use',
+        toolUseId: b.id,
+        name: b.name,
+        input: b.input,
+      });
+    } else if (b.type === 'tool_result' && typeof b.tool_use_id === 'string') {
+      // content は string or [{type:'text', text:'...'}] で来る (SDK 仕様)。string 化する。
+      let outputText = '';
+      if (typeof b.content === 'string') {
+        outputText = b.content;
+      } else if (Array.isArray(b.content)) {
+        outputText = b.content
+          .map((c: { type?: string; text?: string }) =>
+            c.type === 'text' && typeof c.text === 'string' ? c.text : '',
+          )
+          .join('');
+      }
+      out.push({
+        type: 'tool_result',
+        toolUseId: b.tool_use_id,
+        ok: b.is_error !== true,
+        output: outputText,
+      });
     }
   }
   return out;

@@ -40,6 +40,23 @@ export type ChatEvent =
     }
   | { type: 'chat_assistant_message_completed'; messageId: string }
   | { type: 'chat_turn_ended' }
+  // 外部 MCP (mcp__tally__ 以外) の tool_use を承認なしで永続化するときに発火。
+  // AI が外部ソースを read したことを UI に見える形で残す (Task 12)。
+  | {
+      type: 'chat_tool_external_use';
+      messageId: string;
+      toolUseId: string;
+      name: string;
+      input: unknown;
+    }
+  // 外部 MCP の tool_result。AI が読んだ外部ソースの内容を UI に展開可能で表示する (Task 12)。
+  | {
+      type: 'chat_tool_external_result';
+      messageId: string;
+      toolUseId: string;
+      ok: boolean;
+      output: string;
+    }
   | { type: 'error'; code: string; message: string };
 
 // SDK の厳密な型に依存せず、実行時に触る最小限のプロパティだけで型付けする。
