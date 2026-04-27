@@ -277,6 +277,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
                 toolUseId: evt.toolUseId,
                 name: evt.name,
                 input: evt.input,
+                source: 'internal',
                 approval: 'pending',
               },
             ],

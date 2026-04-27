@@ -234,6 +234,7 @@ export class ChatRunner {
           toolUseId: uiId,
           name: entry.name,
           input,
+          source: 'internal',
           approval: 'approved',
         });
         await chatStore.appendBlockToMessage(threadId, assistantMsgId, {
@@ -262,6 +263,7 @@ export class ChatRunner {
         toolUseId: uiToolUseId,
         name: entry.name,
         input,
+        source: 'internal',
         approval: 'pending',
       });
       emit({
