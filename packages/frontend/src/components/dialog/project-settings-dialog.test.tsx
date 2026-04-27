@@ -10,6 +10,7 @@ const meta: ProjectMeta = {
   id: 'proj-a',
   name: 'P',
   codebases: [{ id: 'web', label: 'Web', path: '/w' }],
+  mcpServers: [],
   createdAt: '2026-04-21T00:00:00Z',
   updatedAt: '2026-04-21T00:00:00Z',
 };

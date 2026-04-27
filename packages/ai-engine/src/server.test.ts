@@ -24,6 +24,7 @@ describe('WS /agent', () => {
       id: 'proj-ws',
       name: 'WS',
       codebases: [],
+      mcpServers: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
@@ -158,6 +159,7 @@ describe('WS /chat', () => {
       id: 'proj-ws',
       name: 'WS',
       codebases: [],
+      mcpServers: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });

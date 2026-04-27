@@ -21,6 +21,7 @@ describe('POST /api/projects/[id]/nodes/[nodeId]/adopt', () => {
       id: 'proj-test',
       name: 'Test',
       codebases: [],
+      mcpServers: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });

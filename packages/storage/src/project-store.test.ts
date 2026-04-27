@@ -37,6 +37,7 @@ describe('FileSystemProjectStore', () => {
         name: 'テストプロジェクト',
         description: '説明',
         codebases: [],
+        mcpServers: [],
         createdAt: '2026-04-18T10:00:00Z',
         updatedAt: '2026-04-18T10:00:00Z',
       });
@@ -355,6 +356,7 @@ describe('FileSystemProjectStore', () => {
         id: 'proj-a',
         name: 'a',
         codebases: [],
+        mcpServers: [],
         createdAt: '2026-04-21T00:00:00Z',
         updatedAt: '2026-04-21T00:00:00Z',
       });
@@ -372,6 +374,7 @@ describe('FileSystemProjectStore', () => {
         id: 'proj-a',
         name: 'a',
         codebases,
+        mcpServers: [],
         createdAt: '2026-04-21T00:00:00Z',
         updatedAt: '2026-04-21T00:00:00Z',
       });
@@ -386,6 +389,7 @@ describe('FileSystemProjectStore', () => {
         id: 'proj-a',
         name: 'a',
         codebases: [{ id: 'frontend', label: 'W', path: '/a' }],
+        mcpServers: [],
         createdAt: '2026-04-21T00:00:00Z',
         updatedAt: '2026-04-21T00:00:00Z',
       });
@@ -407,6 +411,7 @@ describe('FileSystemProjectStore', () => {
         id: 'proj-a',
         name: 'a',
         codebases: [{ id: 'frontend', label: 'W', path: '/a' }],
+        mcpServers: [],
         createdAt: '2026-04-21T00:00:00Z',
         updatedAt: '2026-04-21T00:00:00Z',
       });
