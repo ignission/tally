@@ -1,165 +1,41 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { buildMcpServers } from './build-mcp-servers';
 
 describe('buildMcpServers', () => {
-  const ORIGINAL_ENV = { ...process.env };
-  afterEach(() => {
-    process.env = { ...ORIGINAL_ENV };
-  });
-
   it('mcpServers 空配列 → external 無し、allowedTools は tally のみ', () => {
     const result = buildMcpServers({ tallyMcp: { type: 'sdk' } as unknown, configs: [] });
     expect(Object.keys(result.mcpServers)).toEqual(['tally']);
     expect(result.allowedTools).toEqual(['mcp__tally__*']);
   });
 
-  it('Bearer (Server/DC) → Authorization: Bearer <token>', () => {
-    process.env.JIRA_PAT = 'secret-xyz';
+  it('atlassian 1 個 → HTTP config (url のみ、Authorization header なし) + allowedTools', () => {
     const result = buildMcpServers({
       tallyMcp: { type: 'sdk' } as unknown,
       configs: [
         {
-          id: 'atlassian-dc',
-          name: 'A',
+          id: 'atlassian',
+          name: 'Atlassian',
           kind: 'atlassian',
-          url: 'https://jira.test/mcp',
-          auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'JIRA_PAT' },
+          url: 'https://mcp.atlassian.example/v1/mcp',
           options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
         },
       ],
     });
-    const atlassian = result.mcpServers['atlassian-dc'] as {
+    const atlassian = result.mcpServers.atlassian as {
       type: string;
       url: string;
-      headers: Record<string, string>;
+      headers?: unknown;
     };
     expect(atlassian.type).toBe('http');
-    expect(atlassian.url).toBe('https://jira.test/mcp');
-    expect(atlassian.headers.Authorization).toBe('Bearer secret-xyz');
+    expect(atlassian.url).toBe('https://mcp.atlassian.example/v1/mcp');
+    // OAuth 2.1 採用: Tally は Authorization header を組み立てない
+    expect(atlassian.headers).toBeUndefined();
     expect(result.allowedTools).toContain('mcp__tally__*');
-    expect(result.allowedTools).toContain('mcp__atlassian-dc__*');
-  });
-
-  it('Basic (Cloud) → Authorization: Basic <base64(email:token)>', () => {
-    process.env.ATLASSIAN_EMAIL = 'user@example.com';
-    process.env.ATLASSIAN_API_TOKEN = 'api-token-xyz';
-    const result = buildMcpServers({
-      tallyMcp: { type: 'sdk' } as unknown,
-      configs: [
-        {
-          id: 'atlassian-cloud',
-          name: 'A',
-          kind: 'atlassian',
-          url: 'https://x.test/mcp',
-          auth: {
-            type: 'pat',
-            scheme: 'basic',
-            emailEnvVar: 'ATLASSIAN_EMAIL',
-            tokenEnvVar: 'ATLASSIAN_API_TOKEN',
-          },
-          options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
-        },
-      ],
-    });
-    const atlassian = result.mcpServers['atlassian-cloud'] as {
-      headers: Record<string, string>;
-    };
-    const expected = Buffer.from('user@example.com:api-token-xyz').toString('base64');
-    expect(atlassian.headers.Authorization).toBe(`Basic ${expected}`);
-  });
-
-  it('Bearer の tokenEnvVar 未設定 → throw', () => {
-    delete process.env.JIRA_PAT;
-    expect(() =>
-      buildMcpServers({
-        tallyMcp: { type: 'sdk' } as unknown,
-        configs: [
-          {
-            id: 'a',
-            name: 'A',
-            kind: 'atlassian',
-            url: 'https://x.test/mcp',
-            auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'JIRA_PAT' },
-            options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
-          },
-        ],
-      }),
-    ).toThrowError(/JIRA_PAT/);
-  });
-
-  it('Basic の emailEnvVar 未設定 → throw', () => {
-    delete process.env.ATLASSIAN_EMAIL;
-    process.env.ATLASSIAN_API_TOKEN = 'x';
-    expect(() =>
-      buildMcpServers({
-        tallyMcp: { type: 'sdk' } as unknown,
-        configs: [
-          {
-            id: 'a',
-            name: 'A',
-            kind: 'atlassian',
-            url: 'https://x.test/mcp',
-            auth: {
-              type: 'pat',
-              scheme: 'basic',
-              emailEnvVar: 'ATLASSIAN_EMAIL',
-              tokenEnvVar: 'ATLASSIAN_API_TOKEN',
-            },
-            options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
-          },
-        ],
-      }),
-    ).toThrowError(/ATLASSIAN_EMAIL/);
-  });
-
-  it('Basic の tokenEnvVar 未設定 → throw', () => {
-    process.env.ATLASSIAN_EMAIL = 'user@example.com';
-    delete process.env.ATLASSIAN_API_TOKEN;
-    expect(() =>
-      buildMcpServers({
-        tallyMcp: { type: 'sdk' } as unknown,
-        configs: [
-          {
-            id: 'a',
-            name: 'A',
-            kind: 'atlassian',
-            url: 'https://x.test/mcp',
-            auth: {
-              type: 'pat',
-              scheme: 'basic',
-              emailEnvVar: 'ATLASSIAN_EMAIL',
-              tokenEnvVar: 'ATLASSIAN_API_TOKEN',
-            },
-            options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
-          },
-        ],
-      }),
-    ).toThrowError(/ATLASSIAN_API_TOKEN/);
-  });
-
-  it('env 値が空文字でも → throw (= 未設定と同じ扱い)', () => {
-    process.env.JIRA_PAT = '';
-    expect(() =>
-      buildMcpServers({
-        tallyMcp: { type: 'sdk' } as unknown,
-        configs: [
-          {
-            id: 'a',
-            name: 'A',
-            kind: 'atlassian',
-            url: 'https://x.test/mcp',
-            auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'JIRA_PAT' },
-            options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
-          },
-        ],
-      }),
-    ).toThrowError(/JIRA_PAT/);
+    expect(result.allowedTools).toContain('mcp__atlassian__*');
   });
 
   it('複数の config を合成 → 各々が独立に build される', () => {
-    process.env.JIRA_PAT = 's1';
-    process.env.OTHER_TOKEN = 's2';
     const result = buildMcpServers({
       tallyMcp: { type: 'sdk' } as unknown,
       configs: [
@@ -168,7 +44,6 @@ describe('buildMcpServers', () => {
           name: 'F',
           kind: 'atlassian',
           url: 'https://a.test/mcp',
-          auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'JIRA_PAT' },
           options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
         },
         {
@@ -176,16 +51,17 @@ describe('buildMcpServers', () => {
           name: 'S',
           kind: 'atlassian',
           url: 'https://b.test/mcp',
-          auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'OTHER_TOKEN' },
           options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
         },
       ],
     });
     expect(Object.keys(result.mcpServers)).toEqual(['tally', 'first', 'second']);
-    const first = result.mcpServers.first as { headers: Record<string, string> };
-    const second = result.mcpServers.second as { headers: Record<string, string> };
-    expect(first.headers.Authorization).toBe('Bearer s1');
-    expect(second.headers.Authorization).toBe('Bearer s2');
+    const first = result.mcpServers.first as { url: string; headers?: unknown };
+    const second = result.mcpServers.second as { url: string; headers?: unknown };
+    expect(first.url).toBe('https://a.test/mcp');
+    expect(second.url).toBe('https://b.test/mcp');
+    expect(first.headers).toBeUndefined();
+    expect(second.headers).toBeUndefined();
     expect(result.allowedTools).toEqual(['mcp__tally__*', 'mcp__first__*', 'mcp__second__*']);
   });
 });

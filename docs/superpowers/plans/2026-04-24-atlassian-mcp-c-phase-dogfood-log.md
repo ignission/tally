@@ -4,38 +4,51 @@
 
 ## Setup
 
-### MCP サーバー起動 (sooperset/mcp-atlassian)
+### MCP サーバーの選択肢
+
+#### (A) Atlassian 公式 Rovo MCP — OAuth 2.1 (推奨)
+
+- URL: `https://mcp.atlassian.com/v1/mcp`
+- 認証: ユーザーが初回 Tally Chat 利用時に Claude Agent SDK が WWW-Authenticate を解釈し、
+  ブラウザ経由で OAuth 2.1 を実行。token は SDK が管理し、Tally process には保存されない。
+- 制約: Atlassian Cloud 専用 (Server/DC 非対応)。
+
+#### (B) sooperset/mcp-atlassian — credentials は MCP server 側で管理
 
 ```bash
-# uvx 経由
-uvx mcp-atlassian --transport streamable-http --port 9000
+# Cloud に対する Basic auth で起動 (token は MCP server プロセスに留まる)
+JIRA_USERNAME=you@example.com JIRA_API_TOKEN=xxx \
+  uvx mcp-atlassian --transport streamable-http --port 9000
 
-# または Docker
-docker run -p 9000:9000 ghcr.io/sooperset/mcp-atlassian:latest \
-  --transport streamable-http --port 9000
+# Server/DC に対する Bearer auth で起動
+JIRA_PERSONAL_TOKEN=xxx JIRA_URL=https://jira.your-company.example \
+  uvx mcp-atlassian --transport streamable-http --port 9000
 ```
 
-### .env 設定
-
-Cloud (Atlassian Cloud) の場合 (Basic auth):
+または Docker:
 ```bash
-ATLASSIAN_EMAIL=your-email@example.com
-ATLASSIAN_API_TOKEN=your-api-token
+docker run -p 9000:9000 -e JIRA_PERSONAL_TOKEN=xxx -e JIRA_URL=... \
+  ghcr.io/sooperset/mcp-atlassian:latest --transport streamable-http --port 9000
 ```
 
-Server / DC (オンプレ Jira) の場合 (Bearer auth):
-```bash
-JIRA_PAT=your-personal-access-token
-```
+**Tally は (A)/(B) いずれの場合も credentials を一切持ちません。** Tally プロセスから PAT/API key
+が漏れる経路が無いことが Premise 9 撤回後の設計です。
 
 ### Tally プロジェクト設定
 
 プロジェクト設定ダイアログ → MCP サーバーを追加:
 - ID: `atlassian`
 - 名前: `Atlassian Cloud` (任意)
-- URL: `http://localhost:9000/mcp`
-- スキーム: Bearer or Basic
-- envVar: `ATLASSIAN_EMAIL` / `ATLASSIAN_API_TOKEN` (basic) or `JIRA_PAT` (bearer)
+- URL: 上の (A) なら `https://mcp.atlassian.com/v1/mcp`、(B) なら `http://localhost:9000/mcp`
+  (loopback の http はテスト用に許容)
+
+### 初回 OAuth フロー (ケース A)
+
+1. Tally Chat で `@JIRA EPIC-XXX 読んで論点出して` を投げる
+2. SDK が 401 を受けて WWW-Authenticate から OAuth metadata を取得
+3. ブラウザが開き Atlassian で auth、token は SDK 内部に保存
+4. 自動で再リクエストが走り、tool 呼び出しが成功する
+5. 以降は token が refresh される間、再認証は不要
 
 ## Epic 1-10
 

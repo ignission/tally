@@ -7,15 +7,13 @@ import { TextInput } from '@/components/ui/text-input';
 import { useCanvasStore } from '@/lib/store';
 import { FolderBrowserDialog } from './folder-browser-dialog';
 
-// MCP サーバー新規追加時のデフォルト config (Bearer + 空 envVar 名 + 空 url)。
-// scheme/envVar は ユーザーが Cloud (basic) か Server/DC (bearer) かで選択する。
+// MCP サーバー新規追加時のデフォルト config (url 空、認証は MCP/SDK 任せ)。
 function makeDefaultMcpServer(seq: number): McpServerConfig {
   return {
     id: `atlassian-${seq}`,
     name: 'Atlassian',
     kind: 'atlassian',
     url: '',
-    auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: '' },
     options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
   };
 }
@@ -170,12 +168,13 @@ export function ProjectSettingsDialog({ open, onClose }: { open: boolean; onClos
             </button>
           </div>
           <div style={MUTED}>
-            シークレット (PAT 等) はこのフォームでは入力しません。サーバーの .env に
-            <code> ATLASSIAN_PAT=... </code>のように置き、ここでは環境変数名のみ指定します。
+            認証 (OAuth 2.1 / API token 等) は MCP プロトコルに任せます。Tally では URL
+            の登録のみ行い、 初回利用時に MCP サーバーから案内される認証フローに従ってください。
           </div>
           {mcpServers.length === 0 && <div style={MUTED}>MCP サーバー未設定</div>}
           <ul style={CB_LIST}>
             {mcpServers.map((s, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: id 重複 (default 'atlassian-1' が複数行に並ぶ瞬間) を許す UI で index 込みのキーが必要
               <li key={`mcp-${i}-${s.id}`} style={MCP_ITEM}>
                 <div style={MCP_ROW}>
                   <TextInput
@@ -214,75 +213,6 @@ export function ProjectSettingsDialog({ open, onClose }: { open: boolean; onClos
                     aria-label={`mcp-${i}-url`}
                     style={{ ...INPUT, flex: 1 }}
                     placeholder="https://mcp.atlassian.example/v1/mcp"
-                  />
-                  <select
-                    value={s.auth.scheme}
-                    onChange={(e) => {
-                      const scheme = e.target.value as 'basic' | 'bearer';
-                      const next: McpServerConfig =
-                        scheme === 'basic'
-                          ? {
-                              ...s,
-                              auth: {
-                                type: 'pat',
-                                scheme: 'basic',
-                                emailEnvVar: '',
-                                tokenEnvVar: s.auth.tokenEnvVar,
-                              },
-                            }
-                          : {
-                              ...s,
-                              auth: {
-                                type: 'pat',
-                                scheme: 'bearer',
-                                tokenEnvVar: s.auth.tokenEnvVar,
-                              },
-                            };
-                      updateMcpServer(i, next);
-                    }}
-                    disabled={busy}
-                    aria-label={`mcp-${i}-scheme`}
-                    style={{ ...INPUT, width: 100 }}
-                  >
-                    <option value="bearer">Bearer</option>
-                    <option value="basic">Basic</option>
-                  </select>
-                </div>
-                <div style={MCP_ROW}>
-                  {s.auth.scheme === 'basic' && (
-                    <TextInput
-                      type="text"
-                      value={s.auth.emailEnvVar}
-                      onChange={(e) =>
-                        updateMcpServer(i, {
-                          ...s,
-                          auth: {
-                            type: 'pat',
-                            scheme: 'basic',
-                            emailEnvVar: e.target.value,
-                            tokenEnvVar: s.auth.tokenEnvVar,
-                          },
-                        })
-                      }
-                      disabled={busy}
-                      aria-label={`mcp-${i}-emailEnvVar`}
-                      style={{ ...INPUT, flex: 1 }}
-                      placeholder="ATLASSIAN_EMAIL"
-                    />
-                  )}
-                  <TextInput
-                    type="text"
-                    value={s.auth.tokenEnvVar}
-                    onChange={(e) =>
-                      updateMcpServer(i, {
-                        ...s,
-                        auth: { ...s.auth, tokenEnvVar: e.target.value },
-                      })
-                    }
-                    disabled={busy}
-                    aria-label={`mcp-${i}-tokenEnvVar`}
-                    style={{ ...INPUT, flex: 1 }}
-                    placeholder={s.auth.scheme === 'basic' ? 'ATLASSIAN_API_TOKEN' : 'JIRA_PAT'}
                   />
                 </div>
               </li>

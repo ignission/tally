@@ -196,29 +196,15 @@ function checkUniqueCodebaseIds(
 // ---------------------------------------------------------------------------
 // 注: ProjectMetaSchema / ProjectSchema が McpServerConfigSchema を参照するため、
 //     宣言順序として MCP セクションを Project 系より前に置く。
-
-// 環境変数名の shape (POSIX 準拠: 大文字英 + 数字 + アンダースコア、先頭は大文字英)。
-// 実値 (例 "foo@bar.com") の混入を防ぐ。空文字は regex で自動的に reject される。
-const ENV_VAR_NAME_REGEX = /^[A-Z][A-Z0-9_]*$/u;
-const envVarName = z.string().regex(ENV_VAR_NAME_REGEX, {
-  message: 'env var 名は ^[A-Z][A-Z0-9_]*$ (大文字英始まり、英数字・_ のみ)',
-});
-
-// Atlassian Cloud は Basic (base64(email:token))、Server/DC は Bearer (pat) の 2 scheme。
-// どちらも PAT ベースの認証 (OAuth は MVP 非対応、Premise 9)。
-const McpAuthSchema = z.discriminatedUnion('scheme', [
-  z.object({
-    type: z.literal('pat'),
-    scheme: z.literal('basic'),
-    emailEnvVar: envVarName, // 例 "ATLASSIAN_EMAIL"
-    tokenEnvVar: envVarName, // 例 "ATLASSIAN_API_TOKEN"
-  }),
-  z.object({
-    type: z.literal('pat'),
-    scheme: z.literal('bearer'),
-    tokenEnvVar: envVarName, // 例 "JIRA_PAT"
-  }),
-]);
+//
+// 認証方針 (Premise 9 撤回後):
+// MCP プロトコルの OAuth 2.1 を採用し、Tally は credentials を一切扱わない。
+// - 401 を受けたら Claude Agent SDK が WWW-Authenticate から OAuth metadata を取り、
+//   ブラウザ経由 (or device flow) で auth、token 管理は SDK 側で完結する。
+// - Tally は url のみ持ち、Authorization header は組み立てない。
+// - PAT / API key を Tally のメモリ・ログ・ファイルに残さない。
+// 既存の sooperset/mcp-atlassian (PAT 認証) を使う場合はその MCP server 自身が
+// 起動時 env で credentials を持つ前提 (Tally は header passthrough しない)。
 
 // options は未指定時に {} を default として与え、内側で各フィールドの default を発火させる。
 // zod v4 では outer .default(value) が parse 前に value をそのまま流すため、
@@ -240,8 +226,9 @@ export const McpServerConfigSchema = z.object({
   }),
   name: z.string().min(1),
   kind: z.literal('atlassian'),
-  // PAT を Authorization header で送る transport なので cleartext を許さない。
-  // 開発・テスト用の loopback (localhost / 127.0.0.1 / ::1) のみ http: を例外的に許容。
+  // OAuth 2.1 / その他 credential は MCP プロトコル経由で SDK が処理する。
+  // ここでは url のみを持ち、cleartext を防ぐため https のみ許可
+  // (開発・テスト用の loopback (localhost / 127.0.0.1 / ::1) のみ http: を例外的に許容)。
   url: z
     .string()
     .url()
@@ -266,7 +253,6 @@ export const McpServerConfigSchema = z.object({
       },
       { message: 'url は https で始まる必要があります (loopback の http は例外的に許容)' },
     ),
-  auth: McpAuthSchema,
   options: McpServerOptionsSchema,
 });
 
