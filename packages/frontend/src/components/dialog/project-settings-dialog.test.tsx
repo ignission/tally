@@ -93,6 +93,76 @@ describe('ProjectSettingsDialog', () => {
     );
   });
 
+  it('MCP サーバーを追加できる (Task 17)', async () => {
+    render(<ProjectSettingsDialog open onClose={() => {}} />);
+    await userEvent.click(screen.getByRole('button', { name: /MCP サーバーを追加/ }));
+    // 新規追加された MCP server の id 入力欄が現れる (default は atlassian-1)
+    const idInput = screen.getByLabelText('mcp-0-id') as HTMLInputElement;
+    expect(idInput).toBeInTheDocument();
+    expect(idInput.value).toBe('atlassian-1');
+    // url / tokenEnvVar を入力
+    const urlInput = screen.getByLabelText('mcp-0-url');
+    await userEvent.type(urlInput, 'https://x.test/mcp');
+    const tokenInput = screen.getByLabelText('mcp-0-tokenEnvVar');
+    await userEvent.type(tokenInput, 'JIRA_PAT');
+
+    await userEvent.click(screen.getByRole('button', { name: /保存/ }));
+    await waitFor(() =>
+      expect(patchProjectMeta).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mcpServers: [
+            expect.objectContaining({
+              id: 'atlassian-1',
+              kind: 'atlassian',
+              url: 'https://x.test/mcp',
+              auth: expect.objectContaining({
+                type: 'pat',
+                scheme: 'bearer',
+                tokenEnvVar: 'JIRA_PAT',
+              }),
+            }),
+          ],
+        }),
+      ),
+    );
+  });
+
+  it('Basic auth 切替で emailEnvVar 入力欄が現れる (Task 17)', async () => {
+    render(<ProjectSettingsDialog open onClose={() => {}} />);
+    await userEvent.click(screen.getByRole('button', { name: /MCP サーバーを追加/ }));
+    // 初期は bearer なので emailEnvVar 欄は無し
+    expect(screen.queryByLabelText('mcp-0-emailEnvVar')).toBeNull();
+    // basic に切替
+    const schemeSelect = screen.getByLabelText('mcp-0-scheme') as HTMLSelectElement;
+    await userEvent.selectOptions(schemeSelect, 'basic');
+    // emailEnvVar 欄が現れる
+    expect(screen.getByLabelText('mcp-0-emailEnvVar')).toBeInTheDocument();
+  });
+
+  it('MCP サーバーを削除できる (Task 17)', async () => {
+    render(<ProjectSettingsDialog open onClose={() => {}} />);
+    await userEvent.click(screen.getByRole('button', { name: /MCP サーバーを追加/ }));
+    // 追加直後 1 件
+    expect(screen.getByLabelText('mcp-0-id')).toBeInTheDocument();
+    // MCP セクションの削除 button (codebase の削除と区別するため scope で取る)
+    // codebase 削除 + MCP 削除の 2 つ「削除」button があるので getAllByRole で取って最後を click
+    const removeButtons = screen.getAllByRole('button', { name: /削除/ });
+    // 最後の削除 button = MCP のもの (codebase は 1 件目で追加 = 0 番目)
+    await userEvent.click(removeButtons[removeButtons.length - 1] as HTMLElement);
+    expect(screen.queryByLabelText('mcp-0-id')).toBeNull();
+  });
+
+  it('secret 値の入力欄は無い (envVar 名のみ。caption に .env への誘導)', () => {
+    render(<ProjectSettingsDialog open onClose={() => {}} />);
+    // secret / token / pat / api_token / password 系の入力欄が無いこと
+    expect(screen.queryByLabelText(/PAT$/i)).toBeNull();
+    expect(screen.queryByLabelText(/シークレット/i)).toBeNull();
+    expect(screen.queryByLabelText(/api_token$/i)).toBeNull();
+    expect(screen.queryByLabelText(/password/i)).toBeNull();
+    // .env への誘導文言
+    expect(screen.getByText(/\.env/)).toBeInTheDocument();
+  });
+
   it('id 重複時は保存 disabled', async () => {
     render(<ProjectSettingsDialog open onClose={() => {}} />);
     // まず 2 件目を追加
