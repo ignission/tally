@@ -192,19 +192,26 @@ export const ProjectMetaSchema = z
 // MCP サーバー設定スキーマ (Atlassian MCP 連携)
 // ---------------------------------------------------------------------------
 
+// 環境変数名の shape (POSIX 準拠: 大文字英 + 数字 + アンダースコア、先頭は大文字英)。
+// 実値 (例 "foo@bar.com") の混入を防ぐ。空文字は regex で自動的に reject される。
+const ENV_VAR_NAME_REGEX = /^[A-Z][A-Z0-9_]*$/u;
+const envVarName = z.string().regex(ENV_VAR_NAME_REGEX, {
+  message: 'env var 名は ^[A-Z][A-Z0-9_]*$ (大文字英始まり、英数字・_ のみ)',
+});
+
 // Atlassian Cloud は Basic (base64(email:token))、Server/DC は Bearer (pat) の 2 scheme。
 // どちらも PAT ベースの認証 (OAuth は MVP 非対応、Premise 9)。
 const McpAuthSchema = z.discriminatedUnion('scheme', [
   z.object({
     type: z.literal('pat'),
     scheme: z.literal('basic'),
-    emailEnvVar: z.string().min(1), // 例 "ATLASSIAN_EMAIL"
-    tokenEnvVar: z.string().min(1), // 例 "ATLASSIAN_API_TOKEN"
+    emailEnvVar: envVarName, // 例 "ATLASSIAN_EMAIL"
+    tokenEnvVar: envVarName, // 例 "ATLASSIAN_API_TOKEN"
   }),
   z.object({
     type: z.literal('pat'),
     scheme: z.literal('bearer'),
-    tokenEnvVar: z.string().min(1), // 例 "JIRA_PAT"
+    tokenEnvVar: envVarName, // 例 "JIRA_PAT"
   }),
 ]);
 
@@ -218,11 +225,42 @@ const McpServerOptionsSchema = z
   })
   .default(() => ({ maxChildIssues: 30, maxCommentsPerIssue: 5 }));
 
+// MCP サーバー id は SDK の wildcard `mcp__<id>__*` の id 部分に embed されるため、
+// tool 名 matching が壊れないよう CodebaseSchema.id と同じ charset 制約を採用。
+const McpServerIdRegex = /^[a-z][a-z0-9-]{0,31}$/u;
+
 export const McpServerConfigSchema = z.object({
-  id: z.string().min(1),
+  id: z.string().regex(McpServerIdRegex, {
+    message: 'mcp server id は先頭英小文字 + 英小文字/数字/ハイフン、32 字以内',
+  }),
   name: z.string().min(1),
   kind: z.literal('atlassian'),
-  url: z.string().url(),
+  // PAT を Authorization header で送る transport なので cleartext を許さない。
+  // 開発・テスト用の loopback (localhost / 127.0.0.1 / ::1) のみ http: を例外的に許容。
+  url: z
+    .string()
+    .url()
+    .refine(
+      (u) => {
+        try {
+          const parsed = new URL(u);
+          if (parsed.protocol === 'https:') return true;
+          if (
+            parsed.protocol === 'http:' &&
+            (parsed.hostname === 'localhost' ||
+              parsed.hostname === '127.0.0.1' ||
+              parsed.hostname === '::1' ||
+              parsed.hostname === '[::1]')
+          ) {
+            return true;
+          }
+          return false;
+        } catch {
+          return false;
+        }
+      },
+      { message: 'url は https で始まる必要があります (loopback の http は例外的に許容)' },
+    ),
   auth: McpAuthSchema,
   options: McpServerOptionsSchema,
 });
