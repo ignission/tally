@@ -174,23 +174,11 @@ function checkUniqueCodebaseIds(
   }
 }
 
-// .tally/project.yaml に対応する meta のみのスキーマ。
-// ノード・エッジはファイル分割で永続化するため、ここには含めない。
-export const ProjectMetaSchema = z
-  .object({
-    id: z.string().min(1),
-    name: z.string().min(1),
-    description: z.string().optional(),
-    // 0 件以上。code ノードが存在するときは最低 1 件必要（整合性は storage 層で検証）。
-    codebases: z.array(CodebaseSchema),
-    createdAt: z.string(),
-    updatedAt: z.string(),
-  })
-  .superRefine((meta, ctx) => checkUniqueCodebaseIds(meta.codebases, ctx));
-
 // ---------------------------------------------------------------------------
 // MCP サーバー設定スキーマ (Atlassian MCP 連携)
 // ---------------------------------------------------------------------------
+// 注: ProjectMetaSchema / ProjectSchema が McpServerConfigSchema を参照するため、
+//     宣言順序として MCP セクションを Project 系より前に置く。
 
 // 環境変数名の shape (POSIX 準拠: 大文字英 + 数字 + アンダースコア、先頭は大文字英)。
 // 実値 (例 "foo@bar.com") の混入を防ぐ。空文字は regex で自動的に reject される。
@@ -267,6 +255,22 @@ export const McpServerConfigSchema = z.object({
 
 export type McpServerConfig = z.infer<typeof McpServerConfigSchema>;
 
+// .tally/project.yaml に対応する meta のみのスキーマ。
+// ノード・エッジはファイル分割で永続化するため、ここには含めない。
+export const ProjectMetaSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    description: z.string().optional(),
+    // 0 件以上。code ノードが存在するときは最低 1 件必要（整合性は storage 層で検証）。
+    codebases: z.array(CodebaseSchema),
+    // Atlassian 等の MCP サーバー設定。既存 YAML (フィールド無し) は default [] で読み込める。
+    mcpServers: z.array(McpServerConfigSchema).default([]),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })
+  .superRefine((meta, ctx) => checkUniqueCodebaseIds(meta.codebases, ctx));
+
 // 実行時に Project 全体を扱う際の合成スキーマ (メモリ上表現)。
 export const ProjectSchema = z
   .object({
@@ -274,6 +278,8 @@ export const ProjectSchema = z
     name: z.string().min(1),
     description: z.string().optional(),
     codebases: z.array(CodebaseSchema),
+    // Atlassian 等の MCP サーバー設定。ProjectMetaSchema と整合。
+    mcpServers: z.array(McpServerConfigSchema).default([]),
     createdAt: z.string(),
     updatedAt: z.string(),
     nodes: z.array(NodeSchema),

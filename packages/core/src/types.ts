@@ -39,9 +39,14 @@ export type ProposalNode = z.infer<typeof ProposalNodeSchema>;
 export type Node = z.infer<typeof NodeSchema>;
 export type Edge = z.infer<typeof EdgeSchema>;
 
-export type ProjectMeta = z.infer<typeof ProjectMetaSchema>;
-export type ProjectMetaPatch = z.infer<typeof ProjectMetaPatchSchema>;
-export type Project = z.infer<typeof ProjectSchema>;
+// ProjectMeta / Project は z.input 由来にする。
+// 理由: ProjectMetaSchema.mcpServers は default [] を持つので
+//       output 型では required、input 型では optional になる。
+//       既存の YAML や呼び出しが mcpServers を持たないケースを許容するため input 側を採用。
+//       読み取り時は z.parse で必ず default が解決され実値は McpServerConfig[]。
+export type ProjectMeta = z.input<typeof ProjectMetaSchema>;
+export type ProjectMetaPatch = z.input<typeof ProjectMetaPatchSchema>;
+export type Project = z.input<typeof ProjectSchema>;
 
 // UserStoryNode の補助型。
 export type AcceptanceCriterion = NonNullable<UserStoryNode['acceptanceCriteria']>[number];
