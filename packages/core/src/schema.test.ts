@@ -268,6 +268,37 @@ describe('ChatBlockSchema', () => {
       }).success,
     ).toBe(true);
   });
+  it('auth_request ブロック (pending)', () => {
+    const r = ChatBlockSchema.safeParse({
+      type: 'auth_request',
+      mcpServerId: 'atlassian',
+      mcpServerLabel: 'Atlassian',
+      authUrl: 'https://mcp.atlassian.com/v1/authorize?response_type=code&client_id=abc',
+      status: 'pending',
+    });
+    expect(r.success).toBe(true);
+  });
+  it('auth_request ブロック (failed + failureMessage)', () => {
+    const r = ChatBlockSchema.safeParse({
+      type: 'auth_request',
+      mcpServerId: 'atlassian',
+      mcpServerLabel: 'Atlassian',
+      authUrl: 'https://mcp.atlassian.com/v1/authorize?response_type=code&client_id=abc',
+      status: 'failed',
+      failureMessage: 'invalid_grant',
+    });
+    expect(r.success).toBe(true);
+  });
+  it('auth_request の authUrl が URL でないと reject', () => {
+    const r = ChatBlockSchema.safeParse({
+      type: 'auth_request',
+      mcpServerId: 'atlassian',
+      mcpServerLabel: 'Atlassian',
+      authUrl: 'not-a-url',
+      status: 'pending',
+    });
+    expect(r.success).toBe(false);
+  });
   it('不正な type は reject', () => {
     expect(ChatBlockSchema.safeParse({ type: 'other', text: 'x' }).success).toBe(false);
   });

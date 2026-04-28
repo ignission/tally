@@ -19,9 +19,27 @@ export interface StartRequest {
 // テスト時に mockSdk を差し込めるようにするため。
 // SDK 実体のシグネチャは `query({ prompt, options })` なので、systemPrompt / mcpServers /
 // allowedTools / cwd / settingSources / permissionMode はすべて options 内に入れる必要がある。
+// Streaming input mode 用の最小 SDKUserMessage 形状 (実 SDK の SDKUserMessage を duck-type 化)。
+// MCP HTTP transport の OAuth 状態を turn 跨ぎで保持したい場合は、
+// 1 query に AsyncIterable<SdkUserMessageLike> を渡し続ける必要がある。
+export interface SdkUserMessageLike {
+  type: 'user';
+  message: { role: 'user'; content: string };
+  parent_tool_use_id: null;
+  session_id?: string;
+}
+
+// SDK Query は AsyncIterable<SdkMessageLike> + 任意の close() を持つハンドル。
+// 実 SDK の Query 型 (interrupt / setMcpServers / streamInput / close) のうち、
+// chat-runner が触るのは close のみなので最小化して受ける。
+export interface SdkQueryHandle extends AsyncIterable<SdkMessageLike> {
+  close?(): void;
+}
+
 export interface SdkLike {
   query(opts: {
-    prompt: string;
+    // 単発 (agent-runner) は文字列、chat (multi-turn) は AsyncIterable で push 流す。
+    prompt: string | AsyncIterable<SdkUserMessageLike>;
     options?: {
       systemPrompt?: string;
       mcpServers?: Record<string, unknown>;
@@ -43,7 +61,7 @@ export interface SdkLike {
       // 解決に失敗するケースがある。明示的にシステムの claude CLI パスを渡すと回避できる。
       pathToClaudeCodeExecutable?: string;
     };
-  }): AsyncIterable<SdkMessageLike>;
+  }): SdkQueryHandle;
 }
 
 export interface RunAgentDeps {

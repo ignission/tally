@@ -143,6 +143,7 @@ function handleAgentConnection(ws: WebSocket, sdk: SdkLike): void {
 // approve_tool は runner.approveTool へ同期的にデリゲート (pendingApprovals の Promise を resolve)。
 // 切断で runner は破棄 (pending な承認は喪失するが、次回 open で永続化済み状態から再開できる)。
 function handleChatConnection(ws: WebSocket, sdk: SdkLike): void {
+  console.log('[server] /chat WS connected');
   const send = (evt: ChatEvent) => {
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(evt));
   };
@@ -247,5 +248,16 @@ function handleChatConnection(ws: WebSocket, sdk: SdkLike): void {
       code: 'bad_request',
       message: `unknown message type: ${String(obj.type)}`,
     });
+  });
+
+  // WS が閉じたら ChatRunner も片付ける (long-lived SDK subprocess を終わらせる)。
+  // close を呼ばないと subprocess + MCP HTTP transport がプロセス終了まで生き残る。
+  ws.on('close', (code, reason) => {
+    console.log('[server] /chat WS closed:', code, reason?.toString());
+    if (runner) {
+      const r = runner;
+      runner = null;
+      void r.close();
+    }
   });
 }

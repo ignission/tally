@@ -11,6 +11,27 @@ import type { SdkLike } from './agent-runner';
 import { buildChatPrompt, ChatRunner, formatNodeForContext } from './chat-runner';
 import type { ChatEvent, SdkMessageLike } from './stream';
 
+// long-lived Query 化に伴い prompt は AsyncIterable<SdkUserMessageLike> 型に変わった。
+// テスト側で「最初に push された user message の content」を読むためのヘルパ。
+// string で渡された場合 (互換) も同じ shape で扱えるようにする。
+function startCapturePromptText(prompt: unknown): { read: () => string } {
+  const captured = { value: '' };
+  if (typeof prompt === 'string') {
+    captured.value = prompt;
+  } else if (
+    prompt &&
+    typeof (prompt as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator] === 'function'
+  ) {
+    const it = (prompt as AsyncIterable<{ message?: { content?: string } }>)[
+      Symbol.asyncIterator
+    ]();
+    it.next().then((r) => {
+      if (!r.done && r.value?.message?.content) captured.value = r.value.message.content;
+    });
+  }
+  return { read: () => captured.value };
+}
+
 describe('ChatRunner', () => {
   let root: string;
 
@@ -194,10 +215,10 @@ describe('ChatRunner', () => {
       priority: 'must',
     })) as Node;
 
-    let capturedPrompt = '';
+    let promptCapture: { read: () => string } = { read: () => '' };
     const sdk: SdkLike = {
-      query: ({ prompt }: { prompt: string }) => {
-        capturedPrompt = prompt;
+      query: ({ prompt }: { prompt: unknown }) => {
+        promptCapture = startCapturePromptText(prompt);
         return (async function* () {
           yield {
             type: 'assistant',
@@ -221,6 +242,7 @@ describe('ChatRunner', () => {
       events.push(e);
     }
 
+    const capturedPrompt = promptCapture.read();
     expect(capturedPrompt).toContain('<context_nodes>');
     expect(capturedPrompt).toContain(`id: ${target.id}`);
     expect(capturedPrompt).toContain('type: requirement');
@@ -273,10 +295,10 @@ describe('ChatRunner', () => {
       body: '',
     })) as Node;
 
-    let capturedPrompt = '';
+    let promptCapture: { read: () => string } = { read: () => '' };
     const sdk: SdkLike = {
-      query: ({ prompt }: { prompt: string }) => {
-        capturedPrompt = prompt;
+      query: ({ prompt }: { prompt: unknown }) => {
+        promptCapture = startCapturePromptText(prompt);
         return (async function* () {
           yield { type: 'result', subtype: 'success', result: 'ok' } as unknown as SdkMessageLike;
         })();
@@ -295,6 +317,7 @@ describe('ChatRunner', () => {
       // drain
     }
 
+    const capturedPrompt = promptCapture.read();
     const histIdx = capturedPrompt.indexOf('<conversation_history>');
     const histEndIdx = capturedPrompt.indexOf('</conversation_history>');
     const ctxIdx = capturedPrompt.indexOf('<context_nodes>');
@@ -325,10 +348,10 @@ describe('ChatRunner', () => {
       body: '',
     })) as Node;
 
-    let capturedPrompt = '';
+    let promptCapture: { read: () => string } = { read: () => '' };
     const sdk: SdkLike = {
-      query: ({ prompt }: { prompt: string }) => {
-        capturedPrompt = prompt;
+      query: ({ prompt }: { prompt: unknown }) => {
+        promptCapture = startCapturePromptText(prompt);
         return (async function* () {
           yield { type: 'result', subtype: 'success', result: 'ok' } as unknown as SdkMessageLike;
         })();
@@ -344,6 +367,7 @@ describe('ChatRunner', () => {
     for await (const _e of runner.runUserTurn('q', ['nonexistent', valid.id, 'also-gone'])) {
       // drain
     }
+    const capturedPrompt = promptCapture.read();
     expect(capturedPrompt).toContain('<context_nodes>');
     expect(capturedPrompt).toContain(`id: ${valid.id}`);
     expect(capturedPrompt).not.toContain('id: nonexistent');
@@ -356,10 +380,10 @@ describe('ChatRunner', () => {
     const projectStore = new FileSystemProjectStore(root);
     const thread = await chatStore.createChat({ projectId: 'proj-1', title: 't' });
 
-    let capturedPrompt = '';
+    let promptCapture: { read: () => string } = { read: () => '' };
     const sdk: SdkLike = {
-      query: ({ prompt }: { prompt: string }) => {
-        capturedPrompt = prompt;
+      query: ({ prompt }: { prompt: unknown }) => {
+        promptCapture = startCapturePromptText(prompt);
         return (async function* () {
           yield { type: 'result', subtype: 'success', result: 'ok' } as unknown as SdkMessageLike;
         })();
@@ -375,6 +399,7 @@ describe('ChatRunner', () => {
     for await (const _e of runner.runUserTurn('hello', [])) {
       // drain
     }
+    const capturedPrompt = promptCapture.read();
     expect(capturedPrompt).not.toContain('<context_nodes>');
     // user 文字列自体は (履歴経由で) 必ず prompt に入る
     expect(capturedPrompt).toContain('hello');
@@ -1121,5 +1146,280 @@ describe('buildChatPrompt — tool_use/tool_result replay (Task 14, T4 fix)', ()
     expect(prompt).not.toContain('<conversation_history>');
     expect(prompt).toContain('<current_user_message>');
     expect(prompt).toContain('初回');
+  });
+});
+
+// 外部 MCP の OAuth 2.1 フロー: authenticate / complete_authentication tool_use を
+// 検出して auth_request ブロックに変換する経路の検証。raw な tool_use/tool_result が
+// チャット履歴に並ばず、UI が描画する auth_request 1 等地ブロックだけ残る。
+describe('ChatRunner — auth_request 変換 (OAuth 2.1)', () => {
+  async function setup() {
+    const root = mkdtempSync(path.join(tmpdir(), 'tally-chat-auth-'));
+    const ps = new FileSystemProjectStore(root);
+    await ps.saveProjectMeta({
+      id: 'proj-1',
+      name: 'P',
+      codebases: [],
+      mcpServers: [
+        {
+          id: 'atlassian',
+          name: 'My Atlassian',
+          kind: 'atlassian',
+          url: 'https://t.test/mcp',
+          options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
+        },
+      ],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    const chatStore = new FileSystemChatStore(root);
+    const projectStore = new FileSystemProjectStore(root);
+    const thread = await chatStore.createChat({ projectId: 'proj-1', title: 't' });
+    return { root, chatStore, projectStore, thread };
+  }
+
+  function makeAuthSdk(authUrl: string): SdkLike {
+    return {
+      query: () =>
+        (async function* () {
+          yield {
+            type: 'assistant',
+            message: {
+              content: [
+                { type: 'text', text: '認証フローを開始します' },
+                {
+                  type: 'tool_use',
+                  id: 'auth-tu-1',
+                  name: 'mcp__atlassian__authenticate',
+                  input: {},
+                },
+              ],
+            },
+          } as unknown as SdkMessageLike;
+          yield {
+            type: 'user',
+            message: {
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: 'auth-tu-1',
+                  content: [{ type: 'text', text: `Open: ${authUrl}` }],
+                },
+              ],
+            },
+          } as unknown as SdkMessageLike;
+          yield { type: 'result', subtype: 'success', result: 'ok' } as unknown as SdkMessageLike;
+        })(),
+    };
+  }
+
+  it('authenticate: tool_use/tool_result を消化し、auth_request{pending} ブロック + chat_auth_request event を出す', async () => {
+    const { root, chatStore, projectStore, thread } = await setup();
+    try {
+      const authUrl =
+        'https://mcp.atlassian.com/v1/authorize?response_type=code&client_id=abc&state=xyz';
+      const runner = new ChatRunner({
+        sdk: makeAuthSdk(authUrl),
+        chatStore,
+        projectStore,
+        projectDir: root,
+        threadId: thread.id,
+      });
+      const events: ChatEvent[] = [];
+      for await (const e of runner.runUserTurn('jira を読んで')) events.push(e);
+
+      // raw な tool_use / tool_result event は出ない (auth は auth_request 1 等地)
+      expect(events.find((e) => e.type === 'chat_tool_external_use')).toBeUndefined();
+      expect(events.find((e) => e.type === 'chat_tool_external_result')).toBeUndefined();
+
+      const authEvt = events.find((e) => e.type === 'chat_auth_request');
+      expect(authEvt).toBeDefined();
+      if (authEvt && authEvt.type === 'chat_auth_request') {
+        expect(authEvt.mcpServerId).toBe('atlassian');
+        expect(authEvt.mcpServerLabel).toBe('My Atlassian');
+        expect(authEvt.authUrl).toBe(authUrl);
+        expect(authEvt.status).toBe('pending');
+      }
+
+      // 永続化: assistant message に auth_request ブロックがあって、tool_use/tool_result は無い
+      const reloaded = await chatStore.getChat(thread.id);
+      const assistant = reloaded?.messages.find((m) => m.role === 'assistant');
+      const blocks = assistant?.blocks ?? [];
+      const hasRawToolUse = blocks.some(
+        (b) => b.type === 'tool_use' && b.name.includes('authenticate'),
+      );
+      expect(hasRawToolUse).toBe(false);
+      const authBlock = blocks.find((b) => b.type === 'auth_request');
+      expect(authBlock).toBeDefined();
+      if (authBlock && authBlock.type === 'auth_request') {
+        expect(authBlock.status).toBe('pending');
+        expect(authBlock.authUrl).toBe(authUrl);
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('complete_authentication 成功: 同 thread の最新 pending auth_request が completed に更新される', async () => {
+    const { root, chatStore, projectStore, thread } = await setup();
+    try {
+      const authUrl =
+        'https://mcp.atlassian.com/v1/authorize?response_type=code&client_id=abc&state=xyz';
+      // turn 1: authenticate を流して pending auth_request を作る
+      const runner1 = new ChatRunner({
+        sdk: makeAuthSdk(authUrl),
+        chatStore,
+        projectStore,
+        projectDir: root,
+        threadId: thread.id,
+      });
+      for await (const _ of runner1.runUserTurn('jira を読んで')) {
+        void _;
+      }
+
+      // turn 2: complete_authentication が走るシナリオ
+      const sdk2: SdkLike = {
+        query: () =>
+          (async function* () {
+            yield {
+              type: 'assistant',
+              message: {
+                content: [
+                  {
+                    type: 'tool_use',
+                    id: 'auth-tu-2',
+                    name: 'mcp__atlassian__complete_authentication',
+                    input: { url: 'http://localhost:54801/callback?code=xxx&state=xyz' },
+                  },
+                ],
+              },
+            } as unknown as SdkMessageLike;
+            yield {
+              type: 'user',
+              message: {
+                content: [
+                  {
+                    type: 'tool_result',
+                    tool_use_id: 'auth-tu-2',
+                    content: [{ type: 'text', text: 'authenticated' }],
+                  },
+                ],
+              },
+            } as unknown as SdkMessageLike;
+            yield {
+              type: 'result',
+              subtype: 'success',
+              result: 'done',
+            } as unknown as SdkMessageLike;
+          })(),
+      };
+      const runner2 = new ChatRunner({
+        sdk: sdk2,
+        chatStore,
+        projectStore,
+        projectDir: root,
+        threadId: thread.id,
+      });
+      const events: ChatEvent[] = [];
+      for await (const e of runner2.runUserTurn(
+        '[OAuth callback] http://localhost:54801/callback?code=xxx&state=xyz',
+      ))
+        events.push(e);
+
+      const authEvt = events.find((e) => e.type === 'chat_auth_request');
+      expect(authEvt).toBeDefined();
+      if (authEvt && authEvt.type === 'chat_auth_request') {
+        expect(authEvt.status).toBe('completed');
+        expect(authEvt.mcpServerId).toBe('atlassian');
+      }
+
+      // 永続化: 元の pending auth_request ブロックが completed に書き換わっている
+      const reloaded = await chatStore.getChat(thread.id);
+      const allAuthBlocks = (reloaded?.messages ?? []).flatMap((m) =>
+        m.blocks.filter((b) => b.type === 'auth_request'),
+      );
+      // 同 server の auth_request は 1 個のままで、status が completed に変わっている
+      expect(allAuthBlocks).toHaveLength(1);
+      const ab = allAuthBlocks[0];
+      if (ab && ab.type === 'auth_request') {
+        expect(ab.status).toBe('completed');
+        expect(ab.authUrl).toBe(authUrl);
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('complete_authentication 失敗 (ok=false): 最新 pending が failed + failureMessage 付きで更新', async () => {
+    const { root, chatStore, projectStore, thread } = await setup();
+    try {
+      const authUrl =
+        'https://mcp.atlassian.com/v1/authorize?response_type=code&client_id=abc&state=xyz';
+      const runner1 = new ChatRunner({
+        sdk: makeAuthSdk(authUrl),
+        chatStore,
+        projectStore,
+        projectDir: root,
+        threadId: thread.id,
+      });
+      for await (const _ of runner1.runUserTurn('jira を読んで')) {
+        void _;
+      }
+
+      const sdk2: SdkLike = {
+        query: () =>
+          (async function* () {
+            yield {
+              type: 'assistant',
+              message: {
+                content: [
+                  {
+                    type: 'tool_use',
+                    id: 'auth-tu-2',
+                    name: 'mcp__atlassian__complete_authentication',
+                    input: { url: 'http://localhost:54801/callback?code=bad' },
+                  },
+                ],
+              },
+            } as unknown as SdkMessageLike;
+            yield {
+              type: 'user',
+              message: {
+                content: [
+                  {
+                    type: 'tool_result',
+                    tool_use_id: 'auth-tu-2',
+                    content: [{ type: 'text', text: 'invalid_grant: state mismatch' }],
+                    is_error: true,
+                  },
+                ],
+              },
+            } as unknown as SdkMessageLike;
+            yield {
+              type: 'result',
+              subtype: 'success',
+              result: 'done',
+            } as unknown as SdkMessageLike;
+          })(),
+      };
+      const runner2 = new ChatRunner({
+        sdk: sdk2,
+        chatStore,
+        projectStore,
+        projectDir: root,
+        threadId: thread.id,
+      });
+      const events: ChatEvent[] = [];
+      for await (const e of runner2.runUserTurn('callback URL: ...')) events.push(e);
+
+      const authEvt = events.find((e) => e.type === 'chat_auth_request');
+      expect(authEvt).toBeDefined();
+      if (authEvt && authEvt.type === 'chat_auth_request') {
+        expect(authEvt.status).toBe('failed');
+        expect(authEvt.failureMessage).toContain('invalid_grant');
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

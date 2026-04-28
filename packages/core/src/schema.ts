@@ -327,6 +327,20 @@ export const ChatBlockSchema = z.discriminatedUnion('type', [
     ok: z.boolean(),
     output: z.string(),
   }),
+  // 外部 MCP (Atlassian 等) の OAuth 2.1 認証フローを 1 等地で扱うブロック。
+  // SDK の `mcp__<id>__authenticate` tool_use を生のまま並べると UX が破綻する
+  // (URL がプレーンテキスト + redirect 先 localhost:XXXXX が即死) ため、検出して
+  // この auth_request に置き換える。status は同 thread 内の complete_authentication で更新。
+  // mcpServerLabel は project.mcpServers[].label 由来 (label 未設定なら id を表示)。
+  z.object({
+    type: z.literal('auth_request'),
+    mcpServerId: z.string().min(1),
+    mcpServerLabel: z.string().min(1),
+    authUrl: z.string().url(),
+    status: z.enum(['pending', 'completed', 'failed']),
+    // 失敗時にエラーメッセージを残す。pending/completed では undefined。
+    failureMessage: z.string().optional(),
+  }),
 ]);
 
 export const ChatMessageSchema = z.object({

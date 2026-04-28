@@ -382,6 +382,56 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
       });
       return;
     }
+    // OAuth 2.1 認証要求/状態更新。pending は新規 auth_request ブロックを append、
+    // completed/failed は同 mcpServerId の最新 pending ブロックを in-place で更新する。
+    // これは chat-runner が永続化側で行う処理と整合させるための鏡映ロジック。
+    if (evt.type === 'chat_auth_request') {
+      set({
+        chatThreadMessages: get().chatThreadMessages.map((m) => {
+          // pending: 該当 messageId に新規 append
+          if (evt.status === 'pending') {
+            if (m.id !== evt.messageId) return m;
+            return {
+              ...m,
+              blocks: [
+                ...m.blocks,
+                {
+                  type: 'auth_request',
+                  mcpServerId: evt.mcpServerId,
+                  mcpServerLabel: evt.mcpServerLabel,
+                  authUrl: evt.authUrl,
+                  status: 'pending',
+                },
+              ],
+            };
+          }
+          // completed/failed: 同 mcpServerId の pending ブロックを更新 (どのメッセージに属していても)。
+          // 同 server の pending は最新 1 件しか存在しないので最初に見つけたものを書き換える。
+          let updated = false;
+          const blocks = m.blocks.map((b) => {
+            if (
+              !updated &&
+              b.type === 'auth_request' &&
+              b.mcpServerId === evt.mcpServerId &&
+              b.status === 'pending'
+            ) {
+              updated = true;
+              return {
+                ...b,
+                status: evt.status,
+                ...(evt.status === 'failed' && evt.failureMessage
+                  ? { failureMessage: evt.failureMessage }
+                  : {}),
+              };
+            }
+            return b;
+          });
+          if (!updated) return m;
+          return { ...m, blocks };
+        }),
+      });
+      return;
+    }
     if (evt.type === 'chat_assistant_message_completed') {
       return;
     }
