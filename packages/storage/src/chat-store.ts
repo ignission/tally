@@ -91,15 +91,22 @@ export class FileSystemChatStore implements ChatStore {
     const yamlFiles = entries.filter((f) => f.endsWith('.yaml') || f.endsWith('.yml'));
     const threads = await Promise.all(
       yamlFiles.map(async (file) => {
-        const t = await readYaml(path.join(this.paths.chatsDir, file), ChatThreadSchema);
-        if (!t) return null;
-        return {
-          id: t.id,
-          projectId: t.projectId,
-          title: t.title,
-          createdAt: t.createdAt,
-          updatedAt: t.updatedAt,
-        } satisfies ChatThreadMeta;
+        // 1 ファイルが壊れていても他を表示できるように個別 try/catch。
+        // 黙って捨てると気付かないので warn は出す。
+        try {
+          const t = await readYaml(path.join(this.paths.chatsDir, file), ChatThreadSchema);
+          if (!t) return null;
+          return {
+            id: t.id,
+            projectId: t.projectId,
+            title: t.title,
+            createdAt: t.createdAt,
+            updatedAt: t.updatedAt,
+          } satisfies ChatThreadMeta;
+        } catch (err) {
+          console.warn(`[chat-store] skip broken chat file: ${file}`, err);
+          return null;
+        }
       }),
     );
     return threads

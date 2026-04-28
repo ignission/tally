@@ -148,6 +148,44 @@ name: old
     });
   });
 
+  describe('writeYaml flow→block 強制', () => {
+    // regression: 空配列 (`messages: []`) を初回書き込みすると yaml lib は flow style で
+    // 出力する。次回書き込み時、既存 seq が flow=true のまま map を追加すると
+    // 「フロー集約の中にブロック scalar」が混在し再パースが破綻していた (chat YAML 破損)。
+    it('id 配列に複数行 string を含む要素を追加しても再パース可能な YAML が出る', async () => {
+      const filePath = path.join(workspace, 'messages.yaml');
+      // Step 1: 空配列で初回書き込み (yaml lib が `messages: []` flow style で書き出す)
+      await writeYaml(filePath, {
+        id: 'thread-1',
+        messages: [],
+      });
+      // Step 2: 複数行 string を含む要素を追加
+      await writeYaml(filePath, {
+        id: 'thread-1',
+        messages: [
+          {
+            id: 'msg-1',
+            text: 'line one\n\nline two\n\nline three',
+          },
+        ],
+      });
+      // 再パースできれば fix 成立
+      const re = await readYaml(
+        filePath,
+        z.object({
+          id: z.string(),
+          messages: z.array(z.object({ id: z.string(), text: z.string() })),
+        }),
+      );
+      expect(re?.messages).toHaveLength(1);
+      expect(re?.messages[0]?.text).toBe('line one\n\nline two\n\nline three');
+      // 出力は block style (`- id: msg-1`) になっているべき
+      const raw = await fs.readFile(filePath, 'utf8');
+      expect(raw).toContain('- id: msg-1');
+      expect(raw).not.toMatch(/messages:\s*\[/);
+    });
+  });
+
   describe('writeYaml + readYaml 往復', () => {
     it('書いて読み直せば元のデータと一致する', async () => {
       const filePath = path.join(workspace, 'roundtrip.yaml');
