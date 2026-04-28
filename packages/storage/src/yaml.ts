@@ -78,6 +78,7 @@ function serializePreservingComments(doc: Document, data: Record<string, unknown
   if (!isMap(contents)) {
     // top-level が Map でない (空 Document など) → 全面書き換え
     doc.contents = doc.createNode(data) as typeof doc.contents;
+    forceBlockStyle(doc.contents);
     return String(doc);
   }
 
@@ -98,9 +99,25 @@ function serializePreservingComments(doc: Document, data: Record<string, unknown
       mergeSeqById(existingValue, v, doc);
     } else {
       doc.set(k, v);
+      forceBlockStyle(contents.get(k, true));
     }
   }
   return String(doc);
+}
+
+// 空コレクション (`messages: []`) を初回書き込みで保存すると yaml lib は flow style
+// `[]` で出力し、`flow=true` フラグを保持したまま次の書き込みでも引き継ぐ。
+// その flow seq の中に複数行 string が入った map を追加すると、
+// 「フロー集約の中にブロック scalar」が混在して再パース不能な YAML になる。
+// 既存の Pair / value に付くコメントは残したままで flow フラグだけ落とす。
+function forceBlockStyle(node: unknown): void {
+  if (isSeq(node) || isMap(node)) {
+    (node as YAMLSeq | YAMLMap).flow = false;
+    for (const item of (node as YAMLSeq | YAMLMap).items) {
+      if (isPair(item)) forceBlockStyle(item.value);
+      else forceBlockStyle(item);
+    }
+  }
 }
 
 function isArrayOfIdObjects(
@@ -124,6 +141,9 @@ function mergeSeqById(
   data: Array<Record<string, unknown> & { id: string }>,
   doc: Document,
 ): void {
+  // 既存 seq が flow style (`[]` で初期化された空配列由来) のままだと、
+  // 中に追加する map が flow になり複数行 string と相性が悪い。block 強制。
+  seq.flow = false;
   // 既存アイテムを id で引ける Map にする
   const existingById = new Map<string, YAMLMap>();
   for (const item of seq.items) {
@@ -140,9 +160,11 @@ function mergeSeqById(
     const existing = existingById.get(obj.id);
     if (existing) {
       updateMapInPlace(existing, obj, doc);
+      forceBlockStyle(existing);
       nextItems.push(existing);
     } else {
       const newNode = doc.createNode(obj);
+      forceBlockStyle(newNode);
       nextItems.push(newNode as YamlNode);
     }
   }
