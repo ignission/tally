@@ -116,8 +116,9 @@ describe('PATCH /api/projects/:id', () => {
   });
 
   it('mcpServers を空配列で全消去できる', async () => {
-    // 事前に登録
-    await PATCH(
+    // 事前に登録 (失敗していると後続の「空配列で削除」が空 → 空 で偽の成功になる
+    // ので、ここで 200 を assert しておく)。CodeRabbit 指摘 PR #18。
+    const setupRes = await PATCH(
       new Request('http://localhost', {
         method: 'PATCH',
         body: JSON.stringify({
@@ -134,6 +135,7 @@ describe('PATCH /api/projects/:id', () => {
       }),
       { params: Promise.resolve({ id: projectId }) },
     );
+    expect(setupRes.status).toBe(200);
     // 空配列で全消去
     const res = await PATCH(
       new Request('http://localhost', {

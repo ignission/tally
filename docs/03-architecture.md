@@ -173,7 +173,7 @@ AI Engine を別プロセスにする理由：
 
 ```
 ANTHROPIC_API_KEY=sk-ant-...   # Claude Agent SDK
-TALLY_AI_PORT=3001             # AI Engine WebSocket ポート
+AI_ENGINE_PORT=3322            # AI Engine WebSocket ポート (env 名は ai-engine の loadConfig に揃える)
 TALLY_HOME=~/.local/share/tally  # レジストリ・デフォルトプロジェクト置き場（省略時はこの値）
 ```
 

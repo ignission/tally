@@ -299,6 +299,41 @@ describe('ChatBlockSchema', () => {
     });
     expect(r.success).toBe(false);
   });
+  // CodeRabbit 指摘 (PR #18): auth_request の status と failureMessage の整合を schema で固定。
+  // failed なのに failureMessage 無し → reject。pending/completed に failureMessage が
+  // 付いている → reject。
+  it('auth_request: failed に failureMessage 無しは reject', () => {
+    const r = ChatBlockSchema.safeParse({
+      type: 'auth_request',
+      mcpServerId: 'atlassian',
+      mcpServerLabel: 'Atlassian',
+      authUrl: 'https://mcp.atlassian.com/v1/authorize?response_type=code&client_id=abc',
+      status: 'failed',
+    });
+    expect(r.success).toBe(false);
+  });
+  it('auth_request: pending に failureMessage 付きは reject', () => {
+    const r = ChatBlockSchema.safeParse({
+      type: 'auth_request',
+      mcpServerId: 'atlassian',
+      mcpServerLabel: 'Atlassian',
+      authUrl: 'https://mcp.atlassian.com/v1/authorize?response_type=code&client_id=abc',
+      status: 'pending',
+      failureMessage: 'should not be here',
+    });
+    expect(r.success).toBe(false);
+  });
+  it('auth_request: completed に failureMessage 付きは reject', () => {
+    const r = ChatBlockSchema.safeParse({
+      type: 'auth_request',
+      mcpServerId: 'atlassian',
+      mcpServerLabel: 'Atlassian',
+      authUrl: 'https://mcp.atlassian.com/v1/authorize?response_type=code&client_id=abc',
+      status: 'completed',
+      failureMessage: 'should not be here',
+    });
+    expect(r.success).toBe(false);
+  });
   it('不正な type は reject', () => {
     expect(ChatBlockSchema.safeParse({ type: 'other', text: 'x' }).success).toBe(false);
   });

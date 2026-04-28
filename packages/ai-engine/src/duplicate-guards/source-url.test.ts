@@ -126,4 +126,45 @@ describe('sourceUrlGuard', () => {
     sourceUrlGuard.onCreated?.({ title: 'R', body: '', additional: { sourceUrl: '' } }, ctx);
     expect(memo.size).toBe(0);
   });
+
+  // CodeRabbit 指摘 (PR #18): sourceUrl を生値のまま比較していたため、
+  // 前後空白付き入力 (" https://... ") が同一 URL の重複検知をすり抜けていた。
+  // trim 正規化を入れて、入力側も既存ノード側も揃えてから比較する。
+  it('sourceUrl の前後空白は正規化して既存ノードと比較する (重複検知)', async () => {
+    const ctx = makeCtx([{ id: 'r1', type: 'requirement', sourceUrl: 'https://jira.test/EPIC-1' }]);
+    const res = await sourceUrlGuard.check(
+      { title: 'R', body: '', additional: { sourceUrl: '  https://jira.test/EPIC-1  ' } },
+      ctx,
+    );
+    expect(res).not.toBeNull();
+  });
+
+  it('既存ノード側の sourceUrl に前後空白があっても正規化して比較する', async () => {
+    const ctx = makeCtx([
+      { id: 'r1', type: 'requirement', sourceUrl: '  https://jira.test/EPIC-1  ' },
+    ]);
+    const res = await sourceUrlGuard.check(
+      { title: 'R', body: '', additional: { sourceUrl: 'https://jira.test/EPIC-1' } },
+      ctx,
+    );
+    expect(res).not.toBeNull();
+  });
+
+  it('sourceUrl が空白のみなら skip (null)', async () => {
+    const res = await sourceUrlGuard.check(
+      { title: 'R', body: '', additional: { sourceUrl: '   ' } },
+      makeCtx([]),
+    );
+    expect(res).toBeNull();
+  });
+
+  it('onCreated でも trim した値が memo に入る', () => {
+    const memo = new Set<string>();
+    const ctx = makeCtx([], { sessionMemo: memo });
+    sourceUrlGuard.onCreated?.(
+      { title: 'R', body: '', additional: { sourceUrl: '  https://jira.test/EPIC-X  ' } },
+      ctx,
+    );
+    expect(memo.has('sourceUrl:https://jira.test/EPIC-X')).toBe(true);
+  });
 });

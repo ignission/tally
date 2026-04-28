@@ -332,15 +332,34 @@ export const ChatBlockSchema = z.discriminatedUnion('type', [
   // (URL がプレーンテキスト + redirect 先 localhost:XXXXX が即死) ため、検出して
   // この auth_request に置き換える。status は同 thread 内の complete_authentication で更新。
   // mcpServerLabel は project.mcpServers[].label 由来 (label 未設定なら id を表示)。
-  z.object({
-    type: z.literal('auth_request'),
-    mcpServerId: z.string().min(1),
-    mcpServerLabel: z.string().min(1),
-    authUrl: z.string().url(),
-    status: z.enum(['pending', 'completed', 'failed']),
-    // 失敗時にエラーメッセージを残す。pending/completed では undefined。
-    failureMessage: z.string().optional(),
-  }),
+  // failureMessage は status='failed' のときだけ持つ。superRefine で永続化フォーマット
+  // としての不正状態 (failed なのに message 無し / pending・completed に message が付く)
+  // を弾く (CodeRabbit 指摘 PR #18)。
+  z
+    .object({
+      type: z.literal('auth_request'),
+      mcpServerId: z.string().min(1),
+      mcpServerLabel: z.string().min(1),
+      authUrl: z.string().url(),
+      status: z.enum(['pending', 'completed', 'failed']),
+      failureMessage: z.string().optional(),
+    })
+    .superRefine((b, ctx) => {
+      if (b.status === 'failed' && !b.failureMessage) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'failed auth_request には failureMessage が必要',
+          path: ['failureMessage'],
+        });
+      }
+      if (b.status !== 'failed' && b.failureMessage !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'failureMessage は failed のときだけ設定できます',
+          path: ['failureMessage'],
+        });
+      }
+    }),
 ]);
 
 export const ChatMessageSchema = z.object({

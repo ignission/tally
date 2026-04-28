@@ -14,11 +14,21 @@ import type { DuplicateGuard } from './index';
 // memo キー: `sourceUrl:${url}` (anchor 非依存、グラフ横断で一意)
 const SESSION_KEY_PREFIX = 'sourceUrl:';
 
+// 入力 / 永続化済み URL を比較可能な形に揃える。
+// 前後空白がある入力 (" https://jira.../X ") を許容してしまうと、
+// memo キーと比較値がずれて同一 URL が二重登録される。
+// CodeRabbit 指摘 PR #18: trim 必須。空文字 / 非 string は null にする。
+function normalizeSourceUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 export const sourceUrlGuard: DuplicateGuard = {
   adoptAs: 'requirement',
   async check(input, ctx) {
-    const sourceUrl = input.additional?.sourceUrl;
-    if (typeof sourceUrl !== 'string' || sourceUrl.length === 0) return null;
+    const sourceUrl = normalizeSourceUrl(input.additional?.sourceUrl);
+    if (!sourceUrl) return null;
 
     const sessionKey = `${SESSION_KEY_PREFIX}${sourceUrl}`;
     if (ctx.sessionMemo.has(sessionKey)) {
@@ -35,7 +45,7 @@ export const sourceUrlGuard: DuplicateGuard = {
       const isRequirement =
         type === 'requirement' || (type === 'proposal' && adoptAs === 'requirement');
       if (!isRequirement) continue;
-      const existingUrl = rec.sourceUrl as string | undefined;
+      const existingUrl = normalizeSourceUrl(rec.sourceUrl);
       if (existingUrl === sourceUrl) {
         const id = rec.id as string;
         return {
@@ -46,8 +56,8 @@ export const sourceUrlGuard: DuplicateGuard = {
     return null;
   },
   onCreated(input, ctx) {
-    const sourceUrl = input.additional?.sourceUrl;
-    if (typeof sourceUrl === 'string' && sourceUrl.length > 0) {
+    const sourceUrl = normalizeSourceUrl(input.additional?.sourceUrl);
+    if (sourceUrl) {
       ctx.sessionMemo.add(`${SESSION_KEY_PREFIX}${sourceUrl}`);
     }
   },
