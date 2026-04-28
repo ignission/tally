@@ -16,7 +16,7 @@ export default defineConfig({
   globalSetup: './e2e/global-setup.ts',
 
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL: 'http://localhost:3321',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
@@ -31,7 +31,7 @@ export default defineConfig({
   // frontend の dev server を自動起動。ai-engine は未起動でもノード表示は動く (chat を開かない限り WS 接続なし)。
   webServer: {
     command: 'pnpm dev',
-    url: 'http://localhost:3000',
+    url: 'http://localhost:3321',
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
     env: {

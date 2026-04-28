@@ -41,7 +41,7 @@ sample-project/
 pnpm dev
 
 # ブラウザで以下を開く
-# http://localhost:3000/projects/taskflow-invite
+# http://localhost:3321/projects/taskflow-invite
 ```
 
 ## 注意

@@ -59,7 +59,7 @@ src/
 ## 開発
 
 ```bash
-pnpm --filter @tally/frontend dev        # http://localhost:3000
+pnpm --filter @tally/frontend dev        # http://localhost:3321
 pnpm --filter @tally/frontend build
 pnpm --filter @tally/frontend typecheck
 ```
