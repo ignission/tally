@@ -257,7 +257,11 @@ function handleChatConnection(ws: WebSocket, sdk: SdkLike): void {
     if (runner) {
       const r = runner;
       runner = null;
-      void r.close();
+      // close 内部の例外 (subprocess kill 失敗など) を unhandled rejection に
+      // しないために .catch で握る。観測できるよう warn は出す。
+      r.close().catch((err) => {
+        console.warn('[server] runner.close() failed:', err);
+      });
     }
   });
 }

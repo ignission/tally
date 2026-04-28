@@ -82,7 +82,13 @@ export function ProjectSettingsDialog({ open, onClose }: { open: boolean; onClos
   };
 
   const addMcpServer = () => {
-    setMcpServers([...mcpServers, makeDefaultMcpServer(mcpServers.length + 1)]);
+    // 削除→追加で `mcpServers.length + 1` を使うと既存 ID と衝突する
+    // (例: atlassian-1, atlassian-2 で 1 件削除して追加すると再び atlassian-2)。
+    // mcpServers の id は下流で key として使われるため、未使用 suffix を探す。
+    const usedIds = new Set(mcpServers.map((s) => s.id));
+    let seq = 1;
+    while (usedIds.has(`atlassian-${seq}`)) seq += 1;
+    setMcpServers([...mcpServers, makeDefaultMcpServer(seq)]);
   };
 
   const updateMcpServer = (index: number, next: McpServerConfig) => {

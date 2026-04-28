@@ -138,6 +138,32 @@ describe('ProjectSettingsDialog', () => {
     expect(screen.queryByLabelText('mcp-0-id')).toBeNull();
   });
 
+  // CodeRabbit 指摘 (PR #18): mcpServers.length + 1 で id 採番すると、
+  // 削除→追加で既存 id と衝突する。未使用 suffix を採番するよう修正済み。
+  it('追加 → 追加 → 1 件目を削除 → 追加で id が衝突しない', async () => {
+    render(<ProjectSettingsDialog open onClose={() => {}} />);
+    const addBtn = () => screen.getByRole('button', { name: /MCP サーバーを追加/ });
+    await userEvent.click(addBtn()); // atlassian-1
+    await userEvent.click(addBtn()); // atlassian-2
+    expect((screen.getByLabelText('mcp-0-id') as HTMLInputElement).value).toBe('atlassian-1');
+    expect((screen.getByLabelText('mcp-1-id') as HTMLInputElement).value).toBe('atlassian-2');
+    // 1 件目 (mcp-0) を削除 → 残るのは元 mcp-1 だが index は 0 にスライド
+    const removeButtons = screen.getAllByRole('button', { name: /削除/ });
+    // codebase 削除 (0) + MCP 2 件分 削除 (1, 2) → MCP 削除は最後 2 つ。1 件目 MCP を削除。
+    await userEvent.click(removeButtons[removeButtons.length - 2] as HTMLElement);
+    expect((screen.getByLabelText('mcp-0-id') as HTMLInputElement).value).toBe('atlassian-2');
+    // ここで再度追加 → 旧実装は mcpServers.length + 1 = 2 で `atlassian-2` 衝突。
+    // 修正後は未使用 suffix `atlassian-1` が採番される。
+    await userEvent.click(addBtn());
+    const ids = [
+      (screen.getByLabelText('mcp-0-id') as HTMLInputElement).value,
+      (screen.getByLabelText('mcp-1-id') as HTMLInputElement).value,
+    ];
+    expect(new Set(ids).size).toBe(2); // 衝突なし
+    expect(ids).toContain('atlassian-2');
+    expect(ids).toContain('atlassian-1');
+  });
+
   it('auth / secret 関連の入力欄は無い (OAuth 2.1 で MCP/SDK 任せ)', async () => {
     render(<ProjectSettingsDialog open onClose={() => {}} />);
     await userEvent.click(screen.getByRole('button', { name: /MCP サーバーを追加/ }));

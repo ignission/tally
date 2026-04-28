@@ -30,5 +30,8 @@ export function extractAuthUrl(output: string): string | null {
   // 単なる説明用の URL (https://example.com 等) を引かないようにする。
   const urlRe = /https:\/\/[^\s)"'<>]+\?[^\s)"'<>]+/;
   const m = unfolded.match(urlRe);
-  return m ? m[0] : null;
+  if (!m) return null;
+  // 自然文末尾の句読点 / 閉じ括弧が URL に紛れるのを除く (CodeRabbit 指摘 PR #18)。
+  // 例: "...state=xyz." / "...state=xyz)" → 末尾の `.` `)` を落とす。
+  return m[0].replace(/[).,;:!?]+$/u, '');
 }

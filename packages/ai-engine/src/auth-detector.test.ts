@@ -64,4 +64,25 @@ Once they complete the flow, the server's tools will become available automatica
   it('URL が無ければ null', () => {
     expect(extractAuthUrl('no url here')).toBeNull();
   });
+
+  // CodeRabbit 指摘 (PR #18): 自然文末尾の句読点・括弧が URL に紛れて
+  // 認可リンクが壊れていた。末尾の `.,;:!?)` は剥がす。
+  it('文末の句読点を URL に含めない (period)', () => {
+    const out = '認証は https://mcp.atlassian.com/v1/authorize?response_type=code&state=xyz.';
+    expect(extractAuthUrl(out)).toBe(
+      'https://mcp.atlassian.com/v1/authorize?response_type=code&state=xyz',
+    );
+  });
+
+  it('文末の閉じ括弧を URL に含めない', () => {
+    const out = '(認証は https://mcp.atlassian.com/v1/authorize?response_type=code&state=xyz)';
+    expect(extractAuthUrl(out)).toBe(
+      'https://mcp.atlassian.com/v1/authorize?response_type=code&state=xyz',
+    );
+  });
+
+  it('複数の末尾句読点も剥がす', () => {
+    const out = '行ってください: https://mcp.atlassian.com/v1/authorize?state=xyz!?';
+    expect(extractAuthUrl(out)).toBe('https://mcp.atlassian.com/v1/authorize?state=xyz');
+  });
 });

@@ -8,6 +8,9 @@ build/
 .next/
 out/
 
+# Next.js auto-generated type reference (内容が dev/build で変動する。手で編集しない)
+next-env.d.ts
+
 # Test
 coverage/
 *.lcov

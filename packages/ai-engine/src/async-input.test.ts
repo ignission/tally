@@ -61,4 +61,40 @@ describe('AsyncIterableInput', () => {
       expect(r2.done).toBe(true);
     }
   });
+
+  // CodeRabbit 指摘 (PR #18): 単一 waiter スロットだと 2 回連続で next() を呼んだとき
+  // 1 つ目の resolver が捨てられて Promise が永遠に未解決になる。FIFO キューで保持する
+  // ことで、push 順に正しく解決されることを確認する。
+  it('next() を複数回先に呼んでから push しても、push 順に各 promise が解決される', async () => {
+    const input = new AsyncIterableInput<number>();
+    const it = input.iterable()[Symbol.asyncIterator]();
+    const p1 = it.next();
+    const p2 = it.next();
+    input.push(10);
+    input.push(20);
+    const [r1, r2] = await Promise.all([p1, p2]);
+    expect(r1).toEqual({ value: 10, done: false });
+    expect(r2).toEqual({ value: 20, done: false });
+  });
+
+  it('next() を 2 回先に呼んで push を 1 回だけしても、未解決の Promise は close で done に倒れる', async () => {
+    const input = new AsyncIterableInput<number>();
+    const it = input.iterable()[Symbol.asyncIterator]();
+    const p1 = it.next();
+    const p2 = it.next();
+    input.push(42);
+    const r1 = await p1;
+    expect(r1).toEqual({ value: 42, done: false });
+    // p2 は未解決
+    let p2Resolved = false;
+    p2.then(() => {
+      p2Resolved = true;
+    });
+    await new Promise((r) => setTimeout(r, 5));
+    expect(p2Resolved).toBe(false);
+    // close で残りの waiter が done に倒れる
+    input.close();
+    const r2 = await p2;
+    expect(r2.done).toBe(true);
+  });
 });

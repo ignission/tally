@@ -3,19 +3,19 @@
 // 1 chat thread = 1 long-lived sdk.query() を実現するため、user message を
 // 任意のタイミングで投入し、close で iter を終わらせる。
 //
-// 実装方針: バッファ + waiter の二段構え。consumer (SDK) が next を呼んだ瞬間に
-// バッファがあれば即返す。空なら 1 回限りの resolver を保留 (背圧に近い形)。
-// 再 push でその resolver を解決する。
+// 実装方針: バッファ + waiter キュー。consumer が next を複数回連続で呼んでも
+// 各 promise が独立に保持される。AsyncIterator 仕様に沿うため waiter は
+// 単一スロットではなく FIFO キューで持つ (consumer が並行で next() を呼ぶ
+// ケースに耐える)。
 export class AsyncIterableInput<T> {
   private buf: T[] = [];
-  private waiter: ((r: IteratorResult<T>) => void) | null = null;
+  private waiters: Array<(r: IteratorResult<T>) => void> = [];
   private finished = false;
 
   push(value: T): void {
     if (this.finished) return;
-    const w = this.waiter;
+    const w = this.waiters.shift();
     if (w) {
-      this.waiter = null;
       w({ value, done: false });
       return;
     }
@@ -25,10 +25,8 @@ export class AsyncIterableInput<T> {
   close(): void {
     if (this.finished) return;
     this.finished = true;
-    const w = this.waiter;
-    if (w) {
-      this.waiter = null;
-      w({ value: undefined as never, done: true });
+    while (this.waiters.length > 0) {
+      this.waiters.shift()?.({ value: undefined as never, done: true });
     }
   }
 
@@ -46,7 +44,7 @@ export class AsyncIterableInput<T> {
             return Promise.resolve({ value: undefined as never, done: true });
           }
           return new Promise<IteratorResult<T>>((resolve) => {
-            this.waiter = resolve;
+            this.waiters.push(resolve);
           });
         },
         return: (): Promise<IteratorResult<T>> => {
