@@ -1,7 +1,7 @@
 import type { ProjectStore } from '@tally/storage';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { __resetGuardsForTest, type DuplicateGuardContext } from './index';
+import type { DuplicateGuardContext } from './index';
 import { sourceUrlGuard } from './source-url';
 
 function makeCtx(
@@ -20,7 +20,8 @@ function makeCtx(
 }
 
 describe('sourceUrlGuard', () => {
-  beforeEach(() => __resetGuardsForTest());
+  // 注: このテストは sourceUrlGuard を直接呼んでおり、`dispatchDuplicateGuard`
+  // 経由のグローバル registry は触らない。__resetGuardsForTest は不要 (CR 指摘)。
 
   it('adoptAs は "requirement"', () => {
     expect(sourceUrlGuard.adoptAs).toBe('requirement');
