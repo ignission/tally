@@ -152,6 +152,32 @@ describe('ProjectSettingsDialog', () => {
     expect(screen.queryByLabelText('mcp-0-id')).toBeNull();
   });
 
+  // 旧実装は `mcpServers.length + 1` で id 採番していたため、削除→追加で
+  // 既存 id と衝突して下流の React key も衝突していた。未使用 suffix を探索する
+  // ように修正済み (Task 17 fix)。
+  it('addMcpServer: 削除→追加で id が既存と衝突しない', async () => {
+    render(<ProjectSettingsDialog open onClose={() => {}} />);
+    const addBtn = () => screen.getByRole('button', { name: /MCP サーバーを追加/ });
+    await userEvent.click(addBtn()); // atlassian-1
+    await userEvent.click(addBtn()); // atlassian-2
+    expect((screen.getByLabelText('mcp-0-id') as HTMLInputElement).value).toBe('atlassian-1');
+    expect((screen.getByLabelText('mcp-1-id') as HTMLInputElement).value).toBe('atlassian-2');
+    // 1 件目 (mcp-0) を削除 → 残るのは元 mcp-1 だが index は 0 にスライド
+    const removeButtons = screen.getAllByRole('button', { name: /削除/ });
+    // codebase 削除 (0) + MCP 2 件分 削除 (1, 2) → MCP 削除は最後 2 つ。1 件目 MCP を削除。
+    await userEvent.click(removeButtons[removeButtons.length - 2] as HTMLElement);
+    expect((screen.getByLabelText('mcp-0-id') as HTMLInputElement).value).toBe('atlassian-2');
+    // 再度追加 → 旧実装は length+1=2 で `atlassian-2` 衝突。修正後は `atlassian-1`。
+    await userEvent.click(addBtn());
+    const ids = [
+      (screen.getByLabelText('mcp-0-id') as HTMLInputElement).value,
+      (screen.getByLabelText('mcp-1-id') as HTMLInputElement).value,
+    ];
+    expect(new Set(ids).size).toBe(2); // 衝突なし
+    expect(ids).toContain('atlassian-1');
+    expect(ids).toContain('atlassian-2');
+  });
+
   it('secret 値の入力欄は無い (envVar 名のみ。caption に .env への誘導)', () => {
     render(<ProjectSettingsDialog open onClose={() => {}} />);
     // secret / token / pat / api_token / password 系の入力欄が無いこと
