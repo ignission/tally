@@ -8,6 +8,9 @@ build/
 .next/
 out/
 
+# Next.js auto-generated type reference (内容が dev/build で変動する。手で編集しない)
+next-env.d.ts
+
 # Test
 coverage/
 *.lcov
@@ -44,6 +47,9 @@ workspace/
 # Codex 一時出力（サブエージェント用）
 .claude/tmp/
 .gstack/
+
+# superpowers の中間 planning doc。実装と不整合化しやすく review noise になるため untrack。
+docs/superpowers/
 
 # Playwright
 packages/*/.playwright-tally-home/
