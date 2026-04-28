@@ -137,8 +137,8 @@ User taps "UC" node → "ストーリー分解"
 
 ```
 $ pnpm dev
-├── frontend (Next.js dev server, :3000)
-├── ai-engine (WebSocket server, :3001)
+├── frontend (Next.js dev server, :3321)
+├── ai-engine (WebSocket server, :3322)
 └── storage (inline in Next.js Route Handlers)
 ```
 

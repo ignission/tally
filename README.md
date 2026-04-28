@@ -65,14 +65,14 @@ cp .env.example .env  # 必要なら編集
 pnpm dev
 ```
 
-- frontend: http://localhost:3000
-- ai-engine: ws://localhost:5050/agent
+- frontend: http://localhost:3321
+- ai-engine: ws://localhost:3322/agent
 
 `pnpm dev` は `pnpm -r --parallel dev` を呼び、frontend (Next.js dev) と ai-engine (tsx watch) を並列起動する。
 
 ### 利用フロー (要点)
 
-1. ブラウザで http://localhost:3000 を開く
+1. ブラウザで http://localhost:3321 を開く
 2. 「+ 新規プロジェクト」でフォルダ選択ダイアログから保存先を選ぶ（`~/.local/share/tally/projects/<名前>/` が提案される）
 3. 任意で 1 つ以上の「コードベース」（AI が探索する対象リポジトリ）を追加して「作成」
 4. UC ノードを選択 → DetailSheet の「ストーリー分解」ボタンを押下

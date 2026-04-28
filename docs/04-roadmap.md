@@ -21,7 +21,7 @@
 
 - `pnpm install` がエラーなく完了
 - `pnpm -r test` が通る（空のテストでOK）
-- `pnpm --filter frontend dev` で http://localhost:3000 が表示される
+- `pnpm --filter frontend dev` で http://localhost:3321 が表示される
 
 ---
 

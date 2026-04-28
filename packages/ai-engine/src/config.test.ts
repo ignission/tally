@@ -3,9 +3,9 @@ import { describe, expect, it } from 'vitest';
 import { loadConfig } from './config';
 
 describe('loadConfig', () => {
-  it('デフォルト PORT は 5050 (4000/4001 は ark 等と衝突するため避ける)', () => {
+  it('デフォルト PORT は 3322 (3321 frontend の隣、他プロジェクトと衝突しがちな 3000/4000/4001/5050 を避ける)', () => {
     const cfg = loadConfig({});
-    expect(cfg.port).toBe(5050);
+    expect(cfg.port).toBe(3322);
   });
 
   it('AI_ENGINE_PORT を解釈する', () => {

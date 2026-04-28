@@ -4,9 +4,9 @@
   "private": true,
   "description": "Tally のフロントエンド (Next.js 16 App Router + React Flow キャンバス)",
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3321",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -p 3321",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",

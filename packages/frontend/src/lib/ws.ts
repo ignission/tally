@@ -20,7 +20,7 @@ export interface AgentHandle {
 // WS ベースの agent 呼び出し。受信した NDJSON を AgentEvent の AsyncIterable に変換する。
 // close() で接続を明示的に終わらせる。サーバ側が close したら AsyncIterable も終了する。
 export function startAgent(opts: StartAgentOptions): AgentHandle {
-  const url = opts.url ?? process.env.NEXT_PUBLIC_AI_ENGINE_URL ?? 'ws://localhost:5050';
+  const url = opts.url ?? process.env.NEXT_PUBLIC_AI_ENGINE_URL ?? 'ws://localhost:3322';
   const ws = new WebSocket(`${url}/agent`);
 
   const buf: AgentEvent[] = [];
@@ -107,7 +107,7 @@ export interface OpenChatOptions {
 // sendUserMessage / approveTool を任意のタイミングで呼ぶ。
 // サーバが close した場合は events も終了する。
 export function openChat(opts: OpenChatOptions): ChatHandle {
-  const url = opts.url ?? process.env.NEXT_PUBLIC_AI_ENGINE_URL ?? 'ws://localhost:5050';
+  const url = opts.url ?? process.env.NEXT_PUBLIC_AI_ENGINE_URL ?? 'ws://localhost:3322';
   const ws = new WebSocket(`${url}/chat`);
 
   const buf: ChatEvent[] = [];
