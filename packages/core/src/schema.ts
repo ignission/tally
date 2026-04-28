@@ -363,6 +363,38 @@ export const ChatBlockSchema = z.discriminatedUnion('type', [
     ok: z.boolean(),
     output: z.string(),
   }),
+  // 外部 MCP (Atlassian 等) の OAuth 2.1 認証フローを 1 等地で扱うブロック。
+  // SDK の `mcp__<id>__authenticate` tool_use を生のまま並べると UX が破綻する
+  // (URL がプレーンテキスト + redirect 先 localhost:XXXXX が即死) ため、検出して
+  // この auth_request に置き換える。status は同 thread 内の complete_authentication で更新。
+  // failureMessage は status='failed' のときだけ持つ。superRefine で永続化フォーマット
+  // としての不正状態 (failed なのに message 無し / pending・completed に message が付く)
+  // を弾く。
+  z
+    .object({
+      type: z.literal('auth_request'),
+      mcpServerId: z.string().min(1),
+      mcpServerLabel: z.string().min(1),
+      authUrl: z.string().url(),
+      status: z.enum(['pending', 'completed', 'failed']),
+      failureMessage: z.string().optional(),
+    })
+    .superRefine((b, ctx) => {
+      if (b.status === 'failed' && !b.failureMessage) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'failed auth_request には failureMessage が必要',
+          path: ['failureMessage'],
+        });
+      }
+      if (b.status !== 'failed' && b.failureMessage !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'failureMessage は failed のときだけ設定できます',
+          path: ['failureMessage'],
+        });
+      }
+    }),
 ]);
 
 export const ChatMessageSchema = z.object({

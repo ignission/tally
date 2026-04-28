@@ -9,6 +9,7 @@ import {
 import type { ChatStore, ProjectStore } from '@tally/storage';
 
 import type { SdkLike } from './agent-runner';
+import { type AuthToolNameMatch, extractAuthUrl, parseAuthToolName } from './auth-detector';
 import { buildMcpServers } from './mcp/build-mcp-servers';
 import { redactMcpSecrets } from './mcp/redact';
 import type { ChatEvent, SdkMessageLike } from './stream';
@@ -37,6 +38,36 @@ function truncateForPersistence(output: string): string {
   if (output.length <= TOOL_RESULT_PERSIST_LIMIT) return output;
   const head = output.slice(0, TOOL_RESULT_PERSIST_LIMIT);
   return `${head}\n... (truncated, ${output.length} chars total)`;
+}
+
+// 最新の pending auth_request ブロックを探す (同一 mcpServerId 限定)。
+// thread.messages を末尾から走査し、最初に見つかった pending を返す。
+// 同一 server に対する直近の認証フローのみを更新対象にして、過去に completed/failed で
+// 終わったブロックには触らない方針。
+function findLatestPendingAuthRequest(
+  messages: ChatMessage[],
+  mcpServerId: string,
+): {
+  messageId: string;
+  blockIndex: number;
+  block: Extract<ChatBlock, { type: 'auth_request' }>;
+} | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (!m) continue;
+    for (let j = m.blocks.length - 1; j >= 0; j--) {
+      const b = m.blocks[j];
+      if (
+        b &&
+        b.type === 'auth_request' &&
+        b.mcpServerId === mcpServerId &&
+        b.status === 'pending'
+      ) {
+        return { messageId: m.id, blockIndex: j, block: b };
+      }
+    }
+  }
+  return null;
 }
 
 // SDK の assistant / user message から抽出する block の単純化形。
@@ -184,6 +215,15 @@ export class ChatRunner {
     // が流れた場合に external 誤分類するのを防ぐためのガード (CR 指摘 #19 2 周目)。
     const externalToolUseIds = new Set<string>();
 
+    // OAuth 認証フロー検出用 state。
+    // SDK の tool_use → tool_result は同じ for-await ループ内で順に流れるので、
+    // tool_use 時点で認証系か判定して stash しておき、tool_result 到達時に
+    // raw な tool_use/tool_result を捨てて auth_request ブロックに変換する。
+    // mcpServerLabel 解決用に externalConfigs を id → name の map にしておく。
+    const externalConfigById = new Map<string, string>();
+    for (const c of externalConfigs) externalConfigById.set(c.id, c.name);
+    const stashedAuthUses = new Map<string, { match: AuthToolNameMatch; mcpServerLabel: string }>();
+
     // 5. SDK query をバックグラウンドで走らせ、queue にイベントを push する。
     //    generator 側は queue をドレインして yield するだけ。
     const sdkDone = (async () => {
@@ -215,6 +255,16 @@ export class ChatRunner {
               textBuffer.push(b.text);
               queue.push({ type: 'chat_text_delta', messageId: assistantMsgId, text: b.text });
             } else if (b.type === 'tool_use') {
+              // OAuth 認証系ツール (mcp__*__authenticate / complete_authentication) は
+              // tool_use を素のまま並べると UX が破綻するので、tool_result 到達まで stash して
+              // auth_request ブロックに変換する。
+              const authMatch = parseAuthToolName(b.name);
+              if (authMatch) {
+                const label =
+                  externalConfigById.get(authMatch.mcpServerId) ?? authMatch.mcpServerId;
+                stashedAuthUses.set(b.toolUseId, { match: authMatch, mcpServerLabel: label });
+                continue;
+              }
               // 外部 MCP の tool_use: source='external' で永続化、承認 UI なし (Task 12)。
               externalToolUseIds.add(b.toolUseId);
               await chatStore.appendBlockToMessage(threadId, assistantMsgId, {
@@ -232,6 +282,19 @@ export class ChatRunner {
                 input: b.input,
               });
             } else if (b.type === 'tool_result') {
+              // 認証系 tool_use とペアになる tool_result は auth_request に変換する (PR-B)。
+              const stash = stashedAuthUses.get(b.toolUseId);
+              if (stash) {
+                stashedAuthUses.delete(b.toolUseId);
+                await this.handleAuthToolResult({
+                  match: stash.match,
+                  mcpServerLabel: stash.mcpServerLabel,
+                  result: { ok: b.ok, output: b.output },
+                  assistantMsgId,
+                  emit: (e) => queue.push(e),
+                });
+                continue;
+              }
               // 同 turn 中に観測した外部 tool_use の id のみ external として扱う。
               // 集合に無い toolUseId (= 内部 / intercept 経路 / 想定外) は無視する。
               if (!externalToolUseIds.has(b.toolUseId)) continue;
@@ -284,6 +347,119 @@ export class ChatRunner {
     }
 
     await sdkDone; // バックグラウンドタスクの未捕捉エラーを顕在化
+  }
+
+  // OAuth 認証系 tool_use/tool_result ペアを auth_request ブロックに変換する。
+  // - authenticate: tool_result.output から auth URL を抽出して新規 pending ブロックを append
+  // - complete_authentication: 同 mcpServerId の最新 pending ブロックを completed/failed に更新
+  // どちらの場合も chat_auth_request イベントを emit する (UI が card を再描画するための合図)。
+  // tool_result の ok=false や URL 抽出失敗時は failed として扱い、UI に message を出す。
+  private async handleAuthToolResult(opts: {
+    match: AuthToolNameMatch;
+    mcpServerLabel: string;
+    result: { ok: boolean; output: string };
+    assistantMsgId: string;
+    emit: (e: ChatEvent) => void;
+  }): Promise<void> {
+    const { match, mcpServerLabel, result, assistantMsgId, emit } = opts;
+    const { chatStore, threadId } = this.deps;
+
+    if (match.kind === 'authenticate') {
+      const authUrl = result.ok ? extractAuthUrl(result.output) : null;
+      if (!authUrl) {
+        const failureMessage = result.ok
+          ? 'authenticate tool_result から URL を抽出できませんでした'
+          : result.output.slice(0, 256);
+        const placeholderUrl = 'https://invalid.invalid/?auth_url_unavailable';
+        const block: ChatBlock = {
+          type: 'auth_request',
+          mcpServerId: match.mcpServerId,
+          mcpServerLabel,
+          authUrl: placeholderUrl,
+          status: 'failed',
+          failureMessage,
+        };
+        await chatStore.appendBlockToMessage(threadId, assistantMsgId, block);
+        emit({
+          type: 'chat_auth_request',
+          messageId: assistantMsgId,
+          mcpServerId: match.mcpServerId,
+          mcpServerLabel,
+          authUrl: placeholderUrl,
+          status: 'failed',
+          failureMessage,
+        });
+        return;
+      }
+      const block: ChatBlock = {
+        type: 'auth_request',
+        mcpServerId: match.mcpServerId,
+        mcpServerLabel,
+        authUrl,
+        status: 'pending',
+      };
+      await chatStore.appendBlockToMessage(threadId, assistantMsgId, block);
+      emit({
+        type: 'chat_auth_request',
+        messageId: assistantMsgId,
+        mcpServerId: match.mcpServerId,
+        mcpServerLabel,
+        authUrl,
+        status: 'pending',
+      });
+      return;
+    }
+
+    // complete_authentication: 最新 pending ブロックを更新する。
+    const thread = await chatStore.getChat(threadId);
+    if (!thread) return;
+    const found = findLatestPendingAuthRequest(thread.messages, match.mcpServerId);
+    if (!found) {
+      // 対応する pending が無い (履歴外で auth 済 / 別 thread で auth 済 / 重複呼び出し)。
+      // 失敗時は新規 failed ブロックで残す。成功時はサイレント (ノイズ防止)。
+      if (!result.ok) {
+        const failureMessage = result.output.slice(0, 256);
+        const placeholderUrl = 'https://invalid.invalid/?orphan_complete_failed';
+        const block: ChatBlock = {
+          type: 'auth_request',
+          mcpServerId: match.mcpServerId,
+          mcpServerLabel,
+          authUrl: placeholderUrl,
+          status: 'failed',
+          failureMessage,
+        };
+        await chatStore.appendBlockToMessage(threadId, assistantMsgId, block);
+        emit({
+          type: 'chat_auth_request',
+          messageId: assistantMsgId,
+          mcpServerId: match.mcpServerId,
+          mcpServerLabel,
+          authUrl: placeholderUrl,
+          status: 'failed',
+          failureMessage,
+        });
+      }
+      return;
+    }
+    const updated: ChatBlock = result.ok
+      ? { ...found.block, status: 'completed' }
+      : {
+          ...found.block,
+          status: 'failed',
+          failureMessage: result.output.slice(0, 256),
+        };
+    await chatStore.updateMessageBlock(threadId, found.messageId, found.blockIndex, updated);
+    emit({
+      type: 'chat_auth_request',
+      messageId: found.messageId,
+      mcpServerId: match.mcpServerId,
+      mcpServerLabel,
+      authUrl: found.block.authUrl,
+      status: updated.status,
+      ...(updated.status === 'failed' && updated.failureMessage
+        ? { failureMessage: updated.failureMessage }
+        : {}),
+    });
   }
 
   // 承認 intercept + 実ツール呼び出し。
