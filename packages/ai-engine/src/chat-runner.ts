@@ -132,16 +132,11 @@ export class ChatRunner {
     const prompt = buildChatPrompt(threadWithUser?.messages ?? [], contextNodes);
     const systemPrompt = buildChatSystemPrompt();
 
-    // 3. 空の assistant message を append (後続の tool_use 即時永続化の親として必要)
-    //    prompt スナップショット後に行うことで、上記 buildChatPrompt の前提が崩れないようにする。
+    // 3. assistantMsgId を先に生成 (buildMcpServer の handler が emit 先として参照)。
+    //    永続化は MCP 構築成功後に行う (途中で throw した場合に空 assistant message が
+    //    YAML に残らないようにする。ロード時は <message blocks=[]> がスキップされるが、
+    //    chat 履歴 UI には空バブルが蓄積するのを防ぐため)。
     const assistantMsgId = newChatMessageId();
-    await chatStore.appendMessage(threadId, {
-      id: assistantMsgId,
-      role: 'assistant',
-      blocks: [],
-      createdAt: new Date().toISOString(),
-    });
-    yield { type: 'chat_assistant_message_started', messageId: assistantMsgId };
 
     // 4. MCP 経由で呼ばれる tool ハンドラ内で invokeInterceptedTool を回す。
     //    MCP handler は SDK query を block するので、イベント emit は AsyncQueue 経由に分離する。
@@ -171,6 +166,16 @@ export class ChatRunner {
       };
       return;
     }
+
+    // 5. MCP 構築が成功した時点で空 assistant message を永続化 (後続の tool_use 即時
+    //    永続化の親として必要)。buildChatPrompt スナップショット後・sdk.query 前に行う。
+    await chatStore.appendMessage(threadId, {
+      id: assistantMsgId,
+      role: 'assistant',
+      blocks: [],
+      createdAt: new Date().toISOString(),
+    });
+    yield { type: 'chat_assistant_message_started', messageId: assistantMsgId };
 
     const textBuffer: string[] = [];
 
