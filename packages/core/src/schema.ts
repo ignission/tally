@@ -191,6 +191,28 @@ function checkUniqueCodebaseIds(
   }
 }
 
+// mcpServers[].id の重複を検出して issue を積む。superRefine の共通ロジック。
+// buildMcpServers が Record<id, ...> にマップするため、重複 id を許容すると
+// 後勝ちで silent override されつつ allowedTools には両方残るため整合性が崩れる。
+function checkUniqueMcpServerIds(
+  mcpServers: { id: string }[] | undefined,
+  ctx: z.RefinementCtx,
+): void {
+  if (!mcpServers) return;
+  const seen = new Set<string>();
+  for (const s of mcpServers) {
+    if (seen.has(s.id)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `mcpServers[].id 重複: ${s.id}`,
+        path: ['mcpServers'],
+      });
+      return;
+    }
+    seen.add(s.id);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // MCP サーバー設定スキーマ (Atlassian MCP 連携)
 // ---------------------------------------------------------------------------
@@ -286,7 +308,10 @@ export const ProjectMetaSchema = z
     createdAt: z.string(),
     updatedAt: z.string(),
   })
-  .superRefine((meta, ctx) => checkUniqueCodebaseIds(meta.codebases, ctx));
+  .superRefine((meta, ctx) => {
+    checkUniqueCodebaseIds(meta.codebases, ctx);
+    checkUniqueMcpServerIds(meta.mcpServers, ctx);
+  });
 
 // 実行時に Project 全体を扱う際の合成スキーマ (メモリ上表現)。
 export const ProjectSchema = z
@@ -302,7 +327,10 @@ export const ProjectSchema = z
     nodes: z.array(NodeSchema),
     edges: z.array(EdgeSchema),
   })
-  .superRefine((p, ctx) => checkUniqueCodebaseIds(p.codebases, ctx));
+  .superRefine((p, ctx) => {
+    checkUniqueCodebaseIds(p.codebases, ctx);
+    checkUniqueMcpServerIds(p.mcpServers, ctx);
+  });
 
 // PATCH /api/projects/:id の body スキーマ。codebases / mcpServers は全置換のみ (部分更新はしない)。
 export const ProjectMetaPatchSchema = z
@@ -313,7 +341,10 @@ export const ProjectMetaPatchSchema = z
     mcpServers: z.array(McpServerConfigSchema).optional(),
   })
   .strict()
-  .superRefine((patch, ctx) => checkUniqueCodebaseIds(patch.codebases, ctx));
+  .superRefine((patch, ctx) => {
+    checkUniqueCodebaseIds(patch.codebases, ctx);
+    checkUniqueMcpServerIds(patch.mcpServers, ctx);
+  });
 
 // ---------------------------------------------------------------------------
 // チャットスキーマ (Phase 6)
