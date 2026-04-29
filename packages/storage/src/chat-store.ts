@@ -12,7 +12,7 @@ import {
 } from '@tally/core';
 
 import { chatFileName, resolveProjectPaths } from './project-dir';
-import { readYaml, writeYaml } from './yaml';
+import { readYaml, writeYaml, YamlValidationError } from './yaml';
 
 export interface CreateChatInput {
   projectId: string;
@@ -91,15 +91,25 @@ export class FileSystemChatStore implements ChatStore {
     const yamlFiles = entries.filter((f) => f.endsWith('.yaml') || f.endsWith('.yml'));
     const threads = await Promise.all(
       yamlFiles.map(async (file) => {
-        const t = await readYaml(path.join(this.paths.chatsDir, file), ChatThreadSchema);
-        if (!t) return null;
-        return {
-          id: t.id,
-          projectId: t.projectId,
-          title: t.title,
-          createdAt: t.createdAt,
-          updatedAt: t.updatedAt,
-        } satisfies ChatThreadMeta;
+        // YAML パース／スキーマ違反のみ skip 対象。FS 系 IO エラー (EACCES / EMFILE 等)
+        // は黙って隠蔽すると問題発見が遅れるため再スローして 500 に倒す。
+        try {
+          const t = await readYaml(path.join(this.paths.chatsDir, file), ChatThreadSchema);
+          if (!t) return null;
+          return {
+            id: t.id,
+            projectId: t.projectId,
+            title: t.title,
+            createdAt: t.createdAt,
+            updatedAt: t.updatedAt,
+          } satisfies ChatThreadMeta;
+        } catch (err) {
+          if (err instanceof YamlValidationError) {
+            console.warn(`[chat-store] skip broken chat file: ${file}`, err);
+            return null;
+          }
+          throw err;
+        }
       }),
     );
     return threads

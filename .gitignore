@@ -45,6 +45,9 @@ workspace/
 .claude/tmp/
 .gstack/
 
+# superpowers の中間 planning doc。実装と不整合化しやすく review noise になるため untrack。
+docs/superpowers/
+
 # Playwright
 packages/*/.playwright-tally-home/
 packages/*/playwright-report/
