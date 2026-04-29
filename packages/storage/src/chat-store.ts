@@ -12,7 +12,7 @@ import {
 } from '@tally/core';
 
 import { chatFileName, resolveProjectPaths } from './project-dir';
-import { readYaml, writeYaml } from './yaml';
+import { readYaml, writeYaml, YamlValidationError } from './yaml';
 
 export interface CreateChatInput {
   projectId: string;
@@ -91,8 +91,8 @@ export class FileSystemChatStore implements ChatStore {
     const yamlFiles = entries.filter((f) => f.endsWith('.yaml') || f.endsWith('.yml'));
     const threads = await Promise.all(
       yamlFiles.map(async (file) => {
-        // 1 ファイルが壊れていても他を表示できるように個別 try/catch。
-        // 黙って捨てると気付かないので warn は出す。
+        // YAML パース／スキーマ違反のみ skip 対象。FS 系 IO エラー (EACCES / EMFILE 等)
+        // は黙って隠蔽すると問題発見が遅れるため再スローして 500 に倒す。
         try {
           const t = await readYaml(path.join(this.paths.chatsDir, file), ChatThreadSchema);
           if (!t) return null;
@@ -104,8 +104,11 @@ export class FileSystemChatStore implements ChatStore {
             updatedAt: t.updatedAt,
           } satisfies ChatThreadMeta;
         } catch (err) {
-          console.warn(`[chat-store] skip broken chat file: ${file}`, err);
-          return null;
+          if (err instanceof YamlValidationError) {
+            console.warn(`[chat-store] skip broken chat file: ${file}`, err);
+            return null;
+          }
+          throw err;
         }
       }),
     );
