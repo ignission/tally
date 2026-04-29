@@ -617,6 +617,14 @@ export function formatNodeForContext(node: Node): string {
   return lines.join('\n');
 }
 
+// XML 特殊文字をエスケープ。tool_result.output は外部 MCP の生出力 (Jira 本文・
+// epic 説明等) で `</tool_result>` や `<` を含む可能性があり、これが prompt の XML
+// 構造を壊して AI が context を誤読するのを防ぐ。`<` `>` `&` の最低限のみ。
+// (tool_use.input 側は JSON.stringify が `<` を `<` にエスケープするため安全)
+function escapeXmlText(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 // チャット履歴を単一 prompt にエンコードする。
 // 各 block を順に replay する:
 // - text: そのまま (assistant / user の自然言語)
@@ -652,7 +660,9 @@ export function buildChatPrompt(messages: ChatMessage[], contextNodes: Node[] = 
             `<tool_use id="${b.toolUseId}" name="${b.name}"${sourceAttr}>${JSON.stringify(b.input)}</tool_use>`,
           );
         } else if (b.type === 'tool_result') {
-          lines.push(`<tool_result id="${b.toolUseId}" ok="${b.ok}">${b.output}</tool_result>`);
+          lines.push(
+            `<tool_result id="${b.toolUseId}" ok="${b.ok}">${escapeXmlText(b.output)}</tool_result>`,
+          );
         }
       }
       lines.push('</message>');
