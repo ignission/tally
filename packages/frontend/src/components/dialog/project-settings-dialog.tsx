@@ -1,23 +1,54 @@
 'use client';
 
-import type { Codebase } from '@tally/core';
+import type { Codebase, McpServerConfig } from '@tally/core';
 import { useEffect, useMemo, useState } from 'react';
 
 import { TextInput } from '@/components/ui/text-input';
 import { useCanvasStore } from '@/lib/store';
 import { FolderBrowserDialog } from './folder-browser-dialog';
 
+// MCP サーバー新規追加時のデフォルト config (Bearer + 空 envVar 名 + 空 url)。
+// scheme/envVar は ユーザーが Cloud (basic) か Server/DC (bearer) かで選択する。
+function makeDefaultMcpServer(seq: number): McpServerConfig {
+  return {
+    id: `atlassian-${seq}`,
+    name: 'Atlassian',
+    kind: 'atlassian',
+    url: '',
+    auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: '' },
+    options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
+  };
+}
+
+// UI ローカルの不変 ID を持つ MCP server エントリ。
+// React key として用いる `_uid` はマウント時に 1 度だけ割り当て、その後は変更しない。
+// `id` は UI で編集可能なため key にすると編集中の再マウント (focus / state リセット)
+// や重複入力時の reconciliation 衝突を起こす。`_uid` は永続化対象外で onSave で剥がす。
+type McpServerEntry = McpServerConfig & { _uid: string };
+
+function makeUid(): string {
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID();
+  }
+  // crypto.randomUUID 非対応環境向け fallback (jsdom の古い setup 等)。
+  return `mcp-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
+}
+
 export function ProjectSettingsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const projectMeta = useCanvasStore((s) => s.projectMeta);
   const patchProjectMeta = useCanvasStore((s) => s.patchProjectMeta);
 
   const [codebases, setCodebases] = useState<Codebase[]>([]);
+  const [mcpServers, setMcpServers] = useState<McpServerEntry[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (open && projectMeta) setCodebases(projectMeta.codebases);
+    if (open && projectMeta) {
+      setCodebases(projectMeta.codebases);
+      setMcpServers((projectMeta.mcpServers ?? []).map((s) => ({ ...s, _uid: makeUid() })));
+    }
   }, [open, projectMeta]);
 
   const duplicateIds = useMemo(() => {
@@ -58,12 +89,36 @@ export function ProjectSettingsDialog({ open, onClose }: { open: boolean; onClos
     setBusy(true);
     setError(null);
     try {
-      await patchProjectMeta({ codebases });
+      // _uid は UI ローカルの React key 用なので永続化前に剥がす。
+      const cleanedMcpServers = mcpServers.map(({ _uid, ...rest }) => rest);
+      await patchProjectMeta({ codebases, mcpServers: cleanedMcpServers });
       onClose();
     } catch (e) {
       setError(String((e as Error).message ?? e));
       setBusy(false);
     }
+  };
+
+  const addMcpServer = () => {
+    // 採番 id は表示初期値として使うが、React key は別途 _uid を割り当てる
+    // (id はユーザーが編集できるため key に使うと編集中の再マウントを起こす)。
+    const usedIds = new Set(mcpServers.map((s) => s.id));
+    let seq = 1;
+    while (usedIds.has(`atlassian-${seq}`)) seq += 1;
+    setMcpServers([...mcpServers, { ...makeDefaultMcpServer(seq), _uid: makeUid() }]);
+  };
+
+  const updateMcpServer = (index: number, next: McpServerConfig) => {
+    const list = [...mcpServers];
+    const prev = list[index];
+    if (!prev) return;
+    // 既存エントリの _uid は保持 (フォーム編集で React key が変わるのを防ぐ)。
+    list[index] = { ...next, _uid: prev._uid };
+    setMcpServers(list);
+  };
+
+  const removeMcpServer = (index: number) => {
+    setMcpServers(mcpServers.filter((_, i) => i !== index));
   };
 
   return (
@@ -126,6 +181,137 @@ export function ProjectSettingsDialog({ open, onClose }: { open: boolean; onClos
                 >
                   削除
                 </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div style={SECTION}>
+          <div style={SECTION_HEADER}>
+            MCP サーバー (Atlassian 等の外部連携) ({mcpServers.length})
+            <button type="button" onClick={addMcpServer} disabled={busy} style={LINK}>
+              + MCP サーバーを追加
+            </button>
+          </div>
+          <div style={MUTED}>
+            シークレット (PAT 等) はこのフォームでは入力しません。サーバーの .env に
+            <code> ATLASSIAN_PAT=... </code>のように置き、ここでは環境変数名のみ指定します。
+          </div>
+          {mcpServers.length === 0 && <div style={MUTED}>MCP サーバー未設定</div>}
+          <ul style={CB_LIST}>
+            {mcpServers.map((s, i) => (
+              // _uid は UI ローカルの不変 ID。s.id はフォームで編集可能なため key に使うと
+              // 編集中の再マウント (focus / state リセット) や重複入力時の reconciliation
+              // 衝突を起こすため避ける (CR 指摘 #19)。
+              <li key={s._uid} style={MCP_ITEM}>
+                <div style={MCP_ROW}>
+                  <TextInput
+                    type="text"
+                    value={s.id}
+                    onChange={(e) => updateMcpServer(i, { ...s, id: e.target.value })}
+                    disabled={busy}
+                    aria-label={`mcp-${i}-id`}
+                    style={{ ...INPUT, width: 160 }}
+                    placeholder="atlassian"
+                  />
+                  <TextInput
+                    type="text"
+                    value={s.name}
+                    onChange={(e) => updateMcpServer(i, { ...s, name: e.target.value })}
+                    disabled={busy}
+                    aria-label={`mcp-${i}-name`}
+                    style={{ ...INPUT, flex: 1 }}
+                    placeholder="表示名"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeMcpServer(i)}
+                    disabled={busy}
+                    style={LINK}
+                  >
+                    削除
+                  </button>
+                </div>
+                <div style={MCP_ROW}>
+                  <TextInput
+                    type="url"
+                    value={s.url}
+                    onChange={(e) => updateMcpServer(i, { ...s, url: e.target.value })}
+                    disabled={busy}
+                    aria-label={`mcp-${i}-url`}
+                    style={{ ...INPUT, flex: 1 }}
+                    placeholder="https://mcp.atlassian.example/v1/mcp"
+                  />
+                  <select
+                    value={s.auth.scheme}
+                    onChange={(e) => {
+                      const scheme = e.target.value as 'basic' | 'bearer';
+                      const next: McpServerConfig =
+                        scheme === 'basic'
+                          ? {
+                              ...s,
+                              auth: {
+                                type: 'pat',
+                                scheme: 'basic',
+                                emailEnvVar: '',
+                                tokenEnvVar: s.auth.tokenEnvVar,
+                              },
+                            }
+                          : {
+                              ...s,
+                              auth: {
+                                type: 'pat',
+                                scheme: 'bearer',
+                                tokenEnvVar: s.auth.tokenEnvVar,
+                              },
+                            };
+                      updateMcpServer(i, next);
+                    }}
+                    disabled={busy}
+                    aria-label={`mcp-${i}-scheme`}
+                    style={{ ...INPUT, width: 100 }}
+                  >
+                    <option value="bearer">Bearer</option>
+                    <option value="basic">Basic</option>
+                  </select>
+                </div>
+                <div style={MCP_ROW}>
+                  {s.auth.scheme === 'basic' && (
+                    <TextInput
+                      type="text"
+                      value={s.auth.emailEnvVar}
+                      onChange={(e) =>
+                        updateMcpServer(i, {
+                          ...s,
+                          auth: {
+                            type: 'pat',
+                            scheme: 'basic',
+                            emailEnvVar: e.target.value,
+                            tokenEnvVar: s.auth.tokenEnvVar,
+                          },
+                        })
+                      }
+                      disabled={busy}
+                      aria-label={`mcp-${i}-emailEnvVar`}
+                      style={{ ...INPUT, flex: 1 }}
+                      placeholder="ATLASSIAN_EMAIL"
+                    />
+                  )}
+                  <TextInput
+                    type="text"
+                    value={s.auth.tokenEnvVar}
+                    onChange={(e) =>
+                      updateMcpServer(i, {
+                        ...s,
+                        auth: { ...s.auth, tokenEnvVar: e.target.value },
+                      })
+                    }
+                    disabled={busy}
+                    aria-label={`mcp-${i}-tokenEnvVar`}
+                    style={{ ...INPUT, flex: 1 }}
+                    placeholder={s.auth.scheme === 'basic' ? 'ATLASSIAN_API_TOKEN' : 'JIRA_PAT'}
+                  />
+                </div>
               </li>
             ))}
           </ul>
@@ -222,6 +408,21 @@ const CB_LIST = {
   gap: 6,
 };
 const CB_ITEM = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 6,
+  flexWrap: 'wrap' as const,
+};
+const MCP_ITEM = {
+  display: 'flex',
+  flexDirection: 'column' as const,
+  gap: 4,
+  padding: 8,
+  border: '1px solid #30363d',
+  borderRadius: 6,
+  background: '#0d1117',
+};
+const MCP_ROW = {
   display: 'flex',
   alignItems: 'center',
   gap: 6,

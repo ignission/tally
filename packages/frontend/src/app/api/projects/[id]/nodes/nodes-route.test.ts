@@ -22,6 +22,7 @@ describe('POST /api/projects/[id]/nodes', () => {
       id: 'proj-test',
       name: 'Test',
       codebases: [],
+      mcpServers: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
@@ -91,6 +92,7 @@ describe('PATCH /api/projects/[id]/nodes/[nodeId]', () => {
       id: 'proj-test',
       name: 'Test',
       codebases: [],
+      mcpServers: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
@@ -195,6 +197,7 @@ describe('DELETE /api/projects/[id]/nodes/[nodeId]', () => {
       id: 'proj-test',
       name: 'Test',
       codebases: [],
+      mcpServers: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });

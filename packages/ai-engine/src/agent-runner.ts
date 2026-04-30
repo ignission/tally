@@ -2,6 +2,7 @@ import type { AgentName } from '@tally/core';
 import type { ProjectStore } from '@tally/storage';
 
 import { AGENT_REGISTRY } from './agents/registry';
+import { buildMcpServers } from './mcp/build-mcp-servers';
 import type { AgentEvent, SdkMessageLike } from './stream';
 import { sdkMessageToAgentEvent } from './stream';
 import { buildTallyMcpServer } from './tools';
@@ -104,19 +105,36 @@ export async function* runAgent(deps: RunAgentDeps): AsyncGenerator<AgentEvent> 
     input: parsed.data,
   });
   try {
+    // Task 15: プロジェクト設定の mcpServers[] を毎ターン読み込み、buildMcpServers で
+    // Tally MCP と外部 MCP (Atlassian 等) を合成する。chat-runner と同じ utility を共有。
+    // env 未設定時は throw → catch で error event に流す。
+    const projectMeta = await store.getProjectMeta();
+    const externalConfigs = projectMeta?.mcpServers ?? [];
+    const { mcpServers, allowedTools: externalAllowed } = buildMcpServers({
+      tallyMcp: mcp,
+      configs: externalConfigs,
+    });
+
     // built-in ツールは mcp__ プレフィックスを持たないもの (Read / Glob / Grep など)。
     // options.tools = 実質的な built-in 使用可能リスト。[] を渡せば Bash/Edit/Write 等すべてオフ。
     const builtInTools = def.allowedTools.filter((t) => !t.startsWith('mcp__'));
+    // agent 固有の allowedTools (Tally MCP の具体 tool 名 + built-in) に、外部 MCP の wildcard
+    // (mcp__<id>__*) を合流。tally の wildcard は agent 側に既に具体名で並んでいるので除外して dedup。
+    const finalAllowedTools = [
+      ...def.allowedTools,
+      ...externalAllowed.filter((t) => t !== 'mcp__tally__*'),
+    ];
+
     const iter = sdk.query({
       prompt: prompt.userPrompt,
       options: {
         systemPrompt: prompt.systemPrompt,
-        mcpServers: { tally: mcp as unknown as Record<string, unknown> },
+        mcpServers,
         // built-in ツールは registry で宣言した範囲のみ許可。
         // これで find-related-code に Bash / Edit / Write 等が使われなくなる。
         tools: builtInTools,
-        // MCP ツール (mcp__tally__*) も含めて自動承認する。
-        allowedTools: def.allowedTools,
+        // MCP ツール (mcp__tally__* + 外部 MCP wildcard) を自動承認する。
+        allowedTools: finalAllowedTools,
         // 承認リスト外は拒否。built-in 側は tools で絞っているので二重ガード。
         permissionMode: 'dontAsk',
         // cwd は find-related-code のコード探索スコープ。未指定エージェントは SDK デフォルト。

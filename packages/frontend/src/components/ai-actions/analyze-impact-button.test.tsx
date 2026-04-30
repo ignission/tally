@@ -11,6 +11,7 @@ const baseMeta = {
   id: 'proj-1',
   name: 'P',
   codebases: [] as { id: string; label: string; path: string }[],
+  mcpServers: [],
   createdAt: '2026-04-18T00:00:00Z',
   updatedAt: '2026-04-18T00:00:00Z',
   nodes: [node],

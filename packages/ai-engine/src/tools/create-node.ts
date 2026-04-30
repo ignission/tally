@@ -1,16 +1,26 @@
 import path from 'node:path';
 
 import type { AdoptableType, AgentName, ProposalNode } from '@tally/core';
-import { newQuestionOptionId, stripAiPrefix } from '@tally/core';
+import { newQuestionOptionId } from '@tally/core';
 import type { ProjectStore } from '@tally/storage';
 import { z } from 'zod';
 
+import {
+  type DuplicateGuardContext,
+  dispatchDuplicateGuard,
+  notifyCreated,
+} from '../duplicate-guards/index';
 import type { AgentEvent } from '../stream';
 
 // create_node: ツールハンドラ。AI は proposal しか作れない (ADR-0005 前提)。
 // adoptAs は「採用されたら何になるか」を宣言。title に [AI] プレフィックスが無ければ自動付与。
 // x/y 未指定時は呼び出し元が与える anchor 座標を基準に自動オフセット配置。
-// coderef の場合は filePath を正規化し、近接する既存 coderef があれば重複としてガードする。
+//
+// 重複検知は duplicate-guards/ の strategy map に委譲 (Task 6-9 で抽出)。
+// ここでは「保存内容の整合性」だけ責任を持つ:
+//   - coderef の filePath 正規化と codebaseId 注入 (DB に書く値そのものを揃える)
+//   - question の options 正規化と min 2 検証 (採用後 decision 不能を防ぐ)
+//   - dispatcher 呼び出し → addNode → notifyCreated
 
 const ADOPTABLE_TYPES = [
   'requirement',
@@ -36,7 +46,7 @@ export interface CreateNodeDeps {
   store: ProjectStore;
   emit: (e: AgentEvent) => void;
   anchor: { x: number; y: number };
-  // anchor ノードの id。question 重複ガードで近傍を引くために使う。
+  // anchor ノードの id。question 重複ガードで近傍を引くために使う。chat 経路は空文字。
   anchorId: string;
   // AI が生成した proposal に sourceAgentId として刻むエージェント名。
   // どの agent が作ったかを後から辿れるようにするため required。
@@ -51,63 +61,26 @@ export interface ToolResult {
   output: string;
 }
 
-// filePath 近接判定の許容行数。`find-related-code` / `analyze-impact` は
-// スキャン位置がブレやすく、同一箇所を複数 proposal として追加しがちなので
-// ±10 行以内を重複とみなしてガードする。
-const CODEREF_LINE_TOLERANCE = 10;
-
-// "./src/a.ts" や "src//a.ts" を "src/a.ts" に正規化する。
-// 比較・保存を揃えるため。
-function normalizeFilePath(fp: string): string {
-  const stripped = fp.startsWith('./') ? fp.slice(2) : fp;
-  return path.posix.normalize(stripped);
-}
-
-async function findDuplicateCoderef(
-  store: ProjectStore,
-  filePath: string,
-  startLine: number,
-  codebaseId: string | undefined,
-): Promise<{ id: string; startLine: number } | null> {
-  const all = await store.listNodes();
-  for (const n of all) {
-    const rec = n as Record<string, unknown>;
-    const type = rec.type as string | undefined;
-    const adoptAs = rec.adoptAs as string | undefined;
-    // 正規 coderef と、adoptAs=coderef の proposal の両方を対象にする。
-    const isCoderef = type === 'coderef' || (type === 'proposal' && adoptAs === 'coderef');
-    if (!isCoderef) continue;
-    const fp = rec.filePath as string | undefined;
-    const sl = rec.startLine as number | undefined;
-    if (!fp || typeof sl !== 'number') continue;
-    if (normalizeFilePath(fp) !== filePath) continue;
-    // マルチコードベース対応: 同一 filePath でも codebaseId が異なれば別物として扱う。
-    // codebaseId 未指定の旧 proposal (レガシー) や横断エージェントは従来通り全件比較する。
-    const existingCb = rec.codebaseId as string | undefined;
-    if (codebaseId !== undefined && existingCb !== undefined && existingCb !== codebaseId) {
-      continue;
-    }
-    if (Math.abs(sl - startLine) <= CODEREF_LINE_TOLERANCE) {
-      return { id: rec.id as string, startLine: sl };
-    }
-  }
-  return null;
-}
-
 // adoptAs=question の options として有効な最小数。extract-questions の仕様上
 // 「必ず 2〜4 個」とプロンプト指示しているが、AI が守らなかったとき proposal
 // 採用後に decision を選べない question が出来てしまうのでサーバ側でも弾く。
 const QUESTION_MIN_OPTIONS = 2;
 
+// 保存前の filePath 正規化 (guard 内の正規化とは独立、保存内容の整合性のため必須)。
+// "./src/a.ts" や "src//a.ts" を "src/a.ts" に揃えて DB に書く。
+function normalizeFilePathForStorage(fp: string): string {
+  const stripped = fp.startsWith('./') ? fp.slice(2) : fp;
+  return path.posix.normalize(stripped);
+}
+
 export function createNodeHandler(deps: CreateNodeDeps) {
   // 複数ノードが同じ anchor で作られたときに重ならないよう、呼び出しごとにオフセットをずらす。
   // agent セッション毎に独立させるため handler closure で保持。
   let nextOffsetIndex = 0;
-  // 同一セッション内で作成済みの question を「anchorId|正規化タイトル」の Set で記録する。
-  // findRelatedNodes は edge 経由で近傍を引くため、「create_node × 2 → create_edge × 2」の
-  // 順にモデルが呼んだとき 1 件目の edge 作成前は 2 件目の findRelatedNodes が 1 件目を
-  // 拾えず重複が素通りする。セッション内 Set と併用して防ぐ。
-  const sessionQuestionKeys = new Set<string>();
+  // duplicate-guards の sessionMemo (anchorId|title など、guard 実装が定義するキー)。
+  // handler closure で持ち、同一エージェントセッション内の重複を短絡防止する。
+  const sessionMemo = new Set<string>();
+
   return async (input: unknown): Promise<ToolResult> => {
     const parsed = CreateNodeInputSchema.safeParse(input);
     if (!parsed.success) {
@@ -115,9 +88,10 @@ export function createNodeHandler(deps: CreateNodeDeps) {
     }
     const { adoptAs, title, body, x, y, additional } = parsed.data;
 
-    // coderef のとき filePath を正規化して additional に戻し、さらに近接 coderef を探して重複ガード。
-    // deps.codebaseId があれば additional に必ず注入し、adopt 時に codebaseId 必須検証が通るようにする。
     let normalizedAdditional = additional;
+
+    // coderef: filePath 正規化 + codebaseId 注入。
+    // 保存値の正規化なので guard 委譲とは別に必須 (DB に "./" 付きを書かない)。
     if (adoptAs === 'coderef') {
       const base = additional ?? {};
       const withCb: Record<string, unknown> =
@@ -126,29 +100,14 @@ export function createNodeHandler(deps: CreateNodeDeps) {
           : { ...base };
       const fp = withCb.filePath;
       if (typeof fp === 'string' && fp.length > 0) {
-        const normalized = normalizeFilePath(fp);
-        withCb.filePath = normalized;
-        const sl = withCb.startLine;
-        if (typeof sl === 'number') {
-          const activeCbId =
-            typeof withCb.codebaseId === 'string' ? (withCb.codebaseId as string) : undefined;
-          const dup = await findDuplicateCoderef(deps.store, normalized, sl, activeCbId);
-          if (dup) {
-            return {
-              ok: false,
-              output: `重複: ${dup.id} と近接 (filePath=${normalized}, startLine 差=${Math.abs(dup.startLine - sl)})`,
-            };
-          }
-        }
+        withCb.filePath = normalizeFilePathForStorage(fp);
       }
       normalizedAdditional = withCb;
     }
 
-    // adoptAs=question: options の正規化 + 有効数チェック + anchor 重複ガード。
+    // adoptAs=question: options の正規化 + 有効数チェック。
     // AI は { text } だけ渡す (仕様)。id / selected 指定があっても上書きする (信頼境界)。
     // options < 2 件の proposal は「決定不能な question」になるのでサーバ側で弾く。
-    // sessionKey は addNode 成功後に set へ追加する (失敗時の汚染回避)。
-    let sessionKey: string | null = null;
     if (adoptAs === 'question') {
       const rawOptions = additional?.options;
       const normalizedOptions = Array.isArray(rawOptions)
@@ -173,32 +132,22 @@ export function createNodeHandler(deps: CreateNodeDeps) {
         options: normalizedOptions,
         decision: null,
       };
-
-      // anchor の近傍に同タイトル question (正規 or proposal) があれば重複として弾く。
-      // 比較は [AI] 接頭辞を剥がして揃える。
-      const normalizedTitle = stripAiPrefix(title);
-      sessionKey = `${deps.anchorId}|${normalizedTitle}`;
-      if (sessionQuestionKeys.has(sessionKey)) {
-        return {
-          ok: false,
-          output: `重複 (同一セッション内): anchor ${deps.anchorId} に既に同タイトル question を生成済み`,
-        };
-      }
-      const neighbors = await deps.store.findRelatedNodes(deps.anchorId);
-      const dup = neighbors.find((n) => {
-        const rec = n as unknown as { type: string; adoptAs?: string; title: string };
-        const isQuestion =
-          rec.type === 'question' || (rec.type === 'proposal' && rec.adoptAs === 'question');
-        return isQuestion && stripAiPrefix(rec.title) === normalizedTitle;
-      });
-      if (dup) {
-        return {
-          ok: false,
-          output: `重複: anchor ${deps.anchorId} に既に同タイトル question 候補 ${(dup as { id: string }).id} が存在`,
-        };
-      }
     }
 
+    // 重複ガード: dispatcher に委譲 (coderef / question / source-url の guard が登録済み)。
+    // 重複あれば early return、無ければ addNode に進む。
+    // codebaseId は exactOptionalPropertyTypes 対応で条件付きで含める。
+    const guardCtx: DuplicateGuardContext = {
+      store: deps.store,
+      anchorId: deps.anchorId,
+      sessionMemo,
+      ...(deps.codebaseId !== undefined ? { codebaseId: deps.codebaseId } : {}),
+    };
+    const guardInput = { title, body, additional: normalizedAdditional };
+    const dup = await dispatchDuplicateGuard(adoptAs, guardInput, guardCtx);
+    if (dup) return { ok: false, output: dup.reason };
+
+    // 共通: ensureTitle / placement / addNode
     const ensuredTitle = title.startsWith('[AI]') ? title : `[AI] ${title}`;
     const idx = nextOffsetIndex++;
     const placedX = x ?? deps.anchor.x + 260 + idx * 20;
@@ -216,7 +165,10 @@ export function createNodeHandler(deps: CreateNodeDeps) {
         sourceAgentId: deps.agentName,
       } as Parameters<typeof deps.store.addNode>[0])) as ProposalNode;
       deps.emit({ type: 'node_created', node: created });
-      if (sessionKey) sessionQuestionKeys.add(sessionKey);
+
+      // 生成成功後、guard に通知 (sessionMemo の更新など)。失敗時は通知しない (Set 汚染回避)。
+      notifyCreated(adoptAs, guardInput, guardCtx);
+
       return { ok: true, output: JSON.stringify(created) };
     } catch (err) {
       return { ok: false, output: `addNode failed: ${String(err)}` };

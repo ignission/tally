@@ -84,6 +84,7 @@ export async function PATCH(req: Request, context: RouteContext): Promise<NextRe
     ...current,
     ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
     ...(parsed.data.codebases !== undefined ? { codebases: parsed.data.codebases } : {}),
+    ...(parsed.data.mcpServers !== undefined ? { mcpServers: parsed.data.mcpServers } : {}),
     updatedAt: new Date().toISOString(),
   };
 

@@ -9,6 +9,7 @@ import type {
   Codebase,
   Edge,
   EdgeType,
+  McpServerConfig,
   Node,
   NodeType,
   Project,
@@ -113,6 +114,7 @@ interface CanvasState {
     name?: string;
     description?: string | null;
     codebases?: Codebase[];
+    mcpServers?: McpServerConfig[];
   }) => Promise<void>;
 
   // Phase 6: チャットスレッド管理。
@@ -277,6 +279,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
                 toolUseId: evt.toolUseId,
                 name: evt.name,
                 input: evt.input,
+                source: 'internal',
                 approval: 'pending',
               },
             ],
@@ -333,6 +336,50 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
           // find_related / list_by_type などの非 JSON 結果は無視する。
         }
       }
+      return;
+    }
+    // Task 12/18: 外部 MCP の tool_use を source='external' で append。承認 UI は出さない。
+    if (evt.type === 'chat_tool_external_use') {
+      set({
+        chatThreadMessages: get().chatThreadMessages.map((m) => {
+          if (m.id !== evt.messageId) return m;
+          return {
+            ...m,
+            blocks: [
+              ...m.blocks,
+              {
+                type: 'tool_use',
+                toolUseId: evt.toolUseId,
+                name: evt.name,
+                input: evt.input,
+                source: 'external',
+              },
+            ],
+          };
+        }),
+      });
+      return;
+    }
+    // Task 12/18: 外部 MCP の tool_result を append。
+    // event はフル output (Task 13 の truncate は永続化のみ)。UI セッション内では全文閲覧可。
+    if (evt.type === 'chat_tool_external_result') {
+      set({
+        chatThreadMessages: get().chatThreadMessages.map((m) => {
+          if (m.id !== evt.messageId) return m;
+          return {
+            ...m,
+            blocks: [
+              ...m.blocks,
+              {
+                type: 'tool_result',
+                toolUseId: evt.toolUseId,
+                ok: evt.ok,
+                output: evt.output,
+              },
+            ],
+          };
+        }),
+      });
       return;
     }
     if (evt.type === 'chat_assistant_message_completed') {

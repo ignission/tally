@@ -9,6 +9,8 @@ import {
 import type { ChatStore, ProjectStore } from '@tally/storage';
 
 import type { SdkLike } from './agent-runner';
+import { buildMcpServers } from './mcp/build-mcp-servers';
+import { redactMcpSecrets } from './mcp/redact';
 import type { ChatEvent, SdkMessageLike } from './stream';
 import { CreateEdgeInputSchema, createEdgeHandler } from './tools/create-edge';
 import { CreateNodeInputSchema, createNodeHandler } from './tools/create-node';
@@ -25,9 +27,25 @@ export interface ChatRunnerDeps {
   threadId: string;
 }
 
-// SDK の assistant message から抽出する block の単純化形。
-// MCP 経路に一本化したため tool_use は拾わないが、将来のデバッグ用に型定義は保持。
-type ExtractedBlock = { type: 'text'; text: string };
+// 外部 MCP の tool_result output を YAML に永続化するときの上限 (Task 13)。
+// 大規模 epic 取り込み等で 1 ターンに 500KB+ 来うるので、永続化は 4KB に切る。
+// メモリ内 (event) は full を流すので、UI セッション内では全文展開可能。
+// リロード後は truncated 版だけ見える (dogfooding には十分)。
+const TOOL_RESULT_PERSIST_LIMIT = 4096;
+
+function truncateForPersistence(output: string): string {
+  if (output.length <= TOOL_RESULT_PERSIST_LIMIT) return output;
+  const head = output.slice(0, TOOL_RESULT_PERSIST_LIMIT);
+  return `${head}\n... (truncated, ${output.length} chars total)`;
+}
+
+// SDK の assistant / user message から抽出する block の単純化形。
+// Tally MCP の tool_use は MCP intercept 経路で処理されるので拾わない。
+// 外部 MCP (mcp__tally__ 以外) の tool_use / tool_result は永続化と UI 通知のためここで拾う (Task 12)。
+type ExtractedBlock =
+  | { type: 'text'; text: string }
+  | { type: 'tool_use'; toolUseId: string; name: string; input: unknown }
+  | { type: 'tool_result'; toolUseId: string; ok: boolean; output: string };
 
 // MCP ツール名と、そのハンドラ (承認必要かどうか) を束ねるエントリ。
 // 承認必須のツールは create_* 系 (書き込み)、承認不要は find_related / list_by_type (読み取り)。
@@ -114,16 +132,11 @@ export class ChatRunner {
     const prompt = buildChatPrompt(threadWithUser?.messages ?? [], contextNodes);
     const systemPrompt = buildChatSystemPrompt();
 
-    // 3. 空の assistant message を append (後続の tool_use 即時永続化の親として必要)
-    //    prompt スナップショット後に行うことで、上記 buildChatPrompt の前提が崩れないようにする。
+    // 3. assistantMsgId を先に生成 (buildMcpServer の handler が emit 先として参照)。
+    //    永続化は MCP 構築成功後に行う (途中で throw した場合に空 assistant message が
+    //    YAML に残らないようにする。ロード時は <message blocks=[]> がスキップされるが、
+    //    chat 履歴 UI には空バブルが蓄積するのを防ぐため)。
     const assistantMsgId = newChatMessageId();
-    await chatStore.appendMessage(threadId, {
-      id: assistantMsgId,
-      role: 'assistant',
-      blocks: [],
-      createdAt: new Date().toISOString(),
-    });
-    yield { type: 'chat_assistant_message_started', messageId: assistantMsgId };
 
     // 4. MCP 経由で呼ばれる tool ハンドラ内で invokeInterceptedTool を回す。
     //    MCP handler は SDK query を block するので、イベント emit は AsyncQueue 経由に分離する。
@@ -133,7 +146,43 @@ export class ChatRunner {
     const emit = (e: ChatEvent) => queue.push(e);
     const mcp = this.buildMcpServer(tools, emit, assistantMsgId);
 
+    // 4b. プロジェクト設定の mcpServers[] を Tally MCP と合成する (Task 11)。
+    //     毎ターン読むことで env / 設定変更がホットリロードされる。
+    //     env 未設定 (PAT 等) は buildMcpServers が throw するので、ここで補足し
+    //     error event を emit して early return する (sdk.query は呼ばない)。
+    const projectMeta = await projectStore.getProjectMeta();
+    const externalConfigs = projectMeta?.mcpServers ?? [];
+    let mcpServers: Record<string, unknown>;
+    let allowedTools: string[];
+    try {
+      const built = buildMcpServers({ tallyMcp: mcp, configs: externalConfigs });
+      mcpServers = built.mcpServers;
+      allowedTools = built.allowedTools;
+    } catch (err) {
+      yield {
+        type: 'error',
+        code: 'mcp_config_invalid',
+        message: err instanceof Error ? err.message : String(err),
+      };
+      return;
+    }
+
+    // 5. MCP 構築が成功した時点で空 assistant message を永続化 (後続の tool_use 即時
+    //    永続化の親として必要)。buildChatPrompt スナップショット後・sdk.query 前に行う。
+    await chatStore.appendMessage(threadId, {
+      id: assistantMsgId,
+      role: 'assistant',
+      blocks: [],
+      createdAt: new Date().toISOString(),
+    });
+    yield { type: 'chat_assistant_message_started', messageId: assistantMsgId };
+
     const textBuffer: string[] = [];
+    // 外部 MCP の tool_use を観測した toolUseId のみ集合に保持し、対応する tool_result
+    // のみ external として永続化する。Tally 内部 MCP (mcp__tally__*) は本来 intercept
+    // 経路で SDK ストリームに現れない前提だが、SDK 仕様変更や edge case で内部 result
+    // が流れた場合に external 誤分類するのを防ぐためのガード (CR 指摘 #19 2 周目)。
+    const externalToolUseIds = new Set<string>();
 
     // 5. SDK query をバックグラウンドで走らせ、queue にイベントを push する。
     //    generator 側は queue をドレインして yield するだけ。
@@ -143,14 +192,9 @@ export class ChatRunner {
           prompt,
           options: {
             systemPrompt,
-            mcpServers: { tally: mcp as unknown as Record<string, unknown> },
+            mcpServers,
             tools: [],
-            allowedTools: [
-              'mcp__tally__create_node',
-              'mcp__tally__create_edge',
-              'mcp__tally__find_related',
-              'mcp__tally__list_by_type',
-            ],
+            allowedTools,
             permissionMode: 'dontAsk',
             settingSources: [],
             cwd: projectDir,
@@ -161,12 +205,51 @@ export class ChatRunner {
         });
 
         for await (const msg of iter) {
-          console.log('[chat-runner] sdk msg:', JSON.stringify(msg).slice(0, 200));
+          console.log(
+            '[chat-runner] sdk msg:',
+            JSON.stringify(redactMcpSecrets(msg)).slice(0, 200),
+          );
           const blocks = extractAssistantBlocks(msg);
           for (const b of blocks) {
             if (b.type === 'text') {
               textBuffer.push(b.text);
               queue.push({ type: 'chat_text_delta', messageId: assistantMsgId, text: b.text });
+            } else if (b.type === 'tool_use') {
+              // 外部 MCP の tool_use: source='external' で永続化、承認 UI なし (Task 12)。
+              externalToolUseIds.add(b.toolUseId);
+              await chatStore.appendBlockToMessage(threadId, assistantMsgId, {
+                type: 'tool_use',
+                toolUseId: b.toolUseId,
+                name: b.name,
+                input: b.input,
+                source: 'external',
+              });
+              queue.push({
+                type: 'chat_tool_external_use',
+                messageId: assistantMsgId,
+                toolUseId: b.toolUseId,
+                name: b.name,
+                input: b.input,
+              });
+            } else if (b.type === 'tool_result') {
+              // 同 turn 中に観測した外部 tool_use の id のみ external として扱う。
+              // 集合に無い toolUseId (= 内部 / intercept 経路 / 想定外) は無視する。
+              if (!externalToolUseIds.has(b.toolUseId)) continue;
+              // Task 13: 大規模 epic で tool_result が 500KB+ になり得るので、
+              // YAML 永続化は 4KB に切り詰める。event はフル (UI はメモリ内で全文展開可)。
+              await chatStore.appendBlockToMessage(threadId, assistantMsgId, {
+                type: 'tool_result',
+                toolUseId: b.toolUseId,
+                ok: b.ok,
+                output: truncateForPersistence(b.output),
+              });
+              queue.push({
+                type: 'chat_tool_external_result',
+                messageId: assistantMsgId,
+                toolUseId: b.toolUseId,
+                ok: b.ok,
+                output: b.output,
+              });
             }
           }
         }
@@ -234,6 +317,7 @@ export class ChatRunner {
           toolUseId: uiId,
           name: entry.name,
           input,
+          source: 'internal',
           approval: 'approved',
         });
         await chatStore.appendBlockToMessage(threadId, assistantMsgId, {
@@ -262,6 +346,7 @@ export class ChatRunner {
         toolUseId: uiToolUseId,
         name: entry.name,
         input,
+        source: 'internal',
         approval: 'pending',
       });
       emit({
@@ -541,13 +626,40 @@ export function formatNodeForContext(node: Node): string {
   return lines.join('\n');
 }
 
+// XML element 内テキスト用のエスケープ。`<` `>` `&` の最低限のみ。
+// tool_result.output (外部 MCP の生出力) や tool_use.input の JSON 文字列を
+// XML 要素本体に埋め込む際に使う。
+//
+// 注: JSON.stringify は `<` `>` `&` をエスケープしない (escape するのは `"` `\`
+// と control chars のみ)。input オブジェクトに `</tool_use>` 等が含まれる
+// ケースに備え、JSON 文字列にも本関数を適用する必要がある。
+function escapeXmlText(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// XML 属性値用のエスケープ。`"` も含めてエスケープする (属性は二重引用符で囲むため)。
+// toolUseId / name / role などの動的値を attr に埋め込むときに使う。
+function escapeXmlAttr(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 // チャット履歴を単一 prompt にエンコードする。
-// tool_use / tool_result は冗長なので省き、text block だけを role 付きで並べる。
-// 最後の user message は current として別タグに出し、モデルの「今答えるべきもの」を明示する。
+// 各 block を順に replay する:
+// - text: そのまま (assistant / user の自然言語)
+// - tool_use: <tool_use id="..." name="..." source="..."> ... </tool_use>
+// - tool_result: <tool_result id="..." ok="..."> ... </tool_result>
+//
+// T4 fix (Task 14): 旧版は text block だけ replay していたが、これだと AI が
+// 2 ターン目以降で前ターンの外部 MCP tool_result (= Jira 等の読み取り内容) を忘れてしまい、
+// multi-turn 対話が成立しなかった。tool_use / tool_result も replay することで
+// 「@JIRA EPIC-1 を読んで → 続けて子チケット STORY-2 も見て」が動く。
 //
 // contextNodes: 今ターンで参照するコンテキストノード (issue #11)。
 // 履歴より下、current_user_message より上に <context_nodes> として埋め込む。
-// 履歴に積まないのは「ターンごとに添付し直しできる軽量な参照」という UX 設計のため。
 export function buildChatPrompt(messages: ChatMessage[], contextNodes: Node[] = []): string {
   const lines: string[] = [];
   const last = messages[messages.length - 1];
@@ -556,14 +668,30 @@ export function buildChatPrompt(messages: ChatMessage[], contextNodes: Node[] = 
   if (past.length > 0) {
     lines.push('<conversation_history>');
     for (const m of past) {
-      const texts = m.blocks
-        .filter((b): b is Extract<ChatBlock, { type: 'text' }> => b.type === 'text')
-        .map((b) => b.text);
-      if (texts.length > 0) {
-        lines.push(`<message role="${m.role}">`);
-        lines.push(texts.join('\n'));
-        lines.push('</message>');
+      // block が 1 つも無い空 message は省く (空 assistant の preliminary append 等)
+      if (m.blocks.length === 0) continue;
+      lines.push(`<message role="${escapeXmlAttr(m.role)}">`);
+      for (const b of m.blocks) {
+        if (b.type === 'text') {
+          // text 本文も `<` `>` `&` を escape する。assistant / user 自由入力なので
+          // `</message>` 等の文字列が混入しうる (CR 指摘 #19 2 周目)。
+          lines.push(escapeXmlText(b.text));
+        } else if (b.type === 'tool_use') {
+          // source は default 'internal'。external も含めて全部 replay する
+          // (AI に「外部 source を読んだ」事実を context として伝えるため)
+          const sourceAttr = b.source === 'external' ? ' source="external"' : '';
+          // input は JSON.stringify 後に XML エスケープ。`<` `>` `&` は JSON 文字列内では
+          // 生のまま残るので、XML タグへの埋め込みでは構造を壊しうる (codex 指摘の前提誤り)。
+          lines.push(
+            `<tool_use id="${escapeXmlAttr(b.toolUseId)}" name="${escapeXmlAttr(b.name)}"${sourceAttr}>${escapeXmlText(JSON.stringify(b.input))}</tool_use>`,
+          );
+        } else if (b.type === 'tool_result') {
+          lines.push(
+            `<tool_result id="${escapeXmlAttr(b.toolUseId)}" ok="${b.ok}">${escapeXmlText(b.output)}</tool_result>`,
+          );
+        }
       }
+      lines.push('</message>');
     }
     lines.push('</conversation_history>');
   }
@@ -581,7 +709,7 @@ export function buildChatPrompt(messages: ChatMessage[], contextNodes: Node[] = 
   if (last && last.role === 'user') {
     const texts = last.blocks
       .filter((b): b is Extract<ChatBlock, { type: 'text' }> => b.type === 'text')
-      .map((b) => b.text);
+      .map((b) => escapeXmlText(b.text));
     lines.push('<current_user_message>');
     lines.push(texts.join('\n'));
     lines.push('</current_user_message>');
@@ -590,20 +718,62 @@ export function buildChatPrompt(messages: ChatMessage[], contextNodes: Node[] = 
   return lines.join('\n');
 }
 
-// SDK から流れてくる assistant message の content 配列から text を取り出す。
-// tool_use は MCP 経路が処理するのでここでは無視する (重複処理を避ける)。
+// SDK から流れてくる assistant message + user message (tool_result を含む) から block 抽出。
+// 拾うもの:
+// - assistant.text (existing 動作維持)
+// - tool_use で name が mcp__tally__ で始まらないもの (= 外部 MCP、Task 12)
+// - tool_result 全部 (外部 MCP の応答、user message に含まれる)
+//
+// Tally MCP (mcp__tally__*) の tool_use は createSdkMcpServer の intercept 経路で
+// invokeInterceptedTool が処理するので、ここで拾うと二重処理になる。よって除外。
 // 実行時 duck typing (agent-runner.ts の sdkMessageToAgentEvent と同じパターン)。
 function extractAssistantBlocks(msg: SdkMessageLike): ExtractedBlock[] {
   const m = msg as unknown as { type?: string; message?: { content?: unknown[] } };
-  if (m.type !== 'assistant' || !m.message?.content) return [];
+  if ((m.type !== 'assistant' && m.type !== 'user') || !m.message?.content) return [];
   const out: ExtractedBlock[] = [];
   for (const block of m.message.content) {
     const b = block as {
       type?: string;
       text?: string;
+      id?: string;
+      name?: string;
+      input?: unknown;
+      tool_use_id?: string;
+      content?: unknown;
+      is_error?: boolean;
     };
-    if (b.type === 'text' && typeof b.text === 'string') {
+    if (b.type === 'text' && typeof b.text === 'string' && m.type === 'assistant') {
       out.push({ type: 'text', text: b.text });
+    } else if (
+      b.type === 'tool_use' &&
+      typeof b.id === 'string' &&
+      typeof b.name === 'string' &&
+      !b.name.startsWith('mcp__tally__')
+    ) {
+      out.push({
+        type: 'tool_use',
+        toolUseId: b.id,
+        name: b.name,
+        input: b.input,
+      });
+    } else if (b.type === 'tool_result' && typeof b.tool_use_id === 'string') {
+      // content は string or [{type:'text', text:'...'}] で来る (SDK 仕様)。string 化する。
+      let outputText = '';
+      if (typeof b.content === 'string') {
+        outputText = b.content;
+      } else if (Array.isArray(b.content)) {
+        outputText = b.content
+          .map((c: { type?: string; text?: string }) =>
+            c.type === 'text' && typeof c.text === 'string' ? c.text : '',
+          )
+          .join('');
+      }
+      out.push({
+        type: 'tool_result',
+        toolUseId: b.tool_use_id,
+        ok: b.is_error !== true,
+        output: outputText,
+      });
     }
   }
   return out;

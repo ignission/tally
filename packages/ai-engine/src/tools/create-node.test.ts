@@ -695,3 +695,159 @@ describe('adoptAs=question の anchor+同タイトル重複ガード', () => {
     expect(r2.ok).toBe(true);
   });
 });
+
+describe('createNodeHandler — sourceUrl 重複ガード (Task 9 連動)', () => {
+  // duplicate-guards/source-url.ts と組み合わさった統合テスト。
+  // Task 10 の主目的: dispatcher 経由で sourceUrl guard が発火することを担保する。
+
+  it('同 sourceUrl の requirement が既にあれば 2 度目の作成は fail (chat anchor 無し経路)', async () => {
+    const existing = [
+      {
+        id: 'req-old',
+        type: 'requirement',
+        x: 0,
+        y: 0,
+        title: 'Jira Issue',
+        body: '',
+        sourceUrl: 'https://example.atlassian.net/browse/PROJ-1',
+      },
+    ];
+    const store = {
+      listNodes: vi.fn().mockResolvedValue(existing),
+      findRelatedNodes: vi.fn().mockResolvedValue([]),
+      addNode: vi.fn(),
+    } as unknown as ProjectStore;
+    const handler = createNodeHandler({
+      store,
+      emit: () => {},
+      anchor: { x: 0, y: 0 },
+      // chat 経路: anchorId は空文字
+      anchorId: '',
+      agentName: 'extract-questions',
+    });
+    const res = await handler({
+      adoptAs: 'requirement',
+      title: 'Jira Issue',
+      body: '',
+      additional: { sourceUrl: 'https://example.atlassian.net/browse/PROJ-1' },
+    });
+    expect(res.ok).toBe(false);
+    expect(res.output).toContain('sourceUrl');
+    expect(store.addNode).not.toHaveBeenCalled();
+  });
+
+  it('chat 経路 (anchorId="") でも sourceUrl で重複検知が動く (proposal 既存)', async () => {
+    const existing = [
+      {
+        id: 'prop-req-0',
+        type: 'proposal',
+        adoptAs: 'requirement',
+        x: 0,
+        y: 0,
+        title: '[AI] Jira Issue',
+        body: '',
+        sourceUrl: 'https://example.atlassian.net/browse/PROJ-2',
+      },
+    ];
+    const store = {
+      listNodes: vi.fn().mockResolvedValue(existing),
+      findRelatedNodes: vi.fn().mockResolvedValue([]),
+      addNode: vi.fn(),
+    } as unknown as ProjectStore;
+    const handler = createNodeHandler({
+      store,
+      emit: () => {},
+      anchor: { x: 0, y: 0 },
+      anchorId: '',
+      agentName: 'extract-questions',
+    });
+    const res = await handler({
+      adoptAs: 'requirement',
+      title: 'Jira Issue 再取込',
+      body: '',
+      additional: { sourceUrl: 'https://example.atlassian.net/browse/PROJ-2' },
+    });
+    expect(res.ok).toBe(false);
+    expect(res.output).toContain('sourceUrl');
+    expect(store.addNode).not.toHaveBeenCalled();
+  });
+
+  it('別 sourceUrl なら重複扱いしない (新規 requirement として通る)', async () => {
+    const existing = [
+      {
+        id: 'req-old',
+        type: 'requirement',
+        x: 0,
+        y: 0,
+        title: 'Jira PROJ-1',
+        body: '',
+        sourceUrl: 'https://example.atlassian.net/browse/PROJ-1',
+      },
+    ];
+    const added: Array<Record<string, unknown>> = [];
+    const store = {
+      listNodes: vi.fn().mockResolvedValue(existing),
+      findRelatedNodes: vi.fn().mockResolvedValue([]),
+      addNode: vi.fn().mockImplementation(async (n: Record<string, unknown>) => {
+        const created = { ...n, id: `n-${added.length + 1}` };
+        added.push(created);
+        return created;
+      }),
+    } as unknown as ProjectStore;
+    const handler = createNodeHandler({
+      store,
+      emit: () => {},
+      anchor: { x: 0, y: 0 },
+      anchorId: '',
+      agentName: 'extract-questions',
+    });
+    const res = await handler({
+      adoptAs: 'requirement',
+      title: 'Jira PROJ-2',
+      body: '',
+      additional: { sourceUrl: 'https://example.atlassian.net/browse/PROJ-2' },
+    });
+    expect(res.ok).toBe(true);
+    expect(added).toHaveLength(1);
+    expect(added[0]?.sourceUrl).toBe('https://example.atlassian.net/browse/PROJ-2');
+  });
+
+  it('sourceUrl 無し (legacy / 非外部 ingest) は guard skip → 通常通り作成', async () => {
+    const existing = [
+      {
+        id: 'req-old',
+        type: 'requirement',
+        x: 0,
+        y: 0,
+        title: '内部要求',
+        body: '',
+        // sourceUrl 無し
+      },
+    ];
+    const added: Array<Record<string, unknown>> = [];
+    const store = {
+      listNodes: vi.fn().mockResolvedValue(existing),
+      findRelatedNodes: vi.fn().mockResolvedValue([]),
+      addNode: vi.fn().mockImplementation(async (n: Record<string, unknown>) => {
+        const created = { ...n, id: `n-${added.length + 1}` };
+        added.push(created);
+        return created;
+      }),
+    } as unknown as ProjectStore;
+    const handler = createNodeHandler({
+      store,
+      emit: () => {},
+      anchor: { x: 0, y: 0 },
+      anchorId: '',
+      agentName: 'extract-questions',
+    });
+    const res = await handler({
+      adoptAs: 'requirement',
+      title: '別の内部要求',
+      body: '',
+      // sourceUrl 無し → guard skip
+    });
+    expect(res.ok).toBe(true);
+    expect(added).toHaveLength(1);
+  });
+});

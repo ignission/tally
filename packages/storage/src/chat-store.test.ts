@@ -64,6 +64,7 @@ describe('FileSystemChatStore', () => {
             toolUseId: 'tool-1',
             name: 'mcp__tally__create_node',
             input: { x: 1 },
+            source: 'internal',
             approval: 'pending',
           },
         ],
@@ -74,6 +75,7 @@ describe('FileSystemChatStore', () => {
         toolUseId: 'tool-1',
         name: 'mcp__tally__create_node',
         input: { x: 1 },
+        source: 'internal',
         approval: 'approved',
       });
       const reloaded = await store.getChat(thread.id);
@@ -155,15 +157,18 @@ describe('FileSystemChatStore', () => {
         toolUseId: 'tool-aaa',
         name: 'mcp__tally__create_node',
         input: { adoptAs: 'requirement', title: 'X', body: '' },
+        source: 'internal',
         approval: 'pending',
       });
       const reloaded = await store.getChat(thread.id);
       expect(reloaded?.messages[0]?.blocks).toHaveLength(2);
+      // source は schema の default で 'internal' が入る (Phase 6+ Atlassian MCP 連携の準備)
       expect(reloaded?.messages[0]?.blocks[1]).toEqual({
         type: 'tool_use',
         toolUseId: 'tool-aaa',
         name: 'mcp__tally__create_node',
         input: { adoptAs: 'requirement', title: 'X', body: '' },
+        source: 'internal',
         approval: 'pending',
       });
     } finally {
@@ -229,6 +234,7 @@ describe('FileSystemChatStore', () => {
             toolUseId: 'tool-a',
             name: 'mcp__tally__create_node',
             input: { adoptAs: 'requirement', title: 'A', body: '' },
+            source: 'internal',
             approval: 'pending',
           },
           {
@@ -236,6 +242,7 @@ describe('FileSystemChatStore', () => {
             toolUseId: 'tool-b',
             name: 'mcp__tally__create_node',
             input: { adoptAs: 'requirement', title: 'B', body: '' },
+            source: 'internal',
             approval: 'pending',
           },
         ],

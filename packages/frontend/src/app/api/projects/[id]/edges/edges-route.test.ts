@@ -24,6 +24,7 @@ describe('POST /api/projects/[id]/edges', () => {
       id: 'proj-test',
       name: 'Test',
       codebases: [],
+      mcpServers: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
@@ -98,6 +99,7 @@ describe('PATCH /api/projects/[id]/edges/[edgeId]', () => {
       id: 'proj-test',
       name: 'Test',
       codebases: [],
+      mcpServers: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });

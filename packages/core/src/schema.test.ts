@@ -8,8 +8,10 @@ import {
   CodebaseSchema,
   CodeRefNodeSchema,
   EdgeSchema,
+  McpServerConfigSchema,
   NodeSchema,
   ProjectMetaSchema,
+  ProjectSchema,
   ProposalNodeSchema,
   QuestionNodeSchema,
   RequirementNodeSchema,
@@ -315,5 +317,505 @@ describe('ChatThreadSchema / ChatThreadMetaSchema', () => {
         updatedAt: '2026-04-20T00:00:00Z',
       }).success,
     ).toBe(true);
+  });
+});
+
+describe('McpServerConfigSchema', () => {
+  it('Cloud (basic) auth の round-trip が通る', () => {
+    const raw = {
+      id: 'atlassian-cloud',
+      name: 'Atlassian Cloud',
+      kind: 'atlassian' as const,
+      url: 'https://mcp.atlassian.example/v1/mcp',
+      auth: {
+        type: 'pat' as const,
+        scheme: 'basic' as const,
+        emailEnvVar: 'ATLASSIAN_EMAIL',
+        tokenEnvVar: 'ATLASSIAN_API_TOKEN',
+      },
+      options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
+    };
+    const parsed = McpServerConfigSchema.parse(raw);
+    expect(parsed).toEqual(raw);
+  });
+
+  it('Server/DC (bearer) auth の round-trip が通る', () => {
+    const raw = {
+      id: 'atlassian-onprem',
+      name: 'Atlassian On-Prem',
+      kind: 'atlassian' as const,
+      url: 'https://jira.example.com/mcp',
+      auth: {
+        type: 'pat' as const,
+        scheme: 'bearer' as const,
+        tokenEnvVar: 'JIRA_PAT',
+      },
+      options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
+    };
+    const parsed = McpServerConfigSchema.parse(raw);
+    expect(parsed).toEqual(raw);
+  });
+
+  it('basic で emailEnvVar 無しは fail', () => {
+    expect(() =>
+      McpServerConfigSchema.parse({
+        id: 'a',
+        name: 'A',
+        kind: 'atlassian',
+        url: 'https://x.test/mcp',
+        auth: { type: 'pat', scheme: 'basic', tokenEnvVar: 'T' },
+      }),
+    ).toThrow();
+  });
+
+  it('options 未指定なら default が入る', () => {
+    const parsed = McpServerConfigSchema.parse({
+      id: 'a',
+      name: 'A',
+      kind: 'atlassian',
+      url: 'https://x.test/mcp',
+      auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'X_PAT' },
+    });
+    expect(parsed.options.maxChildIssues).toBe(30);
+    expect(parsed.options.maxCommentsPerIssue).toBe(5);
+  });
+
+  it('url が URL でないと fail', () => {
+    expect(() =>
+      McpServerConfigSchema.parse({
+        id: 'a',
+        name: 'A',
+        kind: 'atlassian',
+        url: 'not a url',
+        auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'X' },
+      }),
+    ).toThrow();
+  });
+});
+
+describe('McpServerConfigSchema hardening', () => {
+  // hardening test の共通 valid base。テスト対象のフィールドだけを上書きする。
+  const validBase = {
+    id: 'atlassian',
+    name: 'Atlassian',
+    kind: 'atlassian' as const,
+    url: 'https://mcp.atlassian.example/v1/mcp',
+    auth: {
+      type: 'pat' as const,
+      scheme: 'bearer' as const,
+      tokenEnvVar: 'JIRA_PAT',
+    },
+  };
+
+  describe('url: https 強制 + loopback 例外', () => {
+    it('https スキームは pass', () => {
+      expect(() =>
+        McpServerConfigSchema.parse({ ...validBase, url: 'https://x.test/mcp' }),
+      ).not.toThrow();
+    });
+
+    it('http://localhost は pass (sooperset セルフホスト想定)', () => {
+      expect(() =>
+        McpServerConfigSchema.parse({ ...validBase, url: 'http://localhost:9000/mcp' }),
+      ).not.toThrow();
+    });
+
+    it('http://127.0.0.1 は pass', () => {
+      expect(() =>
+        McpServerConfigSchema.parse({ ...validBase, url: 'http://127.0.0.1:9000/mcp' }),
+      ).not.toThrow();
+    });
+
+    it('http://example.com は fail (cleartext で credential が漏れる)', () => {
+      expect(() =>
+        McpServerConfigSchema.parse({ ...validBase, url: 'http://example.com/mcp' }),
+      ).toThrow();
+    });
+
+    it('ftp:// は fail', () => {
+      expect(() =>
+        McpServerConfigSchema.parse({ ...validBase, url: 'ftp://x.test/mcp' }),
+      ).toThrow();
+    });
+  });
+
+  describe('id: charset 制約 (CodebaseSchema.id と同じ regex)', () => {
+    it("'atlassian' は pass", () => {
+      expect(() => McpServerConfigSchema.parse({ ...validBase, id: 'atlassian' })).not.toThrow();
+    });
+
+    it("'atlassian-cloud' は pass", () => {
+      expect(() =>
+        McpServerConfigSchema.parse({ ...validBase, id: 'atlassian-cloud' }),
+      ).not.toThrow();
+    });
+
+    it("'a' は pass (1 文字)", () => {
+      expect(() => McpServerConfigSchema.parse({ ...validBase, id: 'a' })).not.toThrow();
+    });
+
+    it("'Atlassian' は fail (大文字)", () => {
+      expect(() => McpServerConfigSchema.parse({ ...validBase, id: 'Atlassian' })).toThrow();
+    });
+
+    it("'1abc' は fail (数字始まり)", () => {
+      expect(() => McpServerConfigSchema.parse({ ...validBase, id: '1abc' })).toThrow();
+    });
+
+    it("'a_b' は fail (アンダースコア含む)", () => {
+      expect(() => McpServerConfigSchema.parse({ ...validBase, id: 'a_b' })).toThrow();
+    });
+
+    it("'a.b' は fail (ドット含む)", () => {
+      expect(() => McpServerConfigSchema.parse({ ...validBase, id: 'a.b' })).toThrow();
+    });
+
+    it('33 文字は fail (上限超過)', () => {
+      expect(() => McpServerConfigSchema.parse({ ...validBase, id: 'a'.repeat(33) })).toThrow();
+    });
+  });
+
+  describe('emailEnvVar / tokenEnvVar: env var 名 regex', () => {
+    const baseBasic = {
+      ...validBase,
+      auth: {
+        type: 'pat' as const,
+        scheme: 'basic' as const,
+        emailEnvVar: 'ATLASSIAN_EMAIL',
+        tokenEnvVar: 'ATLASSIAN_API_TOKEN',
+      },
+    };
+
+    it("'ATLASSIAN_PAT' は pass", () => {
+      expect(() =>
+        McpServerConfigSchema.parse({
+          ...validBase,
+          auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'ATLASSIAN_PAT' },
+        }),
+      ).not.toThrow();
+    });
+
+    it("'JIRA_PAT_1' は pass (数字含む OK)", () => {
+      expect(() =>
+        McpServerConfigSchema.parse({
+          ...validBase,
+          auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'JIRA_PAT_1' },
+        }),
+      ).not.toThrow();
+    });
+
+    it("'A' は pass (1 文字大文字)", () => {
+      expect(() =>
+        McpServerConfigSchema.parse({
+          ...validBase,
+          auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'A' },
+        }),
+      ).not.toThrow();
+    });
+
+    it("'lowercase' は fail", () => {
+      expect(() =>
+        McpServerConfigSchema.parse({
+          ...validBase,
+          auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'lowercase' },
+        }),
+      ).toThrow();
+    });
+
+    it("'foo@bar.com' は fail (実値混入を防ぐ)", () => {
+      expect(() =>
+        McpServerConfigSchema.parse({
+          ...baseBasic,
+          auth: {
+            type: 'pat',
+            scheme: 'basic',
+            emailEnvVar: 'foo@bar.com',
+            tokenEnvVar: 'ATLASSIAN_API_TOKEN',
+          },
+        }),
+      ).toThrow();
+    });
+
+    it("'1ABC' は fail (数字始まり)", () => {
+      expect(() =>
+        McpServerConfigSchema.parse({
+          ...validBase,
+          auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: '1ABC' },
+        }),
+      ).toThrow();
+    });
+
+    it("'' (空文字) は fail", () => {
+      expect(() =>
+        McpServerConfigSchema.parse({
+          ...validBase,
+          auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: '' },
+        }),
+      ).toThrow();
+    });
+
+    it('basic auth の emailEnvVar も同じ regex を要求', () => {
+      expect(() =>
+        McpServerConfigSchema.parse({
+          ...baseBasic,
+          auth: {
+            type: 'pat',
+            scheme: 'basic',
+            emailEnvVar: 'lowercase',
+            tokenEnvVar: 'ATLASSIAN_API_TOKEN',
+          },
+        }),
+      ).toThrow();
+    });
+  });
+});
+
+describe('ProjectSchema.mcpServers', () => {
+  it('mcpServers 未指定なら default の空配列', () => {
+    const p = ProjectSchema.parse({
+      id: 'p',
+      name: 'P',
+      codebases: [],
+      createdAt: '2026-04-24T00:00:00Z',
+      updatedAt: '2026-04-24T00:00:00Z',
+      nodes: [],
+      edges: [],
+    });
+    expect(p.mcpServers).toEqual([]);
+  });
+
+  it('mcpServers 指定で round-trip する', () => {
+    const input = {
+      id: 'p',
+      name: 'P',
+      codebases: [],
+      createdAt: '2026-04-24T00:00:00Z',
+      updatedAt: '2026-04-24T00:00:00Z',
+      nodes: [],
+      edges: [],
+      mcpServers: [
+        {
+          id: 'atlassian',
+          name: 'A',
+          kind: 'atlassian' as const,
+          url: 'https://x.test/mcp',
+          auth: { type: 'pat' as const, scheme: 'bearer' as const, tokenEnvVar: 'JIRA_PAT' },
+        },
+      ],
+    };
+    const p = ProjectSchema.parse(input);
+    expect(p.mcpServers).toHaveLength(1);
+    expect(p.mcpServers[0]?.options.maxChildIssues).toBe(30);
+    expect(p.mcpServers[0]?.id).toBe('atlassian');
+  });
+});
+
+describe('ProjectMetaSchema.mcpServers', () => {
+  it('ProjectMetaSchema にも mcpServers が乗る (project.yaml の meta との整合)', () => {
+    const meta = ProjectMetaSchema.parse({
+      id: 'p',
+      name: 'P',
+      codebases: [],
+      createdAt: '2026-04-24T00:00:00Z',
+      updatedAt: '2026-04-24T00:00:00Z',
+      mcpServers: [
+        {
+          id: 'atlassian',
+          name: 'A',
+          kind: 'atlassian' as const,
+          url: 'https://x.test/mcp',
+          auth: { type: 'pat' as const, scheme: 'bearer' as const, tokenEnvVar: 'JIRA_PAT' },
+        },
+      ],
+    });
+    expect(meta.mcpServers).toHaveLength(1);
+  });
+
+  it('既存 YAML (mcpServers 無し) は default [] で読める (後方互換)', () => {
+    const meta = ProjectMetaSchema.parse({
+      id: 'p',
+      name: 'P',
+      codebases: [],
+      createdAt: '2026-04-24T00:00:00Z',
+      updatedAt: '2026-04-24T00:00:00Z',
+    });
+    expect(meta.mcpServers).toEqual([]);
+  });
+});
+
+describe('ChatBlockSchema.tool_use.source', () => {
+  it('source 未指定の古いデータが "internal" に defaults', () => {
+    const b = ChatBlockSchema.parse({
+      type: 'tool_use',
+      toolUseId: 'tu-1',
+      name: 'mcp__tally__create_node',
+      input: { x: 1 },
+      approval: 'approved',
+    });
+    expect(b.type).toBe('tool_use');
+    if (b.type === 'tool_use') expect(b.source).toBe('internal');
+  });
+
+  it('source = "external" は承認不要 (approval optional)', () => {
+    const b = ChatBlockSchema.parse({
+      type: 'tool_use',
+      toolUseId: 'tu-2',
+      name: 'mcp__atlassian__jira_get_issue',
+      input: { issueKey: 'EPIC-1' },
+      source: 'external',
+    });
+    if (b.type === 'tool_use') {
+      expect(b.source).toBe('external');
+      expect(b.approval).toBeUndefined();
+    }
+  });
+
+  it('source = "external" + approval 指定もできる (任意で記録可)', () => {
+    const b = ChatBlockSchema.parse({
+      type: 'tool_use',
+      toolUseId: 'tu-3',
+      name: 'mcp__atlassian__jira_search',
+      input: {},
+      source: 'external',
+      approval: 'approved',
+    });
+    if (b.type === 'tool_use') {
+      expect(b.source).toBe('external');
+      expect(b.approval).toBe('approved');
+    }
+  });
+
+  it('source = "internal" で approval 無しは fail', () => {
+    expect(() =>
+      ChatBlockSchema.parse({
+        type: 'tool_use',
+        toolUseId: 'tu-4',
+        name: 'mcp__tally__create_node',
+        input: {},
+        source: 'internal',
+      }),
+    ).toThrow();
+  });
+
+  it('source 未指定 (= internal default) で approval 無しは fail', () => {
+    expect(() =>
+      ChatBlockSchema.parse({
+        type: 'tool_use',
+        toolUseId: 'tu-5',
+        name: 'mcp__tally__create_node',
+        input: {},
+      }),
+    ).toThrow();
+  });
+
+  it('既存の internal + approval=pending/approved/rejected は引き続き valid', () => {
+    for (const a of ['pending', 'approved', 'rejected'] as const) {
+      const b = ChatBlockSchema.parse({
+        type: 'tool_use',
+        toolUseId: `tu-${a}`,
+        name: 'mcp__tally__create_node',
+        input: {},
+        approval: a,
+      });
+      if (b.type === 'tool_use') {
+        expect(b.source).toBe('internal');
+        expect(b.approval).toBe(a);
+      }
+    }
+  });
+
+  it('source の不正値 (例 "auto") は fail', () => {
+    expect(() =>
+      ChatBlockSchema.parse({
+        type: 'tool_use',
+        toolUseId: 'tu-bad',
+        name: 'mcp__tally__create_node',
+        input: {},
+        source: 'auto',
+        approval: 'approved',
+      }),
+    ).toThrow();
+  });
+});
+
+describe('RequirementNodeSchema.sourceUrl', () => {
+  it('sourceUrl 未指定は optional (既存互換)', () => {
+    const n = RequirementNodeSchema.parse({
+      id: 'n',
+      type: 'requirement',
+      x: 0,
+      y: 0,
+      title: 'R',
+      body: '',
+    });
+    expect(n.sourceUrl).toBeUndefined();
+  });
+
+  it('sourceUrl 指定で保持', () => {
+    const n = RequirementNodeSchema.parse({
+      id: 'n',
+      type: 'requirement',
+      x: 0,
+      y: 0,
+      title: 'R',
+      body: '',
+      sourceUrl: 'https://jira.test/browse/EPIC-1',
+    });
+    expect(n.sourceUrl).toBe('https://jira.test/browse/EPIC-1');
+  });
+
+  it('sourceUrl が URL でないと fail', () => {
+    expect(() =>
+      RequirementNodeSchema.parse({
+        id: 'n',
+        type: 'requirement',
+        x: 0,
+        y: 0,
+        title: 'R',
+        body: '',
+        sourceUrl: 'not a url',
+      }),
+    ).toThrow();
+  });
+
+  it('sourceUrl が http:// なら fail (https 強制、UI link でも cleartext は禁止)', () => {
+    expect(() =>
+      RequirementNodeSchema.parse({
+        id: 'n',
+        type: 'requirement',
+        x: 0,
+        y: 0,
+        title: 'R',
+        body: '',
+        sourceUrl: 'http://jira.test/browse/EPIC-1',
+      }),
+    ).toThrow();
+  });
+
+  it('sourceUrl が https:// なら pass', () => {
+    const n = RequirementNodeSchema.parse({
+      id: 'n',
+      type: 'requirement',
+      x: 0,
+      y: 0,
+      title: 'R',
+      body: '',
+      sourceUrl: 'https://jira.test/browse/EPIC-1',
+    });
+    expect(n.sourceUrl).toBe('https://jira.test/browse/EPIC-1');
+  });
+
+  it('sourceUrl が ftp:// なら fail', () => {
+    expect(() =>
+      RequirementNodeSchema.parse({
+        id: 'n',
+        type: 'requirement',
+        x: 0,
+        y: 0,
+        title: 'R',
+        body: '',
+        sourceUrl: 'ftp://jira.test/EPIC-1',
+      }),
+    ).toThrow();
   });
 });
