@@ -178,8 +178,12 @@ describe('ProjectSettingsDialog', () => {
     expect(ids).toContain('atlassian-2');
   });
 
-  it('secret 値の入力欄は無い (envVar 名のみ。caption に .env への誘導)', () => {
+  it('secret 値の入力欄は無い (envVar 名のみ。caption に .env への誘導)', async () => {
     render(<ProjectSettingsDialog open onClose={() => {}} />);
+    // 実 MCP 行に対する検証にするため先に行を 1 つ追加する (空 list だと退行検知が効かない)。
+    await userEvent.click(screen.getByRole('button', { name: /MCP サーバーを追加/ }));
+    // tokenEnvVar (envVar 名) は存在する
+    expect(screen.getByLabelText('mcp-0-tokenEnvVar')).toBeInTheDocument();
     // secret / token / pat / api_token / password 系の入力欄が無いこと
     expect(screen.queryByLabelText(/PAT$/i)).toBeNull();
     expect(screen.queryByLabelText(/シークレット/i)).toBeNull();

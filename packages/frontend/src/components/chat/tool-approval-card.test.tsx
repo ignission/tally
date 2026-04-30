@@ -98,8 +98,11 @@ describe('ToolApprovalCard', () => {
         }}
       />,
     );
-    // <details> 要素が存在
+    // <details> 要素が存在し、その内側に input preview の <pre> が含まれていること。
+    // details が存在するだけだと「input が details の外に出ている」誤実装を取り逃すため
+    // 親子関係まで確認する。
     const details = container.querySelector('details');
     expect(details).not.toBeNull();
+    expect(details?.querySelector('pre')).not.toBeNull();
   });
 });

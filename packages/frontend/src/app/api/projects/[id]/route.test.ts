@@ -71,6 +71,27 @@ describe('PATCH /api/projects/:id', () => {
   });
 
   it('mcpServers[] を全置換 (Task 16)', async () => {
+    // 事前に既存 mcpServers を投入: 「マージ追記」ではなく「全置換」であることを検証する。
+    const seedRes = await PATCH(
+      new Request('http://localhost', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          mcpServers: [
+            {
+              id: 'legacy',
+              name: 'Legacy',
+              kind: 'atlassian',
+              url: 'https://old.test/mcp',
+              auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'OLD' },
+              options: { maxChildIssues: 1, maxCommentsPerIssue: 1 },
+            },
+          ],
+        }),
+      }),
+      { params: Promise.resolve({ id: projectId }) },
+    );
+    expect(seedRes.status).toBe(200);
+
     const res = await PATCH(
       new Request('http://localhost', {
         method: 'PATCH',
@@ -93,6 +114,8 @@ describe('PATCH /api/projects/:id', () => {
     const body = (await res.json()) as { mcpServers: Array<{ id: string }> };
     expect(body.mcpServers).toHaveLength(1);
     expect(body.mcpServers[0]?.id).toBe('atlassian');
+    // legacy が残っていないこと (= 全置換)
+    expect(body.mcpServers.find((s) => s.id === 'legacy')).toBeUndefined();
   });
 
   it('mcpServers の url が http (loopback 以外) なら 400 (Task 1 hardening)', async () => {
