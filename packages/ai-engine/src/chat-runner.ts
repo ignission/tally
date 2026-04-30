@@ -328,6 +328,18 @@ export class ChatRunner {
               ...target.blocks,
             ]);
           }
+        } else {
+          // text 出力なし。complete_authentication 専用 turn のように handleAuthToolResult が
+          // 過去 message の pending を更新するだけのケースでは assistantMsgId の blocks が
+          // 0 件のまま残り、UI に空のアシスタント bubble が蓄積する。プレースホルダを置いて
+          // 「処理した」ことを示す。
+          const current = await chatStore.getChat(threadId);
+          const target = current?.messages.find((m) => m.id === assistantMsgId);
+          if (target && target.blocks.length === 0) {
+            await chatStore.replaceMessageBlocks(threadId, assistantMsgId, [
+              { type: 'text', text: '(認証処理を完了しました)' },
+            ]);
+          }
         }
 
         queue.push({ type: 'chat_assistant_message_completed', messageId: assistantMsgId });
