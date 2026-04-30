@@ -178,6 +178,11 @@ export class ChatRunner {
     yield { type: 'chat_assistant_message_started', messageId: assistantMsgId };
 
     const textBuffer: string[] = [];
+    // 外部 MCP の tool_use を観測した toolUseId のみ集合に保持し、対応する tool_result
+    // のみ external として永続化する。Tally 内部 MCP (mcp__tally__*) は本来 intercept
+    // 経路で SDK ストリームに現れない前提だが、SDK 仕様変更や edge case で内部 result
+    // が流れた場合に external 誤分類するのを防ぐためのガード (CR 指摘 #19 2 周目)。
+    const externalToolUseIds = new Set<string>();
 
     // 5. SDK query をバックグラウンドで走らせ、queue にイベントを push する。
     //    generator 側は queue をドレインして yield するだけ。
@@ -211,6 +216,7 @@ export class ChatRunner {
               queue.push({ type: 'chat_text_delta', messageId: assistantMsgId, text: b.text });
             } else if (b.type === 'tool_use') {
               // 外部 MCP の tool_use: source='external' で永続化、承認 UI なし (Task 12)。
+              externalToolUseIds.add(b.toolUseId);
               await chatStore.appendBlockToMessage(threadId, assistantMsgId, {
                 type: 'tool_use',
                 toolUseId: b.toolUseId,
@@ -226,6 +232,9 @@ export class ChatRunner {
                 input: b.input,
               });
             } else if (b.type === 'tool_result') {
+              // 同 turn 中に観測した外部 tool_use の id のみ external として扱う。
+              // 集合に無い toolUseId (= 内部 / intercept 経路 / 想定外) は無視する。
+              if (!externalToolUseIds.has(b.toolUseId)) continue;
               // Task 13: 大規模 epic で tool_result が 500KB+ になり得るので、
               // YAML 永続化は 4KB に切り詰める。event はフル (UI はメモリ内で全文展開可)。
               await chatStore.appendBlockToMessage(threadId, assistantMsgId, {
@@ -664,7 +673,9 @@ export function buildChatPrompt(messages: ChatMessage[], contextNodes: Node[] = 
       lines.push(`<message role="${escapeXmlAttr(m.role)}">`);
       for (const b of m.blocks) {
         if (b.type === 'text') {
-          lines.push(b.text);
+          // text 本文も `<` `>` `&` を escape する。assistant / user 自由入力なので
+          // `</message>` 等の文字列が混入しうる (CR 指摘 #19 2 周目)。
+          lines.push(escapeXmlText(b.text));
         } else if (b.type === 'tool_use') {
           // source は default 'internal'。external も含めて全部 replay する
           // (AI に「外部 source を読んだ」事実を context として伝えるため)
@@ -698,7 +709,7 @@ export function buildChatPrompt(messages: ChatMessage[], contextNodes: Node[] = 
   if (last && last.role === 'user') {
     const texts = last.blocks
       .filter((b): b is Extract<ChatBlock, { type: 'text' }> => b.type === 'text')
-      .map((b) => b.text);
+      .map((b) => escapeXmlText(b.text));
     lines.push('<current_user_message>');
     lines.push(texts.join('\n'));
     lines.push('</current_user_message>');

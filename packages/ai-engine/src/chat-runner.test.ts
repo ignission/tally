@@ -869,6 +869,20 @@ describe('ChatRunner — 外部 MCP tool_use/tool_result 永続化 (Task 12)', (
     const sdk: SdkLike = {
       query: () =>
         (async function* () {
+          // 外部 tool_use を先行させる (externalToolUseIds に登録するため)。
+          yield {
+            type: 'assistant',
+            message: {
+              content: [
+                {
+                  type: 'tool_use',
+                  id: 'big-1',
+                  name: 'mcp__atlassian__jira_get_issue',
+                  input: { issueKey: 'BIG-1' },
+                },
+              ],
+            },
+          } as unknown as SdkMessageLike;
           yield {
             type: 'user',
             message: {
@@ -942,6 +956,20 @@ describe('ChatRunner — 外部 MCP tool_use/tool_result 永続化 (Task 12)', (
     const sdk: SdkLike = {
       query: () =>
         (async function* () {
+          // 外部 tool_use を先行させる (externalToolUseIds に登録するため)。
+          yield {
+            type: 'assistant',
+            message: {
+              content: [
+                {
+                  type: 'tool_use',
+                  id: 'small-1',
+                  name: 'mcp__atlassian__jira_get_issue',
+                  input: { issueKey: 'SMALL-1' },
+                },
+              ],
+            },
+          } as unknown as SdkMessageLike;
           yield {
             type: 'user',
             message: {
