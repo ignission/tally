@@ -20,12 +20,26 @@ function makeDefaultMcpServer(seq: number): McpServerConfig {
   };
 }
 
+// UI ローカルの不変 ID を持つ MCP server エントリ。
+// React key として用いる `_uid` はマウント時に 1 度だけ割り当て、その後は変更しない。
+// `id` は UI で編集可能なため key にすると編集中の再マウント (focus / state リセット)
+// や重複入力時の reconciliation 衝突を起こす。`_uid` は永続化対象外で onSave で剥がす。
+type McpServerEntry = McpServerConfig & { _uid: string };
+
+function makeUid(): string {
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID();
+  }
+  // crypto.randomUUID 非対応環境向け fallback (jsdom の古い setup 等)。
+  return `mcp-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
+}
+
 export function ProjectSettingsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const projectMeta = useCanvasStore((s) => s.projectMeta);
   const patchProjectMeta = useCanvasStore((s) => s.patchProjectMeta);
 
   const [codebases, setCodebases] = useState<Codebase[]>([]);
-  const [mcpServers, setMcpServers] = useState<McpServerConfig[]>([]);
+  const [mcpServers, setMcpServers] = useState<McpServerEntry[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,7 +47,7 @@ export function ProjectSettingsDialog({ open, onClose }: { open: boolean; onClos
   useEffect(() => {
     if (open && projectMeta) {
       setCodebases(projectMeta.codebases);
-      setMcpServers(projectMeta.mcpServers ?? []);
+      setMcpServers((projectMeta.mcpServers ?? []).map((s) => ({ ...s, _uid: makeUid() })));
     }
   }, [open, projectMeta]);
 
@@ -75,7 +89,9 @@ export function ProjectSettingsDialog({ open, onClose }: { open: boolean; onClos
     setBusy(true);
     setError(null);
     try {
-      await patchProjectMeta({ codebases, mcpServers });
+      // _uid は UI ローカルの React key 用なので永続化前に剥がす。
+      const cleanedMcpServers = mcpServers.map(({ _uid, ...rest }) => rest);
+      await patchProjectMeta({ codebases, mcpServers: cleanedMcpServers });
       onClose();
     } catch (e) {
       setError(String((e as Error).message ?? e));
@@ -84,18 +100,20 @@ export function ProjectSettingsDialog({ open, onClose }: { open: boolean; onClos
   };
 
   const addMcpServer = () => {
-    // 削除→追加で `mcpServers.length + 1` を使うと既存 ID と衝突する
-    // (例: atlassian-1, atlassian-2 で 1 件削除して追加すると再び atlassian-2)。
-    // mcpServers の id は下流で key として使われるため、未使用 suffix を探す。
+    // 採番 id は表示初期値として使うが、React key は別途 _uid を割り当てる
+    // (id はユーザーが編集できるため key に使うと編集中の再マウントを起こす)。
     const usedIds = new Set(mcpServers.map((s) => s.id));
     let seq = 1;
     while (usedIds.has(`atlassian-${seq}`)) seq += 1;
-    setMcpServers([...mcpServers, makeDefaultMcpServer(seq)]);
+    setMcpServers([...mcpServers, { ...makeDefaultMcpServer(seq), _uid: makeUid() }]);
   };
 
   const updateMcpServer = (index: number, next: McpServerConfig) => {
     const list = [...mcpServers];
-    list[index] = next;
+    const prev = list[index];
+    if (!prev) return;
+    // 既存エントリの _uid は保持 (フォーム編集で React key が変わるのを防ぐ)。
+    list[index] = { ...next, _uid: prev._uid };
     setMcpServers(list);
   };
 
@@ -182,8 +200,10 @@ export function ProjectSettingsDialog({ open, onClose }: { open: boolean; onClos
           {mcpServers.length === 0 && <div style={MUTED}>MCP サーバー未設定</div>}
           <ul style={CB_LIST}>
             {mcpServers.map((s, i) => (
-              // addMcpServer で未使用 suffix を採番するため id は一意。React key として安全。
-              <li key={s.id} style={MCP_ITEM}>
+              // _uid は UI ローカルの不変 ID。s.id はフォームで編集可能なため key に使うと
+              // 編集中の再マウント (focus / state リセット) や重複入力時の reconciliation
+              // 衝突を起こすため避ける (CR 指摘 #19)。
+              <li key={s._uid} style={MCP_ITEM}>
                 <div style={MCP_ROW}>
                   <TextInput
                     type="text"
