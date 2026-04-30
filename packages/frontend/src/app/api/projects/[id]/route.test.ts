@@ -141,8 +141,8 @@ describe('PATCH /api/projects/:id', () => {
   });
 
   it('mcpServers を空配列で全消去できる', async () => {
-    // 事前に登録
-    await PATCH(
+    // 事前に登録 (seed PATCH の成功も assert: 前提崩れを取り逃さないため)
+    const seedRes = await PATCH(
       new Request('http://localhost', {
         method: 'PATCH',
         body: JSON.stringify({
@@ -160,6 +160,7 @@ describe('PATCH /api/projects/:id', () => {
       }),
       { params: Promise.resolve({ id: projectId }) },
     );
+    expect(seedRes.status).toBe(200);
     // 空配列で全消去
     const res = await PATCH(
       new Request('http://localhost', {
