@@ -617,12 +617,25 @@ export function formatNodeForContext(node: Node): string {
   return lines.join('\n');
 }
 
-// XML 特殊文字をエスケープ。tool_result.output は外部 MCP の生出力 (Jira 本文・
-// epic 説明等) で `</tool_result>` や `<` を含む可能性があり、これが prompt の XML
-// 構造を壊して AI が context を誤読するのを防ぐ。`<` `>` `&` の最低限のみ。
-// (tool_use.input 側は JSON.stringify が `<` を `<` にエスケープするため安全)
+// XML element 内テキスト用のエスケープ。`<` `>` `&` の最低限のみ。
+// tool_result.output (外部 MCP の生出力) や tool_use.input の JSON 文字列を
+// XML 要素本体に埋め込む際に使う。
+//
+// 注: JSON.stringify は `<` `>` `&` をエスケープしない (escape するのは `"` `\`
+// と control chars のみ)。input オブジェクトに `</tool_use>` 等が含まれる
+// ケースに備え、JSON 文字列にも本関数を適用する必要がある。
 function escapeXmlText(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// XML 属性値用のエスケープ。`"` も含めてエスケープする (属性は二重引用符で囲むため)。
+// toolUseId / name / role などの動的値を attr に埋め込むときに使う。
+function escapeXmlAttr(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 // チャット履歴を単一 prompt にエンコードする。
@@ -648,7 +661,7 @@ export function buildChatPrompt(messages: ChatMessage[], contextNodes: Node[] = 
     for (const m of past) {
       // block が 1 つも無い空 message は省く (空 assistant の preliminary append 等)
       if (m.blocks.length === 0) continue;
-      lines.push(`<message role="${m.role}">`);
+      lines.push(`<message role="${escapeXmlAttr(m.role)}">`);
       for (const b of m.blocks) {
         if (b.type === 'text') {
           lines.push(b.text);
@@ -656,12 +669,14 @@ export function buildChatPrompt(messages: ChatMessage[], contextNodes: Node[] = 
           // source は default 'internal'。external も含めて全部 replay する
           // (AI に「外部 source を読んだ」事実を context として伝えるため)
           const sourceAttr = b.source === 'external' ? ' source="external"' : '';
+          // input は JSON.stringify 後に XML エスケープ。`<` `>` `&` は JSON 文字列内では
+          // 生のまま残るので、XML タグへの埋め込みでは構造を壊しうる (codex 指摘の前提誤り)。
           lines.push(
-            `<tool_use id="${b.toolUseId}" name="${b.name}"${sourceAttr}>${JSON.stringify(b.input)}</tool_use>`,
+            `<tool_use id="${escapeXmlAttr(b.toolUseId)}" name="${escapeXmlAttr(b.name)}"${sourceAttr}>${escapeXmlText(JSON.stringify(b.input))}</tool_use>`,
           );
         } else if (b.type === 'tool_result') {
           lines.push(
-            `<tool_result id="${b.toolUseId}" ok="${b.ok}">${escapeXmlText(b.output)}</tool_result>`,
+            `<tool_result id="${escapeXmlAttr(b.toolUseId)}" ok="${b.ok}">${escapeXmlText(b.output)}</tool_result>`,
           );
         }
       }
