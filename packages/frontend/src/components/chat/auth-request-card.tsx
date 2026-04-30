@@ -9,12 +9,17 @@ type AuthRequestBlock = Extract<ChatBlock, { type: 'auth_request' }>;
 
 // callback URL が「http://localhost:XXXXX/callback?code=...&state=...」形式かを軽く検査。
 // SDK が立てた一時 callback 鯖は agent turn 終了で死ぬので、ユーザーがアドレスバーから
-// コピーして貼ることを想定。host は localhost / 127.0.0.1 のみ通す。
+// コピーして貼ることを想定。host は loopback (localhost / 127.0.0.1 / ::1) のみ通す。
+// schema.ts (McpServerConfigSchema.url) と loopback 判定を揃えており、IPv6 優先環境で
+// SDK が `http://[::1]:XXXXX/callback?...` を返した場合にも認証フローが進むようにする。
 function isLikelyCallbackUrl(s: string): boolean {
   try {
     const u = new URL(s.trim());
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
-    if (u.hostname !== 'localhost' && u.hostname !== '127.0.0.1') return false;
+    const host = u.hostname;
+    if (host !== 'localhost' && host !== '127.0.0.1' && host !== '::1' && host !== '[::1]') {
+      return false;
+    }
     return u.searchParams.has('code') && u.searchParams.has('state');
   } catch {
     return false;
