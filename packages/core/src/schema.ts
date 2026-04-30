@@ -264,6 +264,8 @@ export const McpServerConfigSchema = z.object({
   kind: z.literal('atlassian'),
   // PAT を Authorization header で送る transport なので cleartext を許さない。
   // 開発・テスト用の loopback (localhost / 127.0.0.1 / ::1) のみ http: を例外的に許容。
+  // URL 内資格情報 (user:pass@host) はログ・プロキシ漏洩リスクがあり、Authorization header
+  // 設計とも不整合のため拒否する。
   url: z
     .string()
     .url()
@@ -271,6 +273,7 @@ export const McpServerConfigSchema = z.object({
       (u) => {
         try {
           const parsed = new URL(u);
+          if (parsed.username || parsed.password) return false;
           if (parsed.protocol === 'https:') return true;
           if (
             parsed.protocol === 'http:' &&
@@ -286,7 +289,10 @@ export const McpServerConfigSchema = z.object({
           return false;
         }
       },
-      { message: 'url は https で始まる必要があります (loopback の http は例外的に許容)' },
+      {
+        message:
+          'url は https で始まる必要があります (loopback の http は例外的に許容)。URL 内資格情報 (user:pass@) は禁止',
+      },
     ),
   auth: McpAuthSchema,
   options: McpServerOptionsSchema,
