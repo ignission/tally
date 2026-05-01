@@ -242,6 +242,15 @@ const McpServerOptionsSchema = z
 // tool 名 matching が壊れないよう CodebaseSchema.id と同じ charset 制約を採用。
 const McpServerIdRegex = /^[a-z][a-z0-9-]{0,31}$/u;
 
+// ADR-0011: Tally 側で OAuth 2.1 フローを管理するための client 設定。
+// PR-E1 では optional で導入し、PR-E4 (旧 auth_request 経路の削除) と同時に required 化する。
+// scopes が空または未指定なら kind ごとの default を使う (core/src/oauth/<kind>.ts)。
+export const McpOAuthConfigSchema = z.object({
+  clientId: z.string().min(1),
+  scopes: z.array(z.string().min(1)).optional(),
+});
+export type McpOAuthConfig = z.infer<typeof McpOAuthConfigSchema>;
+
 export const McpServerConfigSchema = z.object({
   id: z.string().regex(McpServerIdRegex, {
     message: 'mcp server id は先頭英小文字 + 英小文字/数字/ハイフン、32 字以内',
@@ -280,10 +289,38 @@ export const McpServerConfigSchema = z.object({
           'url は https で始まる必要があります (loopback の http は例外的に許容)。URL 内資格情報 (user:pass@) は禁止',
       },
     ),
+  // ADR-0011: Tally 側で OAuth 2.1 フローを管理する。MVP は段階導入のため optional
+  // で開始し、PR-E4 で旧 auth_request 経路を削除する際に required 化する。
+  oauth: McpOAuthConfigSchema.optional(),
   options: McpServerOptionsSchema,
 });
 
 export type McpServerConfig = z.infer<typeof McpServerConfigSchema>;
+
+// ADR-0011: OAuth token store の YAML スキーマ。
+// `<projectDir>/oauth/<mcpServerId>.yaml` 1 ファイル 1 server で永続化する。
+// access token / refresh token はそのまま平文で書き込み、ファイルパーミッションを
+// 0o600 に絞ることで多人数共有環境からの読み取りを防ぐ (MVP)。
+// 暗号化 (OS keychain 統合等) は ADR-0012 で別途検討する。
+export const McpOAuthTokenSchema = z.object({
+  mcpServerId: z.string().regex(McpServerIdRegex, {
+    message: 'mcp server id は先頭英小文字 + 英小文字/数字/ハイフン、32 字以内',
+  }),
+  // 認可コード交換で得た access token。MCP の HTTP transport の Authorization ヘッダで使う。
+  accessToken: z.string().min(1),
+  // refresh token。受信していない provider もあるため optional。
+  refreshToken: z.string().optional(),
+  // ISO 8601 datetime。expiresAt と比較して期限間近なら refresh する。
+  // 文字列のまま z.string() にしておくと "not-a-date" 等が通り、PR-E2 の expiry 判定が
+  // 文字列比較で境界バグを起こす (codex P2 指摘)。.datetime() で形式を強制する。
+  acquiredAt: z.iso.datetime(),
+  expiresAt: z.iso.datetime().optional(),
+  // 実際に許可された scopes (provider が requested scopes を絞った場合に把握)。
+  scopes: z.array(z.string()).optional(),
+  // Bearer 以外の token_type を返す provider が将来現れた場合に備える。default は Bearer。
+  tokenType: z.string().default('Bearer'),
+});
+export type McpOAuthToken = z.infer<typeof McpOAuthTokenSchema>;
 
 // .tally/project.yaml に対応する meta のみのスキーマ。
 // ノード・エッジはファイル分割で永続化するため、ここには含めない。

@@ -8,6 +8,7 @@ import {
   CodebaseSchema,
   CodeRefNodeSchema,
   EdgeSchema,
+  McpOAuthTokenSchema,
   McpServerConfigSchema,
   NodeSchema,
   ProjectMetaSchema,
@@ -421,6 +422,30 @@ describe('McpServerConfigSchema', () => {
     ).toThrow();
   });
 
+  it('oauth 設定 (clientId + scopes) を持って parse できる (ADR-0011 で導入、PR-E1 では optional)', () => {
+    const raw = {
+      id: 'atlassian',
+      name: 'Atlassian',
+      kind: 'atlassian' as const,
+      url: 'https://mcp.atlassian.example/v1/mcp',
+      oauth: { clientId: 'cid-abc123', scopes: ['read:jira-work', 'offline_access'] },
+    };
+    const parsed = McpServerConfigSchema.parse(raw);
+    expect(parsed.oauth).toEqual(raw.oauth);
+  });
+
+  it('oauth.clientId が空文字なら fail', () => {
+    expect(() =>
+      McpServerConfigSchema.parse({
+        id: 'a',
+        name: 'A',
+        kind: 'atlassian',
+        url: 'https://x.test/mcp',
+        oauth: { clientId: '' },
+      }),
+    ).toThrow();
+  });
+
   it('auth フィールドが付いていても strict ではないので無視される (passthrough)', () => {
     // schema 上は auth キーを持たない。zod は default で strict ではないため余計なキーは drop。
     // OAuth 移行前の YAML が混入しても parse 自体は通すが、auth 情報は使われない。
@@ -756,6 +781,54 @@ describe('RequirementNodeSchema.sourceUrl', () => {
         title: 'R',
         body: '',
         sourceUrl: 'ftp://jira.test/EPIC-1',
+      }),
+    ).toThrow();
+  });
+});
+
+// ADR-0011: Tally 側で OAuth 2.1 フローを管理する。token store の YAML スキーマ。
+describe('McpOAuthTokenSchema', () => {
+  it('最小フィールド (mcpServerId / accessToken / acquiredAt) で parse 成功、tokenType に default Bearer', () => {
+    const parsed = McpOAuthTokenSchema.parse({
+      mcpServerId: 'atlassian',
+      accessToken: 'a-tok',
+      acquiredAt: '2026-05-02T10:00:00Z',
+    });
+    expect(parsed.tokenType).toBe('Bearer');
+    expect(parsed.refreshToken).toBeUndefined();
+    expect(parsed.expiresAt).toBeUndefined();
+    expect(parsed.scopes).toBeUndefined();
+  });
+
+  it('refresh_token / expiresAt / scopes を含めて round-trip', () => {
+    const raw = {
+      mcpServerId: 'atlassian',
+      accessToken: 'a-tok',
+      refreshToken: 'r-tok',
+      acquiredAt: '2026-05-02T10:00:00Z',
+      expiresAt: '2026-05-02T11:00:00Z',
+      scopes: ['read:jira-work', 'offline_access'],
+      tokenType: 'Bearer',
+    };
+    expect(McpOAuthTokenSchema.parse(raw)).toEqual(raw);
+  });
+
+  it('mcpServerId が McpServerIdRegex に違反するなら fail', () => {
+    expect(() =>
+      McpOAuthTokenSchema.parse({
+        mcpServerId: 'BadID', // 大文字 NG
+        accessToken: 'a',
+        acquiredAt: '2026-05-02T10:00:00Z',
+      }),
+    ).toThrow();
+  });
+
+  it('accessToken が空なら fail (min 1)', () => {
+    expect(() =>
+      McpOAuthTokenSchema.parse({
+        mcpServerId: 'atlassian',
+        accessToken: '',
+        acquiredAt: '2026-05-02T10:00:00Z',
       }),
     ).toThrow();
   });

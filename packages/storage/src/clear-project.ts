@@ -6,19 +6,25 @@ import { resolveProjectPaths } from './project-dir';
 export interface ClearProjectResult {
   removedNodes: number;
   removedChats: number;
+  removedOAuthTokens: number;
   keptEdgesFile: boolean;
 }
 
-// プロジェクトの内容を初期化する。project.yaml は維持、nodes/*.yaml と chats/*.yaml を全削除、
-// edges.yaml は空配列に書き戻す。呼び出し側 (UI/CLI) が確認ダイアログを出す前提。
+// プロジェクトの内容を初期化する。project.yaml は維持、nodes/*.yaml と chats/*.yaml と
+// oauth/*.yaml を全削除、edges.yaml は空配列に書き戻す。呼び出し側 (UI/CLI) が確認ダイアログを
+// 出す前提。
+//
+// ADR-0011: oauth/ には access token / refresh token が平文で保存されているため、
+// プロジェクトリセット時に確実に削除しないと次の利用者に漏洩しうる (codex P1 指摘)。
 export async function clearProject(projectDir: string): Promise<ClearProjectResult> {
   const paths = resolveProjectPaths(projectDir);
   const removedNodes = await clearDir(paths.nodesDir);
   const removedChats = await clearDir(paths.chatsDir);
+  const removedOAuthTokens = await clearDir(paths.oauthDir);
   // edges.yaml を空配列で書き直す (無ければ作成)。
   await fs.mkdir(paths.edgesDir, { recursive: true });
   await fs.writeFile(paths.edgesFile, 'edges: []\n', 'utf8');
-  return { removedNodes, removedChats, keptEdgesFile: true };
+  return { removedNodes, removedChats, removedOAuthTokens, keptEdgesFile: true };
 }
 
 // 指定ディレクトリ直下の *.yaml / *.yml を削除する。ディレクトリ自体は残す。
