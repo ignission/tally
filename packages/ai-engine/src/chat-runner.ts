@@ -12,7 +12,6 @@ import type { SdkLike, SdkQueryHandle, SdkUserMessageLike } from './agent-runner
 import { AsyncIterableInput } from './async-input';
 import { type AuthToolNameMatch, extractAuthUrl, parseAuthToolName } from './auth-detector';
 import { buildMcpServers } from './mcp/build-mcp-servers';
-import { redactMcpSecrets } from './mcp/redact';
 import type { ChatEvent, SdkMessageLike } from './stream';
 import { CreateEdgeInputSchema, createEdgeHandler } from './tools/create-edge';
 import { CreateNodeInputSchema, createNodeHandler } from './tools/create-node';
@@ -164,6 +163,20 @@ export class ChatRunner {
     });
   }
 
+  // 進行中の turn が異常終了したとき、pendingApprovals に残っている承認待ちを
+  // 一括で否認 (false) する (CR Major)。これを呼ばないと、turn 失敗後に UI から
+  // 承認が来ても create_node / create_edge 等の side effect が走ってしまう。
+  private rejectAllPendingApprovals(): void {
+    for (const resolver of this.pendingApprovals.values()) {
+      try {
+        resolver(false);
+      } catch {
+        /* swallow: resolver の throw は他の rejection に影響させない */
+      }
+    }
+    this.pendingApprovals.clear();
+  }
+
   // user の 1 ターンを実行する (long-lived Query 化版)。
   // - 1 ChatRunner = 1 sdk.query() = 1 subprocess に固定し、MCP HTTP transport の
   //   OAuth state (PKCE / token) を turn 跨ぎで保持する。
@@ -238,47 +251,47 @@ export class ChatRunner {
     };
     this.currentTurn = turnState;
 
-    // 5. SDK Query (long-lived) を必要なら起動する。
+    // currentTurn を立てた直後から全体を try/finally で囲み、appendMessage / input.push
+    // 等の中間ステップで throw しても currentTurn が解放されることを保証する (CR Major)。
     try {
-      await this.ensureQuery();
-    } catch (err) {
-      this.currentTurn = null;
-      // 空 assistant message を「先に append」している関係で、ensureQuery 失敗時に
-      // 空バブルが履歴に残ってしまう (CR Minor)。chatStore に message 単位の delete
-      // API は無いので、エラー内容で blocks を埋める形にロールバックする。
-      const message = err instanceof Error ? err.message : String(err);
+      // 5. SDK Query (long-lived) を必要なら起動する。
       try {
-        await chatStore.replaceMessageBlocks(threadId, assistantMsgId, [
-          { type: 'text', text: `(MCP 設定エラー: ${message})` },
-        ]);
-      } catch {
-        /* swallow: replace 自体が失敗しても error event は流すので致命的ではない */
+        await this.ensureQuery();
+      } catch (err) {
+        // 空 assistant message を「先に append」している関係で、ensureQuery 失敗時に
+        // 空バブルが履歴に残ってしまう (CR Minor)。chatStore に message 単位の delete
+        // API は無いので、エラー内容で blocks を埋める形にロールバックする。
+        const message = err instanceof Error ? err.message : String(err);
+        try {
+          await chatStore.replaceMessageBlocks(threadId, assistantMsgId, [
+            { type: 'text', text: `(MCP 設定エラー: ${message})` },
+          ]);
+        } catch {
+          /* swallow: replace 自体が失敗しても error event は流すので致命的ではない */
+        }
+        yield {
+          type: 'error',
+          code: 'mcp_config_invalid',
+          message,
+        };
+        return;
       }
-      yield {
-        type: 'error',
-        code: 'mcp_config_invalid',
-        message,
-      };
-      return;
-    }
-    // ensureQuery が externalConfig を更新するので turnState の参照を最新へ差し替える。
-    turnState.externalConfigById = this.cachedExternalConfigById ?? new Map();
+      // ensureQuery が externalConfig を更新するので turnState の参照を最新へ差し替える。
+      turnState.externalConfigById = this.cachedExternalConfigById ?? new Map();
 
-    // 6. user message を SDK の input ストリームに push する。
-    //    ensureQuery 成功後は this.input が必ず存在するはず (codex 指摘 Major 2:
-    //    null チェックを invariant assertion で表明し、無音破棄 → ハングを防ぐ)。
-    if (!this.input) {
-      this.currentTurn = null;
-      throw new Error('invariant: ensureQuery succeeded but input is null');
-    }
-    this.input.push({
-      type: 'user',
-      message: { role: 'user', content: prompt },
-      parent_tool_use_id: null,
-    });
+      // 6. user message を SDK の input ストリームに push する。
+      //    ensureQuery 成功後は this.input が必ず存在するはず (codex 指摘 Major 2:
+      //    null チェックを invariant assertion で表明し、無音破棄 → ハングを防ぐ)。
+      if (!this.input) {
+        throw new Error('invariant: ensureQuery succeeded but input is null');
+      }
+      this.input.push({
+        type: 'user',
+        message: { role: 'user', content: prompt },
+        parent_tool_use_id: null,
+      });
 
-    // 8. queue をドレイン。chat_turn_ended が来たら今 turn は終わり。
-    try {
+      // 7. queue をドレイン。chat_turn_ended が来たら今 turn は終わり。
       while (true) {
         const evt = await queue.next();
         if (evt === null) break;
@@ -354,7 +367,12 @@ export class ChatRunner {
   private async runOutputLoop(query: SdkQueryHandle): Promise<void> {
     try {
       for await (const msg of query) {
-        console.log('[chat-runner] sdk msg:', JSON.stringify(redactMcpSecrets(msg)).slice(0, 200));
+        // SDK メッセージの全文を log すると OAuth callback URL の code/state や
+        // 外部 MCP の出力 (Jira 本文等) がサーバーログに残る (CR Major)。
+        // type だけ出して、content / result は redactMcpSecrets でも完全に落とせない
+        // ため出さない。詳細デバッグが必要な場合は環境変数で切替可能にする想定。
+        const mt = (msg as unknown as { type?: string }).type;
+        if (mt) console.log('[chat-runner] sdk msg type:', mt);
         await this.dispatchSdkMessage(msg);
       }
     } catch (err) {
@@ -365,6 +383,9 @@ export class ChatRunner {
         turn.queue.push({ type: 'chat_turn_ended' });
         turn.queue.finish();
       }
+      // 異常終了後に古い承認が UI から来ても side effect を走らせないため、
+      // pendingApprovals を一括 reject する (CR Major)。
+      this.rejectAllPendingApprovals();
       return;
     }
     // iter 正常終端 (close 等)。query が死んだ印として outputLoopFailed を立て、
@@ -384,6 +405,8 @@ export class ChatRunner {
       turn.queue.push({ type: 'chat_turn_ended' });
       turn.queue.finish();
     }
+    // 予期しない終了 / 明示 shutdown のいずれでも、残っている承認待ちは無効化する。
+    this.rejectAllPendingApprovals();
   }
 
   // 1 つの SDKMessage を処理する。turn が無ければ捨てる。
@@ -515,6 +538,16 @@ export class ChatRunner {
   // としては emit させない (CR Major)。
   async close(): Promise<void> {
     this.isClosing = true;
+    // 進行中の startQueryInternal を待ってから tearDown する (CR Major)。
+    // close() が startQueryInternal の途中 (await projectStore.getProjectMeta() 等) で
+    // 走ると、shutdown 後に sdk.query() が作られて subprocess が孤立する race を防ぐ。
+    if (this.ensureQueryInflight) {
+      try {
+        await this.ensureQueryInflight;
+      } catch {
+        /* swallow: starter の例外は ensureQuery 呼び出し側で観測される */
+      }
+    }
     const pendingLoop = this.outputLoopDone;
     this.tearDownQuery();
     if (pendingLoop) {
@@ -574,57 +607,58 @@ export class ChatRunner {
     };
     this.currentTurn = turnState;
 
-    // long-lived query 上で動かす (OAuth state を turn 跨ぎで保持するため)。
+    // currentTurn を立てた直後から全体を try/finally で囲み、appendMessage 等の
+    // 中間ステップで throw しても currentTurn が解放されることを保証する (CR Major)。
+    // 解放しないと以後 turn_in_progress で次の turn を受け付けられない。
     try {
-      await this.ensureQuery();
-    } catch (err) {
-      this.currentTurn = null;
-      yield {
-        type: 'error',
-        code: 'mcp_config_invalid',
-        message: err instanceof Error ? err.message : String(err),
-      };
-      return;
-    }
-    turnState.externalConfigById = this.cachedExternalConfigById ?? new Map();
+      // long-lived query 上で動かす (OAuth state を turn 跨ぎで保持するため)。
+      try {
+        await this.ensureQuery();
+      } catch (err) {
+        yield {
+          type: 'error',
+          code: 'mcp_config_invalid',
+          message: err instanceof Error ? err.message : String(err),
+        };
+        return;
+      }
+      turnState.externalConfigById = this.cachedExternalConfigById ?? new Map();
 
-    // ephemeral: user message は chatStore に append しない (callback URL の code/state
-    // を chat 履歴に残さない)。空 assistant message だけは tool_use/tool_result の親
-    // として必要なので append し、turn 末で「(認証処理を完了しました)」プレースホルダで
-    // 埋める (dispatchSdkMessage の result 処理が自動で実行する)。
-    await chatStore.appendMessage(threadId, {
-      id: assistantMsgId,
-      role: 'assistant',
-      blocks: [],
-      createdAt: new Date().toISOString(),
-    });
-    yield { type: 'chat_assistant_message_started', messageId: assistantMsgId };
+      // ephemeral: user message は chatStore に append しない (callback URL の code/state
+      // を chat 履歴に残さない)。空 assistant message だけは tool_use/tool_result の親
+      // として必要なので append し、turn 末で「(認証処理を完了しました)」プレースホルダで
+      // 埋める (dispatchSdkMessage の result 処理が自動で実行する)。
+      await chatStore.appendMessage(threadId, {
+        id: assistantMsgId,
+        role: 'assistant',
+        blocks: [],
+        createdAt: new Date().toISOString(),
+      });
+      yield { type: 'chat_assistant_message_started', messageId: assistantMsgId };
 
-    if (!this.input) {
-      this.currentTurn = null;
-      throw new Error('invariant: ensureQuery succeeded but input is null');
-    }
+      if (!this.input) {
+        throw new Error('invariant: ensureQuery succeeded but input is null');
+      }
 
-    // 構造化 prompt: AI に必ず指定 server の complete_authentication を呼ばせる。
-    // long-lived query では allowedTools が固定 (ensureQuery 起動時に決まる) なので
-    // 単一 tool への制約はかけられないが、prompt 指示で実用上はモデルが従う。
-    const prompt = [
-      'OAuth コールバック URL を受信しました。',
-      `mcp__${mcpServerId}__complete_authentication ツールを呼び、`,
-      '以下の callback URL で認証を完了してください:',
-      callbackUrl,
-      '',
-      '他の MCP server の complete_authentication ツールや、',
-      '別の作業ツール (create_node 等) は呼ばないでください。',
-    ].join('\n');
+      // 構造化 prompt: AI に必ず指定 server の complete_authentication を呼ばせる。
+      // long-lived query では allowedTools が固定 (ensureQuery 起動時に決まる) なので
+      // 単一 tool への制約はかけられないが、prompt 指示で実用上はモデルが従う。
+      const prompt = [
+        'OAuth コールバック URL を受信しました。',
+        `mcp__${mcpServerId}__complete_authentication ツールを呼び、`,
+        '以下の callback URL で認証を完了してください:',
+        callbackUrl,
+        '',
+        '他の MCP server の complete_authentication ツールや、',
+        '別の作業ツール (create_node 等) は呼ばないでください。',
+      ].join('\n');
 
-    this.input.push({
-      type: 'user',
-      message: { role: 'user', content: prompt },
-      parent_tool_use_id: null,
-    });
+      this.input.push({
+        type: 'user',
+        message: { role: 'user', content: prompt },
+        parent_tool_use_id: null,
+      });
 
-    try {
       while (true) {
         const evt = await queue.next();
         if (evt === null) break;
