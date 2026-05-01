@@ -16,6 +16,9 @@ function isLikelyCallbackUrl(s: string): boolean {
   try {
     const u = new URL(s.trim());
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+    // URL 内資格情報 (user:pass@host) は誤って貼り付けると chat 履歴に永続化される
+    // (sendChatMessage 経由で残る) ため、ここで弾く。schema.ts の url validator と整合。
+    if (u.username || u.password) return false;
     const host = u.hostname;
     if (host !== 'localhost' && host !== '127.0.0.1' && host !== '::1' && host !== '[::1]') {
       return false;
@@ -33,7 +36,7 @@ function isLikelyCallbackUrl(s: string): boolean {
 // ・redirect 先 localhost:XXXXX が即死しているのにユーザーが原因を特定できない
 // という UX が破綻するため、専用カードで「やるべきこと」を 2 ステップに分けて提示する。
 export function AuthRequestCard({ block }: { block: AuthRequestBlock }) {
-  const sendChatMessage = useCanvasStore((s) => s.sendChatMessage);
+  const sendOAuthCallback = useCanvasStore((s) => s.sendOAuthCallback);
   const [callbackUrl, setCallbackUrl] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -52,14 +55,10 @@ export function AuthRequestCard({ block }: { block: AuthRequestBlock }) {
     if (!trimmed || !isLikelyCallbackUrl(trimmed)) return;
     setSubmitting(true);
     try {
-      // AI に complete_authentication を呼ばせるための user_message。
-      // mcpServerId を明示することで、複数 MCP server がある場合でも AI が正しい
-      // server の complete_authentication ツールを選べる。
-      const text =
-        `[OAuth callback for ${block.mcpServerId}] ${trimmed}\n\n` +
-        `上記 URL を使って ${block.mcpServerLabel} の認証コードを引き換えて、` +
-        `元のタスクを続行してください。`;
-      await sendChatMessage(text);
+      // 構造化 WS message で送信。自然文 user_message と異なり、サーバ側で
+      // mcpServerId が確定するので AI が別 server の complete_authentication を
+      // 呼ぶ事故を排除できる (PR-B CR Major)。
+      sendOAuthCallback(block.mcpServerId, trimmed);
       setCallbackUrl('');
     } finally {
       setSubmitting(false);

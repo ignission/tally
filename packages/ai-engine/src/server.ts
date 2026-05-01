@@ -43,6 +43,17 @@ const ChatApproveToolSchema = z.object({
   approved: z.boolean(),
 });
 
+// 外部 MCP の OAuth コールバック URL を構造化されたメッセージで送る (PR-B CR Major)。
+// 自然文 user_message でモデルに mcpServerId を解釈させると、複数 server があるときに
+// 別 server の complete_authentication を呼ぶリスクがあったため、UI からは mcpServerId
+// を構造化フィールドとして固定して送り、chat-runner 側で id 入りプロンプトを生成する。
+// mcpServerId は McpServerConfigSchema.id と同じ charset 制約 (英小文字 + 数字 + ハイフン)。
+const ChatOAuthCallbackSchema = z.object({
+  type: z.literal('oauth_callback'),
+  mcpServerId: z.string().regex(/^[a-z][a-z0-9-]{0,31}$/u),
+  callbackUrl: z.string().url(),
+});
+
 // registry からプロジェクト ID に対応するディレクトリパスを返す。
 // 見つからなければ null。
 async function resolveDir(id: string): Promise<string | null> {
@@ -239,6 +250,29 @@ function handleChatConnection(ws: WebSocket, sdk: SdkLike): void {
       // approveTool は同期的に pendingApprovals の Promise を resolve する。
       // 対応する runUserTurn iterator が続きを進め、tool_result イベントを emit する。
       runner.approveTool(result.data.toolUseId, result.data.approved);
+      return;
+    }
+
+    if (obj.type === 'oauth_callback') {
+      const result = ChatOAuthCallbackSchema.safeParse(parsed);
+      if (!result.success) {
+        send({
+          type: 'error',
+          code: 'bad_request',
+          message: `invalid oauth_callback: ${result.error.message}`,
+        });
+        return;
+      }
+      try {
+        for await (const evt of runner.runOAuthCallback(
+          result.data.mcpServerId,
+          result.data.callbackUrl,
+        )) {
+          send(evt);
+        }
+      } catch (err) {
+        send({ type: 'error', code: 'agent_failed', message: String(err) });
+      }
       return;
     }
 

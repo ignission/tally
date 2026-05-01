@@ -132,6 +132,11 @@ interface CanvasState {
   closeChatThread: () => void;
   sendChatMessage: (text: string) => Promise<void>;
   approveChatTool: (toolUseId: string, approved: boolean) => void;
+  // 外部 MCP の OAuth コールバック URL を構造化送信する (PR-B CR Major)。
+  // 自然文の user_message に mcpServerId を埋め込んで AI に解釈させると、複数 server
+  // 同時運用時に別 server の complete_authentication を呼ぶ事故が起きうる。UI が知って
+  // いる server id を構造化フィールドで渡し、サーバ側で確定的に prompt 化する。
+  sendOAuthCallback: (mcpServerId: string, callbackUrl: string) => void;
 
   // issue #11: チャットに「@メンション」のように添付するノード ID 群。
   // 順序保持 + 重複排除のため配列で持つ。スレッド切替・close で自動クリア
@@ -411,32 +416,33 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
         return;
       }
 
-      // completed/failed: 同 mcpServerId の pending ブロックを更新 (どのメッセージに属していても)。
-      // 同 server の pending は最新 1 件しか存在しないので最初に見つけたものを書き換える。
+      // completed/failed: 同 mcpServerId の最新 pending ブロックを更新 (どのメッセージに属していても)。
+      // 再認証で複数 pending が並ぶ可能性があるため、末尾から走査して直近 1 件のみ書き換える
+      // (先頭から走査すると古いカードを更新してしまい、新しい pending カードが残る問題)。
       let updated = false;
-      const updatedMessages = messages.map((m) => {
-        let messageUpdated = false;
-        const blocks = m.blocks.map((b) => {
+      const updatedMessages = [...messages];
+      for (let mi = updatedMessages.length - 1; mi >= 0 && !updated; mi -= 1) {
+        const message = updatedMessages[mi];
+        if (!message) continue;
+        const blocks = [...message.blocks];
+        for (let bi = blocks.length - 1; bi >= 0; bi -= 1) {
+          const block = blocks[bi];
           if (
-            !updated &&
-            b.type === 'auth_request' &&
-            b.mcpServerId === evt.mcpServerId &&
-            b.status === 'pending'
+            block?.type === 'auth_request' &&
+            block.mcpServerId === evt.mcpServerId &&
+            block.status === 'pending'
           ) {
-            updated = true;
-            messageUpdated = true;
-            return {
-              ...b,
+            blocks[bi] = {
+              ...block,
               status: evt.status,
-              ...(evt.status === 'failed' && evt.failureMessage
-                ? { failureMessage: evt.failureMessage }
-                : {}),
+              ...(evt.status === 'failed' ? { failureMessage: evt.failureMessage } : {}),
             };
+            updatedMessages[mi] = { ...message, blocks };
+            updated = true;
+            break;
           }
-          return b;
-        });
-        return messageUpdated ? { ...m, blocks } : m;
-      });
+        }
+      }
 
       if (updated) {
         set({ chatThreadMessages: updatedMessages });
@@ -954,6 +960,15 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
     approveChatTool: (toolUseId, approved) => {
       if (!chatHandle) return;
       chatHandle.approveTool(toolUseId, approved);
+    },
+
+    sendOAuthCallback: (mcpServerId, callbackUrl) => {
+      if (!chatHandle) throw new Error('chat thread is not opened');
+      // user message としては積まない (UI 上は AuthRequestCard の状態遷移で表現する)。
+      // streaming フラグだけ立てて、サーバから流れてくる chat_auth_request / 完了通知を
+      // 通常の chat イベント経路で受ける。
+      set({ chatThreadStreaming: true });
+      chatHandle.sendOAuthCallback(mcpServerId, callbackUrl);
     },
 
     deleteChatThread: async (threadId) => {

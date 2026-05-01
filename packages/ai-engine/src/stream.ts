@@ -60,14 +60,24 @@ export type ChatEvent =
   // 外部 MCP の OAuth 2.1 認証要求。SDK の authenticate tool_use を検出して
   // tool_use/tool_result の代わりに UI に流す。pending → completed/failed の遷移は
   // 同 thread 内の complete_authentication tool_use 検出時に追って emit する。
+  // status='failed' のときのみ failureMessage を持つ discriminated union 化により、
+  // schema.ts (AuthRequestBlockSchema) の superRefine と型レベルで整合させる。
   | {
       type: 'chat_auth_request';
       messageId: string;
       mcpServerId: string;
       mcpServerLabel: string;
       authUrl: string;
-      status: 'pending' | 'completed' | 'failed';
-      failureMessage?: string;
+      status: 'pending' | 'completed';
+    }
+  | {
+      type: 'chat_auth_request';
+      messageId: string;
+      mcpServerId: string;
+      mcpServerLabel: string;
+      authUrl: string;
+      status: 'failed';
+      failureMessage: string;
     }
   | { type: 'error'; code: string; message: string };
 

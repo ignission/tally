@@ -361,6 +361,28 @@ export class ChatRunner {
     await sdkDone; // バックグラウンドタスクの未捕捉エラーを顕在化
   }
 
+  // 外部 MCP の OAuth コールバック URL を受け取り、対応 server の complete_authentication
+  // を AI に呼ばせる。UI から構造化送信された mcpServerId を prompt に固定することで、
+  // 自然文経由で AI に解釈させていた旧実装の「複数 server 同時運用時に別 server の
+  // complete_authentication を呼ぶ」リスクを排除する (PR-B CR Major)。
+  //
+  // SDK 制約上、complete_authentication tool は agent loop 経由でしか呼べないため、
+  // runUserTurn のラッパーとして実装する。AI 介在は残るが prompt は決定論的に組み立てる。
+  // mcpServerId は server.ts の ChatOAuthCallbackSchema で charset 検証済みなので、
+  // ここでは追加バリデーションをしない。
+  async *runOAuthCallback(mcpServerId: string, callbackUrl: string): AsyncGenerator<ChatEvent> {
+    const text = [
+      'OAuth コールバック URL を受信しました。以下の通り認証を完了してください:',
+      '',
+      `- mcpServerId: ${mcpServerId}`,
+      `- callback URL: ${callbackUrl}`,
+      '',
+      `必ず \`mcp__${mcpServerId}__complete_authentication\` ツールを呼び、`,
+      '他の MCP server の complete_authentication ツールは絶対に使わないでください。',
+    ].join('\n');
+    yield* this.runUserTurn(text, []);
+  }
+
   // OAuth 認証系 tool_use/tool_result ペアを auth_request ブロックに変換する。
   // - authenticate: tool_result.output から auth URL を抽出して新規 pending ブロックを append
   // - complete_authentication: 同 mcpServerId の最新 pending ブロックを completed/failed に更新
@@ -461,17 +483,26 @@ export class ChatRunner {
           failureMessage: result.output.slice(0, 256),
         };
     await chatStore.updateMessageBlock(threadId, found.messageId, found.blockIndex, updated);
-    emit({
-      type: 'chat_auth_request',
-      messageId: found.messageId,
-      mcpServerId: match.mcpServerId,
-      mcpServerLabel,
-      authUrl: found.block.authUrl,
-      status: updated.status,
-      ...(updated.status === 'failed' && updated.failureMessage
-        ? { failureMessage: updated.failureMessage }
-        : {}),
-    });
+    if (updated.status === 'failed' && updated.failureMessage) {
+      emit({
+        type: 'chat_auth_request',
+        messageId: found.messageId,
+        mcpServerId: match.mcpServerId,
+        mcpServerLabel,
+        authUrl: found.block.authUrl,
+        status: 'failed',
+        failureMessage: updated.failureMessage,
+      });
+    } else {
+      emit({
+        type: 'chat_auth_request',
+        messageId: found.messageId,
+        mcpServerId: match.mcpServerId,
+        mcpServerLabel,
+        authUrl: found.block.authUrl,
+        status: 'completed',
+      });
+    }
   }
 
   // 承認 intercept + 実ツール呼び出し。

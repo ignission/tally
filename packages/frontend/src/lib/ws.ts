@@ -93,6 +93,10 @@ export interface ChatHandle {
   events: AsyncIterable<ChatEvent>;
   sendUserMessage: (text: string, contextNodeIds?: string[]) => void;
   approveTool: (toolUseId: string, approved: boolean) => void;
+  // 外部 MCP の OAuth コールバック URL を構造化送信する (PR-B CR Major)。
+  // 自然文 user_message に mcpServerId を埋め込むのを避け、サーバ側で AI に
+  // 「指定 server の complete_authentication を呼べ」と決定論的に prompt 化させる。
+  sendOAuthCallback: (mcpServerId: string, callbackUrl: string) => void;
   close: () => void;
 }
 
@@ -189,6 +193,8 @@ export function openChat(opts: OpenChatOptions): ChatHandle {
       }),
     approveTool: (toolUseId, approved) =>
       sendWhenReady({ type: 'approve_tool', toolUseId, approved }),
+    sendOAuthCallback: (mcpServerId, callbackUrl) =>
+      sendWhenReady({ type: 'oauth_callback', mcpServerId, callbackUrl }),
     close: () => ws.close(),
   };
 }

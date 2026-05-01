@@ -1409,9 +1409,10 @@ describe('ChatRunner — auth_request 変換 (OAuth 2.1)', () => {
 
       const authEvt = events.find((e) => e.type === 'chat_auth_request');
       expect(authEvt).toBeDefined();
-      if (authEvt && authEvt.type === 'chat_auth_request') {
-        expect(authEvt.status).toBe('failed');
+      if (authEvt?.type === 'chat_auth_request' && authEvt.status === 'failed') {
         expect(authEvt.failureMessage).toContain('invalid_grant');
+      } else {
+        throw new Error('expected failed auth_request event');
       }
     } finally {
       rmSync(root, { recursive: true, force: true });
