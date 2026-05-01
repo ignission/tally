@@ -43,6 +43,39 @@ const ChatApproveToolSchema = z.object({
   approved: z.boolean(),
 });
 
+// 外部 MCP の OAuth コールバック URL を構造化されたメッセージで送る (PR-B CR Major)。
+// 自然文 user_message でモデルに mcpServerId を解釈させると、複数 server があるときに
+// 別 server の complete_authentication を呼ぶリスクがあったため、UI からは mcpServerId
+// を構造化フィールドとして固定して送り、chat-runner 側で id 入りプロンプトを生成する。
+// mcpServerId は McpServerConfigSchema.id と同じ charset 制約 (英小文字 + 数字 + ハイフン)。
+//
+// callbackUrl は UI の isLikelyCallbackUrl と同じ条件で validate する。
+// WS には UI 経由でない外部クライアントからも到達しうるので、サーバ側でも
+// loopback / no-credentials / code+state 必須を確認する (CR Major)。
+const isValidCallbackUrl = (s: string): boolean => {
+  try {
+    const u = new URL(s);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+    if (u.username || u.password) return false;
+    const host = u.hostname;
+    if (host !== 'localhost' && host !== '127.0.0.1' && host !== '::1' && host !== '[::1]') {
+      return false;
+    }
+    return u.searchParams.has('code') && u.searchParams.has('state');
+  } catch {
+    return false;
+  }
+};
+
+const ChatOAuthCallbackSchema = z.object({
+  type: z.literal('oauth_callback'),
+  mcpServerId: z.string().regex(/^[a-z][a-z0-9-]{0,31}$/u),
+  callbackUrl: z.string().url().refine(isValidCallbackUrl, {
+    message:
+      'callback URL は loopback (localhost / 127.0.0.1 / ::1) で credential なし、code と state クエリ必須',
+  }),
+});
+
 // registry からプロジェクト ID に対応するディレクトリパスを返す。
 // 見つからなければ null。
 async function resolveDir(id: string): Promise<string | null> {
@@ -239,6 +272,29 @@ function handleChatConnection(ws: WebSocket, sdk: SdkLike): void {
       // approveTool は同期的に pendingApprovals の Promise を resolve する。
       // 対応する runUserTurn iterator が続きを進め、tool_result イベントを emit する。
       runner.approveTool(result.data.toolUseId, result.data.approved);
+      return;
+    }
+
+    if (obj.type === 'oauth_callback') {
+      const result = ChatOAuthCallbackSchema.safeParse(parsed);
+      if (!result.success) {
+        send({
+          type: 'error',
+          code: 'bad_request',
+          message: `invalid oauth_callback: ${result.error.message}`,
+        });
+        return;
+      }
+      try {
+        for await (const evt of runner.runOAuthCallback(
+          result.data.mcpServerId,
+          result.data.callbackUrl,
+        )) {
+          send(evt);
+        }
+      } catch (err) {
+        send({ type: 'error', code: 'agent_failed', message: String(err) });
+      }
       return;
     }
 

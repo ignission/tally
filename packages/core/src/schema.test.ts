@@ -268,6 +268,70 @@ describe('ChatBlockSchema', () => {
       }).success,
     ).toBe(true);
   });
+  it('auth_request ブロック (pending)', () => {
+    const r = ChatBlockSchema.safeParse({
+      type: 'auth_request',
+      mcpServerId: 'atlassian',
+      mcpServerLabel: 'Atlassian',
+      authUrl: 'https://mcp.atlassian.com/v1/authorize?response_type=code&client_id=abc',
+      status: 'pending',
+    });
+    expect(r.success).toBe(true);
+  });
+  it('auth_request ブロック (failed + failureMessage)', () => {
+    const r = ChatBlockSchema.safeParse({
+      type: 'auth_request',
+      mcpServerId: 'atlassian',
+      mcpServerLabel: 'Atlassian',
+      authUrl: 'https://mcp.atlassian.com/v1/authorize?response_type=code&client_id=abc',
+      status: 'failed',
+      failureMessage: 'invalid_grant',
+    });
+    expect(r.success).toBe(true);
+  });
+  it('auth_request の authUrl が URL でないと reject', () => {
+    const r = ChatBlockSchema.safeParse({
+      type: 'auth_request',
+      mcpServerId: 'atlassian',
+      mcpServerLabel: 'Atlassian',
+      authUrl: 'not-a-url',
+      status: 'pending',
+    });
+    expect(r.success).toBe(false);
+  });
+  // status と failureMessage の整合を schema で固定。
+  it('auth_request: failed に failureMessage 無しは reject', () => {
+    const r = ChatBlockSchema.safeParse({
+      type: 'auth_request',
+      mcpServerId: 'atlassian',
+      mcpServerLabel: 'Atlassian',
+      authUrl: 'https://mcp.atlassian.com/v1/authorize?response_type=code&client_id=abc',
+      status: 'failed',
+    });
+    expect(r.success).toBe(false);
+  });
+  it('auth_request: pending に failureMessage 付きは reject', () => {
+    const r = ChatBlockSchema.safeParse({
+      type: 'auth_request',
+      mcpServerId: 'atlassian',
+      mcpServerLabel: 'Atlassian',
+      authUrl: 'https://mcp.atlassian.com/v1/authorize?response_type=code&client_id=abc',
+      status: 'pending',
+      failureMessage: 'should not be here',
+    });
+    expect(r.success).toBe(false);
+  });
+  it('auth_request: completed に failureMessage 付きは reject', () => {
+    const r = ChatBlockSchema.safeParse({
+      type: 'auth_request',
+      mcpServerId: 'atlassian',
+      mcpServerLabel: 'Atlassian',
+      authUrl: 'https://mcp.atlassian.com/v1/authorize?response_type=code&client_id=abc',
+      status: 'completed',
+      failureMessage: 'should not be here',
+    });
+    expect(r.success).toBe(false);
+  });
   it('不正な type は reject', () => {
     expect(ChatBlockSchema.safeParse({ type: 'other', text: 'x' }).success).toBe(false);
   });
@@ -321,51 +385,18 @@ describe('ChatThreadSchema / ChatThreadMetaSchema', () => {
 });
 
 describe('McpServerConfigSchema', () => {
-  it('Cloud (basic) auth の round-trip が通る', () => {
+  // OAuth 2.1 採用後、Tally は url のみ持ち auth credentials は MCP/SDK に委譲する。
+  // よって round-trip の最小形は id/name/kind/url/options のみ。
+  it('atlassian round-trip (auth credentials は MCP/SDK 任せ、Tally は url のみ)', () => {
     const raw = {
       id: 'atlassian-cloud',
       name: 'Atlassian Cloud',
       kind: 'atlassian' as const,
       url: 'https://mcp.atlassian.example/v1/mcp',
-      auth: {
-        type: 'pat' as const,
-        scheme: 'basic' as const,
-        emailEnvVar: 'ATLASSIAN_EMAIL',
-        tokenEnvVar: 'ATLASSIAN_API_TOKEN',
-      },
       options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
     };
     const parsed = McpServerConfigSchema.parse(raw);
     expect(parsed).toEqual(raw);
-  });
-
-  it('Server/DC (bearer) auth の round-trip が通る', () => {
-    const raw = {
-      id: 'atlassian-onprem',
-      name: 'Atlassian On-Prem',
-      kind: 'atlassian' as const,
-      url: 'https://jira.example.com/mcp',
-      auth: {
-        type: 'pat' as const,
-        scheme: 'bearer' as const,
-        tokenEnvVar: 'JIRA_PAT',
-      },
-      options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
-    };
-    const parsed = McpServerConfigSchema.parse(raw);
-    expect(parsed).toEqual(raw);
-  });
-
-  it('basic で emailEnvVar 無しは fail', () => {
-    expect(() =>
-      McpServerConfigSchema.parse({
-        id: 'a',
-        name: 'A',
-        kind: 'atlassian',
-        url: 'https://x.test/mcp',
-        auth: { type: 'pat', scheme: 'basic', tokenEnvVar: 'T' },
-      }),
-    ).toThrow();
   });
 
   it('options 未指定なら default が入る', () => {
@@ -374,7 +405,6 @@ describe('McpServerConfigSchema', () => {
       name: 'A',
       kind: 'atlassian',
       url: 'https://x.test/mcp',
-      auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'X_PAT' },
     });
     expect(parsed.options.maxChildIssues).toBe(30);
     expect(parsed.options.maxCommentsPerIssue).toBe(5);
@@ -387,9 +417,21 @@ describe('McpServerConfigSchema', () => {
         name: 'A',
         kind: 'atlassian',
         url: 'not a url',
-        auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'X' },
       }),
     ).toThrow();
+  });
+
+  it('auth フィールドが付いていても strict ではないので無視される (passthrough)', () => {
+    // schema 上は auth キーを持たない。zod は default で strict ではないため余計なキーは drop。
+    // OAuth 移行前の YAML が混入しても parse 自体は通すが、auth 情報は使われない。
+    const parsed = McpServerConfigSchema.parse({
+      id: 'a',
+      name: 'A',
+      kind: 'atlassian',
+      url: 'https://x.test/mcp',
+      auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'JIRA_PAT' }, // 余計なキー
+    } as Record<string, unknown>);
+    expect((parsed as unknown as { auth?: unknown }).auth).toBeUndefined();
   });
 });
 
@@ -400,11 +442,6 @@ describe('McpServerConfigSchema hardening', () => {
     name: 'Atlassian',
     kind: 'atlassian' as const,
     url: 'https://mcp.atlassian.example/v1/mcp',
-    auth: {
-      type: 'pat' as const,
-      scheme: 'bearer' as const,
-      tokenEnvVar: 'JIRA_PAT',
-    },
   };
 
   describe('url: https 強制 + loopback 例外', () => {
@@ -414,7 +451,7 @@ describe('McpServerConfigSchema hardening', () => {
       ).not.toThrow();
     });
 
-    it('http://localhost は pass (sooperset セルフホスト想定)', () => {
+    it('http://localhost は pass (セルフホスト MCP server 想定)', () => {
       expect(() =>
         McpServerConfigSchema.parse({ ...validBase, url: 'http://localhost:9000/mcp' }),
       ).not.toThrow();
@@ -426,7 +463,7 @@ describe('McpServerConfigSchema hardening', () => {
       ).not.toThrow();
     });
 
-    it('http://example.com は fail (cleartext で credential が漏れる)', () => {
+    it('http://example.com は fail (OAuth handshake / token を cleartext で運ばない)', () => {
       expect(() =>
         McpServerConfigSchema.parse({ ...validBase, url: 'http://example.com/mcp' }),
       ).toThrow();
@@ -474,100 +511,6 @@ describe('McpServerConfigSchema hardening', () => {
       expect(() => McpServerConfigSchema.parse({ ...validBase, id: 'a'.repeat(33) })).toThrow();
     });
   });
-
-  describe('emailEnvVar / tokenEnvVar: env var 名 regex', () => {
-    const baseBasic = {
-      ...validBase,
-      auth: {
-        type: 'pat' as const,
-        scheme: 'basic' as const,
-        emailEnvVar: 'ATLASSIAN_EMAIL',
-        tokenEnvVar: 'ATLASSIAN_API_TOKEN',
-      },
-    };
-
-    it("'ATLASSIAN_PAT' は pass", () => {
-      expect(() =>
-        McpServerConfigSchema.parse({
-          ...validBase,
-          auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'ATLASSIAN_PAT' },
-        }),
-      ).not.toThrow();
-    });
-
-    it("'JIRA_PAT_1' は pass (数字含む OK)", () => {
-      expect(() =>
-        McpServerConfigSchema.parse({
-          ...validBase,
-          auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'JIRA_PAT_1' },
-        }),
-      ).not.toThrow();
-    });
-
-    it("'A' は pass (1 文字大文字)", () => {
-      expect(() =>
-        McpServerConfigSchema.parse({
-          ...validBase,
-          auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'A' },
-        }),
-      ).not.toThrow();
-    });
-
-    it("'lowercase' は fail", () => {
-      expect(() =>
-        McpServerConfigSchema.parse({
-          ...validBase,
-          auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'lowercase' },
-        }),
-      ).toThrow();
-    });
-
-    it("'foo@bar.com' は fail (実値混入を防ぐ)", () => {
-      expect(() =>
-        McpServerConfigSchema.parse({
-          ...baseBasic,
-          auth: {
-            type: 'pat',
-            scheme: 'basic',
-            emailEnvVar: 'foo@bar.com',
-            tokenEnvVar: 'ATLASSIAN_API_TOKEN',
-          },
-        }),
-      ).toThrow();
-    });
-
-    it("'1ABC' は fail (数字始まり)", () => {
-      expect(() =>
-        McpServerConfigSchema.parse({
-          ...validBase,
-          auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: '1ABC' },
-        }),
-      ).toThrow();
-    });
-
-    it("'' (空文字) は fail", () => {
-      expect(() =>
-        McpServerConfigSchema.parse({
-          ...validBase,
-          auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: '' },
-        }),
-      ).toThrow();
-    });
-
-    it('basic auth の emailEnvVar も同じ regex を要求', () => {
-      expect(() =>
-        McpServerConfigSchema.parse({
-          ...baseBasic,
-          auth: {
-            type: 'pat',
-            scheme: 'basic',
-            emailEnvVar: 'lowercase',
-            tokenEnvVar: 'ATLASSIAN_API_TOKEN',
-          },
-        }),
-      ).toThrow();
-    });
-  });
 });
 
 describe('ProjectSchema.mcpServers', () => {
@@ -599,7 +542,6 @@ describe('ProjectSchema.mcpServers', () => {
           name: 'A',
           kind: 'atlassian' as const,
           url: 'https://x.test/mcp',
-          auth: { type: 'pat' as const, scheme: 'bearer' as const, tokenEnvVar: 'JIRA_PAT' },
         },
       ],
     };
@@ -624,7 +566,6 @@ describe('ProjectMetaSchema.mcpServers', () => {
           name: 'A',
           kind: 'atlassian' as const,
           url: 'https://x.test/mcp',
-          auth: { type: 'pat' as const, scheme: 'bearer' as const, tokenEnvVar: 'JIRA_PAT' },
         },
       ],
     });

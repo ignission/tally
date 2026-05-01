@@ -102,7 +102,6 @@ describe('PATCH /api/projects/:id', () => {
               name: 'Atlassian',
               kind: 'atlassian',
               url: 'https://x.test/mcp',
-              auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'JIRA_PAT' },
               options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
             },
           ],
@@ -129,7 +128,6 @@ describe('PATCH /api/projects/:id', () => {
               name: 'A',
               kind: 'atlassian',
               url: 'http://example.com/mcp',
-              auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'X' },
               options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
             },
           ],
@@ -141,7 +139,8 @@ describe('PATCH /api/projects/:id', () => {
   });
 
   it('mcpServers を空配列で全消去できる', async () => {
-    // 事前に登録 (seed PATCH の成功も assert: 前提崩れを取り逃さないため)
+    // 事前に登録 (失敗していると後続の「空配列で削除」が空 → 空 で偽の成功になる
+    // ので、seedRes の成功も assert しておく)。
     const seedRes = await PATCH(
       new Request('http://localhost', {
         method: 'PATCH',
@@ -152,7 +151,6 @@ describe('PATCH /api/projects/:id', () => {
               name: 'A',
               kind: 'atlassian',
               url: 'https://x.test/mcp',
-              auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'X' },
               options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
             },
           ],
