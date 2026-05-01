@@ -11,6 +11,27 @@ import type { SdkLike } from './agent-runner';
 import { buildChatPrompt, ChatRunner, formatNodeForContext } from './chat-runner';
 import type { ChatEvent, SdkMessageLike } from './stream';
 
+// long-lived Query 化に伴い prompt は AsyncIterable<SdkUserMessageLike> 型に変わった。
+// テスト側で「最初に push された user message の content」を読むためのヘルパ。
+// string で渡された場合 (互換) も同じ shape で扱えるようにする。
+function startCapturePromptText(prompt: unknown): { read: () => string } {
+  const captured = { value: '' };
+  if (typeof prompt === 'string') {
+    captured.value = prompt;
+  } else if (
+    prompt &&
+    typeof (prompt as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator] === 'function'
+  ) {
+    const it = (prompt as AsyncIterable<{ message?: { content?: string } }>)[
+      Symbol.asyncIterator
+    ]();
+    it.next().then((r) => {
+      if (!r.done && r.value?.message?.content) captured.value = r.value.message.content;
+    });
+  }
+  return { read: () => captured.value };
+}
+
 describe('ChatRunner', () => {
   let root: string;
 
@@ -194,10 +215,10 @@ describe('ChatRunner', () => {
       priority: 'must',
     })) as Node;
 
-    let capturedPrompt = '';
+    let promptCapture: { read: () => string } = { read: () => '' };
     const sdk: SdkLike = {
-      query: ({ prompt }: { prompt: string }) => {
-        capturedPrompt = prompt;
+      query: ({ prompt }: { prompt: unknown }) => {
+        promptCapture = startCapturePromptText(prompt);
         return (async function* () {
           yield {
             type: 'assistant',
@@ -221,6 +242,7 @@ describe('ChatRunner', () => {
       events.push(e);
     }
 
+    const capturedPrompt = promptCapture.read();
     expect(capturedPrompt).toContain('<context_nodes>');
     expect(capturedPrompt).toContain(`id: ${target.id}`);
     expect(capturedPrompt).toContain('type: requirement');
@@ -273,10 +295,10 @@ describe('ChatRunner', () => {
       body: '',
     })) as Node;
 
-    let capturedPrompt = '';
+    let promptCapture: { read: () => string } = { read: () => '' };
     const sdk: SdkLike = {
-      query: ({ prompt }: { prompt: string }) => {
-        capturedPrompt = prompt;
+      query: ({ prompt }: { prompt: unknown }) => {
+        promptCapture = startCapturePromptText(prompt);
         return (async function* () {
           yield { type: 'result', subtype: 'success', result: 'ok' } as unknown as SdkMessageLike;
         })();
@@ -295,6 +317,7 @@ describe('ChatRunner', () => {
       // drain
     }
 
+    const capturedPrompt = promptCapture.read();
     const histIdx = capturedPrompt.indexOf('<conversation_history>');
     const histEndIdx = capturedPrompt.indexOf('</conversation_history>');
     const ctxIdx = capturedPrompt.indexOf('<context_nodes>');
@@ -325,10 +348,10 @@ describe('ChatRunner', () => {
       body: '',
     })) as Node;
 
-    let capturedPrompt = '';
+    let promptCapture: { read: () => string } = { read: () => '' };
     const sdk: SdkLike = {
-      query: ({ prompt }: { prompt: string }) => {
-        capturedPrompt = prompt;
+      query: ({ prompt }: { prompt: unknown }) => {
+        promptCapture = startCapturePromptText(prompt);
         return (async function* () {
           yield { type: 'result', subtype: 'success', result: 'ok' } as unknown as SdkMessageLike;
         })();
@@ -344,6 +367,7 @@ describe('ChatRunner', () => {
     for await (const _e of runner.runUserTurn('q', ['nonexistent', valid.id, 'also-gone'])) {
       // drain
     }
+    const capturedPrompt = promptCapture.read();
     expect(capturedPrompt).toContain('<context_nodes>');
     expect(capturedPrompt).toContain(`id: ${valid.id}`);
     expect(capturedPrompt).not.toContain('id: nonexistent');
@@ -356,10 +380,10 @@ describe('ChatRunner', () => {
     const projectStore = new FileSystemProjectStore(root);
     const thread = await chatStore.createChat({ projectId: 'proj-1', title: 't' });
 
-    let capturedPrompt = '';
+    let promptCapture: { read: () => string } = { read: () => '' };
     const sdk: SdkLike = {
-      query: ({ prompt }: { prompt: string }) => {
-        capturedPrompt = prompt;
+      query: ({ prompt }: { prompt: unknown }) => {
+        promptCapture = startCapturePromptText(prompt);
         return (async function* () {
           yield { type: 'result', subtype: 'success', result: 'ok' } as unknown as SdkMessageLike;
         })();
@@ -375,6 +399,7 @@ describe('ChatRunner', () => {
     for await (const _e of runner.runUserTurn('hello', [])) {
       // drain
     }
+    const capturedPrompt = promptCapture.read();
     expect(capturedPrompt).not.toContain('<context_nodes>');
     // user 文字列自体は (履歴経由で) 必ず prompt に入る
     expect(capturedPrompt).toContain('hello');

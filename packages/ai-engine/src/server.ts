@@ -304,4 +304,19 @@ function handleChatConnection(ws: WebSocket, sdk: SdkLike): void {
       message: `unknown message type: ${String(obj.type)}`,
     });
   });
+
+  // WS が閉じたら ChatRunner も片付ける (long-lived SDK subprocess を終わらせる)。
+  // close を呼ばないと subprocess + MCP HTTP transport がプロセス終了まで生き残る。
+  ws.on('close', () => {
+    if (runner) {
+      const r = runner;
+      runner = null;
+      // close 内部の例外 (subprocess kill 失敗など) を unhandled rejection に
+      // しないために .catch で握る。観測できるよう warn は出す
+      // (codex 指摘 Major: void close() だと unhandled rejection 化する)。
+      r.close().catch((err) => {
+        console.warn('[server] runner.close() failed:', err);
+      });
+    }
+  });
 }
