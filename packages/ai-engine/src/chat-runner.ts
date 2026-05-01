@@ -8,7 +8,8 @@ import {
 } from '@tally/core';
 import type { ChatStore, ProjectStore } from '@tally/storage';
 
-import type { SdkLike } from './agent-runner';
+import type { SdkLike, SdkQueryHandle, SdkUserMessageLike } from './agent-runner';
+import { AsyncIterableInput } from './async-input';
 import { type AuthToolNameMatch, extractAuthUrl, parseAuthToolName } from './auth-detector';
 import { buildMcpServers } from './mcp/build-mcp-servers';
 import { redactMcpSecrets } from './mcp/redact';
@@ -86,6 +87,23 @@ export interface ToolEntry {
   handler: (input: unknown) => Promise<{ ok: boolean; output: string }>;
 }
 
+// 1 user turn の間だけ生きる mutable state (long-lived Query 化)。
+// SDK ストリームから流れてくる SDK メッセージを「今どの assistant message に紐付けるか」
+// 「どの queue に流すか」を解決するためのコンテキスト。
+// turn と turn の間 (= ユーザーが次の user message を送るまで) は null。
+interface TurnState {
+  assistantMsgId: string;
+  queue: EventQueue<ChatEvent>;
+  textBuffer: string[];
+  // OAuth 認証フロー検出用 stash (tool_use 受信 → tool_result 到達時に auth_request に変換)。
+  stashedAuthUses: Map<string, { match: AuthToolNameMatch; mcpServerLabel: string }>;
+  // 外部 MCP の id → name の即引き map (label 表示用、turn 中は不変)。
+  externalConfigById: Map<string, string>;
+  // 同 turn 中に観測した外部 MCP の tool_use の id 集合。tool_result が来た時、
+  // ここに無い id は「内部 / 想定外」として無視する (CR 指摘 #19 2 周目)。
+  externalToolUseIds: Set<string>;
+}
+
 // ChatRunner は 1 スレッド分の multi-turn 対話を駆動する。
 // 各 user turn を `runUserTurn` で流し、tool_use 承認は外部から `approveTool` で通知する。
 //
@@ -101,6 +119,25 @@ export class ChatRunner {
   private readonly deps: ChatRunnerDeps;
   // 承認待ちの Promise resolver。ui-toolUseId → (approved) => void。
   private readonly pendingApprovals = new Map<string, (approved: boolean) => void>();
+
+  // long-lived SDK Query。1 ChatRunner = 1 sdk.query() = 1 subprocess に固定して
+  // MCP HTTP transport の OAuth 状態 (PKCE / token) を turn 跨ぎで保持する。
+  // null = まだ start していない。closed 状態になっても close() / 再 ensure で破棄して再開できる。
+  private query: SdkQueryHandle | null = null;
+  private input: AsyncIterableInput<SdkUserMessageLike> | null = null;
+  private outputLoopDone: Promise<void> | null = null;
+  private outputLoopFailed = false;
+  // ensureQuery が並行で複数回 await されるのを防ぐ Promise キャッシュ
+  // (codex 指摘: 再入で tearDownQuery → sdk.query が 2 度走り、最初の query / output loop が
+  // 孤立してリークするのを回避)。完了時に null 化して次回の再起動を許す。
+  private ensureQueryInflight: Promise<void> | null = null;
+
+  // 現在進行中の turn。runUserTurn の入口で set、出口で null。
+  // MCP ハンドラと出力ループはここから assistantMsgId / queue を読む。
+  private currentTurn: TurnState | null = null;
+  // ensureQuery が走った時に決まる、long-lived な externalConfig snapshot。
+  // 再起動するまで mcpServers の入替えは反映しない。
+  private cachedExternalConfigById: Map<string, string> | null = null;
 
   constructor(deps: ChatRunnerDeps) {
     this.deps = deps;
@@ -122,18 +159,28 @@ export class ChatRunner {
     });
   }
 
-  // user の 1 ターンを実行する。
-  // 1) user message を append
-  // 2) 空 assistant message を append (ID 確保)
-  // 3) MCP サーバを組み立てて SDK に渡し、assistant stream を iterate
-  // 4) text block は buffer + delta emit。tool_use は MCP ハンドラ内で承認 intercept される。
-  // 5) turn 末に text blocks を assistant message 先頭に統合
+  // user の 1 ターンを実行する (long-lived Query 化版)。
+  // - 1 ChatRunner = 1 sdk.query() = 1 subprocess に固定し、MCP HTTP transport の
+  //   OAuth state (PKCE / token) を turn 跨ぎで保持する。
+  // - 各 turn では (1) user/空 assistant message の永続化、(2) prompt 組み立て、
+  //   (3) AsyncIterableInput への push でターン開始、(4) queue ドレインで進む。
+  // - turn 並走は禁止 (codex 指摘): currentTurn が既に居れば error を返して即終了。
   //
   // contextNodeIds: ユーザーが「@メンション」で添付したノード ID 配列 (issue #11)。
-  // ProjectStore から該当ノードを引いて prompt の <context_nodes> ブロックに埋め込む。
-  // 不在 ID は無視 (削除済みノード等)。永続化はせず、毎ターンの prompt prefix としてのみ使う。
   async *runUserTurn(userText: string, contextNodeIds: string[] = []): AsyncGenerator<ChatEvent> {
-    const { sdk, chatStore, projectStore, projectDir, threadId } = this.deps;
+    const { chatStore, projectStore, threadId } = this.deps;
+
+    // turn 並走禁止 (codex 指摘 Major 1)。currentTurn が既に居る = 前 turn が
+    // まだ完了していない (UI がイベントをドレイン中) ので、新 turn を被せると
+    // SDK 出力が前 turn の assistantMsgId に誤接続される。明示的に拒否する。
+    if (this.currentTurn) {
+      yield {
+        type: 'error',
+        code: 'turn_in_progress',
+        message: '前のターンがまだ完了していません',
+      };
+      return;
+    }
 
     const thread = await chatStore.getChat(threadId);
     if (!thread) {
@@ -153,53 +200,17 @@ export class ChatRunner {
     yield { type: 'chat_user_message_appended', messageId: userMsgId };
 
     // 2. prompt を先に組む。user message 追加直後の履歴 (末尾が user) をスナップショットし、
-    //    buildChatPrompt が <current_user_message> を末尾の user message として正しく抽出できる状態で呼ぶ。
-    //    これは「<context_nodes> は今ターンの user 入力より前に置く」契約 (issue #11) を守るため必須。
-    //    後続で空 assistant を append すると履歴末尾が assistant になってしまい、buildChatPrompt の
-    //    `last?.role === 'user'` 判定が false に倒れる (= context_nodes が user 入力の後ろに並ぶバグ) ので、
-    //    必ずこの順で snapshot → prompt 組立 → 空 assistant append の順を守る。
+    //    buildChatPrompt が <current_user_message> を末尾の user message として正しく抽出できる
+    //    状態で呼ぶ (issue #11 の <context_nodes> 配置契約)。
     const threadWithUser = await chatStore.getChat(threadId);
     const contextNodes = await loadContextNodes(projectStore, contextNodeIds);
     const prompt = buildChatPrompt(threadWithUser?.messages ?? [], contextNodes);
-    const systemPrompt = buildChatSystemPrompt();
 
-    // 3. assistantMsgId を先に生成 (buildMcpServer の handler が emit 先として参照)。
-    //    永続化は MCP 構築成功後に行う (途中で throw した場合に空 assistant message が
-    //    YAML に残らないようにする。ロード時は <message blocks=[]> がスキップされるが、
-    //    chat 履歴 UI には空バブルが蓄積するのを防ぐため)。
+    // 3. 空の assistant message を append (後続の tool_use 即時永続化の親として必要)。
+    //    long-lived 化では ensureQuery 内の出力ループが bg で即起動するため、append を
+    //    ensureQuery 後に遅らせると「空 assistant 永続化前に SDK の result message が
+    //    dispatch されて空 message のままになる」race が起きる。先に append しておく。
     const assistantMsgId = newChatMessageId();
-
-    // 4. MCP 経由で呼ばれる tool ハンドラ内で invokeInterceptedTool を回す。
-    //    MCP handler は SDK query を block するので、イベント emit は AsyncQueue 経由に分離する。
-    //    さもないと deadlock (SDK が MCP 応答待ち / MCP が承認待ち / 承認は UI 経由で queue flush が必要)。
-    const queue = new EventQueue<ChatEvent>();
-    const tools = this.buildToolRegistry();
-    const emit = (e: ChatEvent) => queue.push(e);
-    const mcp = this.buildMcpServer(tools, emit, assistantMsgId);
-
-    // 4b. プロジェクト設定の mcpServers[] を Tally MCP と合成する (Task 11)。
-    //     毎ターン読むことで env / 設定変更がホットリロードされる。
-    //     env 未設定 (PAT 等) は buildMcpServers が throw するので、ここで補足し
-    //     error event を emit して early return する (sdk.query は呼ばない)。
-    const projectMeta = await projectStore.getProjectMeta();
-    const externalConfigs = projectMeta?.mcpServers ?? [];
-    let mcpServers: Record<string, unknown>;
-    let allowedTools: string[];
-    try {
-      const built = buildMcpServers({ tallyMcp: mcp, configs: externalConfigs });
-      mcpServers = built.mcpServers;
-      allowedTools = built.allowedTools;
-    } catch (err) {
-      yield {
-        type: 'error',
-        code: 'mcp_config_invalid',
-        message: err instanceof Error ? err.message : String(err),
-      };
-      return;
-    }
-
-    // 5. MCP 構築が成功した時点で空 assistant message を永続化 (後続の tool_use 即時
-    //    永続化の親として必要)。buildChatPrompt スナップショット後・sdk.query 前に行う。
     await chatStore.appendMessage(threadId, {
       id: assistantMsgId,
       role: 'assistant',
@@ -208,157 +219,285 @@ export class ChatRunner {
     });
     yield { type: 'chat_assistant_message_started', messageId: assistantMsgId };
 
-    const textBuffer: string[] = [];
-    // 外部 MCP の tool_use を観測した toolUseId のみ集合に保持し、対応する tool_result
-    // のみ external として永続化する。Tally 内部 MCP (mcp__tally__*) は本来 intercept
-    // 経路で SDK ストリームに現れない前提だが、SDK 仕様変更や edge case で内部 result
-    // が流れた場合に external 誤分類するのを防ぐためのガード (CR 指摘 #19 2 周目)。
-    const externalToolUseIds = new Set<string>();
+    // 4. turn state を組み立てる。runOutputLoop と MCP ハンドラはここから読む。
+    //    ensureQuery より前に必ず set しておく — output loop が SDK メッセージを
+    //    dispatch する瞬間に currentTurn が null だと取りこぼす (race)。
+    const queue = new EventQueue<ChatEvent>();
+    const turnState: TurnState = {
+      assistantMsgId,
+      queue,
+      textBuffer: [],
+      stashedAuthUses: new Map(),
+      externalConfigById: this.cachedExternalConfigById ?? new Map(),
+      externalToolUseIds: new Set(),
+    };
+    this.currentTurn = turnState;
 
-    // OAuth 認証フロー検出用 state。
-    // SDK の tool_use → tool_result は同じ for-await ループ内で順に流れるので、
-    // tool_use 時点で認証系か判定して stash しておき、tool_result 到達時に
-    // raw な tool_use/tool_result を捨てて auth_request ブロックに変換する。
-    // mcpServerLabel 解決用に externalConfigs を id → name の map にしておく。
+    // 5. SDK Query (long-lived) を必要なら起動する。
+    try {
+      await this.ensureQuery();
+    } catch (err) {
+      this.currentTurn = null;
+      yield {
+        type: 'error',
+        code: 'mcp_config_invalid',
+        message: err instanceof Error ? err.message : String(err),
+      };
+      return;
+    }
+    // ensureQuery が externalConfig を更新するので turnState の参照を最新へ差し替える。
+    turnState.externalConfigById = this.cachedExternalConfigById ?? new Map();
+
+    // 6. user message を SDK の input ストリームに push する。
+    //    ensureQuery 成功後は this.input が必ず存在するはず (codex 指摘 Major 2:
+    //    null チェックを invariant assertion で表明し、無音破棄 → ハングを防ぐ)。
+    if (!this.input) {
+      this.currentTurn = null;
+      throw new Error('invariant: ensureQuery succeeded but input is null');
+    }
+    this.input.push({
+      type: 'user',
+      message: { role: 'user', content: prompt },
+      parent_tool_use_id: null,
+    });
+
+    // 8. queue をドレイン。chat_turn_ended が来たら今 turn は終わり。
+    try {
+      while (true) {
+        const evt = await queue.next();
+        if (evt === null) break;
+        yield evt;
+        if (evt.type === 'chat_turn_ended') break;
+      }
+    } finally {
+      this.currentTurn = null;
+    }
+  }
+
+  // SDK query を 1 度だけ立ち上げ、出力ループをバックグラウンドで走らせる。
+  // close() / iter 終端 / 例外で query が死んでいる場合は次回呼び出しで再起動する。
+  // 並行呼び出しは Promise キャッシュで直列化する (codex 指摘 Major 3: 再入で
+  // tearDownQuery → sdk.query が 2 度走り、最初の query / output loop が孤立して
+  // リークするのを回避)。
+  // throw する条件: project mcpServers の設定不正 (URL 無効等) — 上位で error event 化される。
+  private ensureQuery(): Promise<void> {
+    if (this.query && !this.outputLoopFailed) return Promise.resolve();
+    if (this.ensureQueryInflight) return this.ensureQueryInflight;
+    const p = this.startQueryInternal().finally(() => {
+      this.ensureQueryInflight = null;
+    });
+    this.ensureQueryInflight = p;
+    return p;
+  }
+
+  private async startQueryInternal(): Promise<void> {
+    // 既存が死んでいるなら片付けてから作り直す。
+    this.tearDownQuery();
+
+    const { sdk, projectStore, projectDir } = this.deps;
+    const projectMeta = await projectStore.getProjectMeta();
+    const externalConfigs = projectMeta?.mcpServers ?? [];
+
     const externalConfigById = new Map<string, string>();
     for (const c of externalConfigs) externalConfigById.set(c.id, c.name);
-    const stashedAuthUses = new Map<string, { match: AuthToolNameMatch; mcpServerLabel: string }>();
+    this.cachedExternalConfigById = externalConfigById;
 
-    // 5. SDK query をバックグラウンドで走らせ、queue にイベントを push する。
-    //    generator 側は queue をドレインして yield するだけ。
-    const sdkDone = (async () => {
-      try {
-        const iter = sdk.query({
-          prompt,
-          options: {
-            systemPrompt,
-            mcpServers,
-            tools: [],
-            allowedTools,
-            permissionMode: 'dontAsk',
-            settingSources: [],
-            cwd: projectDir,
-            ...(process.env.CLAUDE_CODE_PATH
-              ? { pathToClaudeCodeExecutable: process.env.CLAUDE_CODE_PATH }
-              : {}),
-          },
-        });
+    const tools = this.buildToolRegistry();
+    // long-lived Query では MCP handler が「いつどの assistantMsgId に emit するか」を
+    // currentTurn から動的解決する。Builder には turn 越境した値を渡さず、
+    // currentTurn 経由で参照させる。
+    const mcp = this.buildMcpServer(tools);
+    const built = buildMcpServers({ tallyMcp: mcp, configs: externalConfigs });
 
-        for await (const msg of iter) {
-          console.log(
-            '[chat-runner] sdk msg:',
-            JSON.stringify(redactMcpSecrets(msg)).slice(0, 200),
-          );
-          const blocks = extractAssistantBlocks(msg);
-          for (const b of blocks) {
-            if (b.type === 'text') {
-              textBuffer.push(b.text);
-              queue.push({ type: 'chat_text_delta', messageId: assistantMsgId, text: b.text });
-            } else if (b.type === 'tool_use') {
-              // OAuth 認証系ツール (mcp__*__authenticate / complete_authentication) は
-              // tool_use を素のまま並べると UX が破綻するので、tool_result 到達まで stash して
-              // auth_request ブロックに変換する。
-              const authMatch = parseAuthToolName(b.name);
-              if (authMatch) {
-                const label =
-                  externalConfigById.get(authMatch.mcpServerId) ?? authMatch.mcpServerId;
-                stashedAuthUses.set(b.toolUseId, { match: authMatch, mcpServerLabel: label });
-                continue;
-              }
-              // 外部 MCP の tool_use: source='external' で永続化、承認 UI なし (Task 12)。
-              externalToolUseIds.add(b.toolUseId);
-              await chatStore.appendBlockToMessage(threadId, assistantMsgId, {
-                type: 'tool_use',
-                toolUseId: b.toolUseId,
-                name: b.name,
-                input: b.input,
-                source: 'external',
-              });
-              queue.push({
-                type: 'chat_tool_external_use',
-                messageId: assistantMsgId,
-                toolUseId: b.toolUseId,
-                name: b.name,
-                input: b.input,
-              });
-            } else if (b.type === 'tool_result') {
-              // 認証系 tool_use とペアになる tool_result は auth_request に変換する (PR-B)。
-              const stash = stashedAuthUses.get(b.toolUseId);
-              if (stash) {
-                stashedAuthUses.delete(b.toolUseId);
-                await this.handleAuthToolResult({
-                  match: stash.match,
-                  mcpServerLabel: stash.mcpServerLabel,
-                  result: { ok: b.ok, output: b.output },
-                  assistantMsgId,
-                  emit: (e) => queue.push(e),
-                });
-                continue;
-              }
-              // 同 turn 中に観測した外部 tool_use の id のみ external として扱う。
-              // 集合に無い toolUseId (= 内部 / intercept 経路 / 想定外) は無視する。
-              if (!externalToolUseIds.has(b.toolUseId)) continue;
-              // Task 13: 大規模 epic で tool_result が 500KB+ になり得るので、
-              // YAML 永続化は 4KB に切り詰める。event はフル (UI はメモリ内で全文展開可)。
-              await chatStore.appendBlockToMessage(threadId, assistantMsgId, {
-                type: 'tool_result',
-                toolUseId: b.toolUseId,
-                ok: b.ok,
-                output: truncateForPersistence(b.output),
-              });
-              queue.push({
-                type: 'chat_tool_external_result',
-                messageId: assistantMsgId,
-                toolUseId: b.toolUseId,
-                ok: b.ok,
-                output: b.output,
-              });
-            }
-          }
-        }
+    const input = new AsyncIterableInput<SdkUserMessageLike>();
+    this.input = input;
 
-        // text blocks を assistant message の先頭に統合 (tool_use/result は intercept 経路で既に append 済み)
-        if (textBuffer.length > 0) {
-          const current = await chatStore.getChat(threadId);
-          const target = current?.messages.find((m) => m.id === assistantMsgId);
-          if (current && target) {
-            const textBlocks: ChatBlock[] = textBuffer.map((t) => ({ type: 'text', text: t }));
-            await chatStore.replaceMessageBlocks(threadId, assistantMsgId, [
-              ...textBlocks,
-              ...target.blocks,
-            ]);
-          }
-        } else {
-          // text 出力なし。complete_authentication 専用 turn のように handleAuthToolResult が
-          // 過去 message の pending を更新するだけのケースでは assistantMsgId の blocks が
-          // 0 件のまま残り、UI に空のアシスタント bubble が蓄積する。プレースホルダを置いて
-          // 「処理した」ことを示す。
-          const current = await chatStore.getChat(threadId);
-          const target = current?.messages.find((m) => m.id === assistantMsgId);
-          if (target && target.blocks.length === 0) {
-            await chatStore.replaceMessageBlocks(threadId, assistantMsgId, [
-              { type: 'text', text: '(認証処理を完了しました)' },
-            ]);
-          }
-        }
+    const query = sdk.query({
+      prompt: input.iterable(),
+      options: {
+        systemPrompt: buildChatSystemPrompt(),
+        mcpServers: built.mcpServers,
+        tools: [],
+        allowedTools: built.allowedTools,
+        permissionMode: 'dontAsk',
+        settingSources: [],
+        cwd: projectDir,
+        ...(process.env.CLAUDE_CODE_PATH
+          ? { pathToClaudeCodeExecutable: process.env.CLAUDE_CODE_PATH }
+          : {}),
+      },
+    });
+    this.query = query;
+    this.outputLoopFailed = false;
+    this.outputLoopDone = this.runOutputLoop(query);
+  }
 
-        queue.push({ type: 'chat_assistant_message_completed', messageId: assistantMsgId });
-        queue.push({ type: 'chat_turn_ended' });
-      } catch (err) {
-        queue.push({ type: 'error', code: 'agent_failed', message: String(err) });
-      } finally {
-        queue.finish();
+  // SDK query から流れてくる SDKMessage を進行中 turn の queue に振り分ける。
+  // turn 終端は SDKResultMessage (type: 'result') の到達で判定し、chat_turn_ended を emit する。
+  // iter が終わった (= subprocess 死亡 / close()) ときは進行中 turn にもエラーを通知して終わらせる。
+  private async runOutputLoop(query: SdkQueryHandle): Promise<void> {
+    try {
+      for await (const msg of query) {
+        console.log('[chat-runner] sdk msg:', JSON.stringify(redactMcpSecrets(msg)).slice(0, 200));
+        await this.dispatchSdkMessage(msg);
       }
-    })();
+    } catch (err) {
+      this.outputLoopFailed = true;
+      const turn = this.currentTurn;
+      if (turn) {
+        turn.queue.push({ type: 'error', code: 'agent_failed', message: String(err) });
+        turn.queue.push({ type: 'chat_turn_ended' });
+        turn.queue.finish();
+      }
+      return;
+    }
+    // iter 正常終端 (close 等)。query が死んだ印として outputLoopFailed を立て、
+    // 次回 ensureQuery で作り直させる。進行中 turn が残っていれば打ち切る。
+    this.outputLoopFailed = true;
+    const turn = this.currentTurn;
+    if (turn) {
+      turn.queue.push({ type: 'chat_turn_ended' });
+      turn.queue.finish();
+    }
+  }
 
-    // 6. queue をドレイン。MCP handler から push される pending/result も含め全て通過する。
-    while (true) {
-      const evt = await queue.next();
-      if (evt === null) break;
-      yield evt;
+  // 1 つの SDKMessage を処理する。turn が無ければ捨てる。
+  private async dispatchSdkMessage(msg: SdkMessageLike): Promise<void> {
+    const turn = this.currentTurn;
+    if (!turn) return;
+    const { chatStore, threadId } = this.deps;
+    const { assistantMsgId, queue, textBuffer, stashedAuthUses } = turn;
+    // ensureQuery 完了直後に SDK が即 yield する test mock のような race ケースで
+    // turn.externalConfigById が初期値 (空 Map) のまま読まれることがあるので、
+    // 最新の cachedExternalConfigById を優先する (load 後に turn は再代入されるが
+    // dispatch のタイミング差で古い参照を保持する可能性がある)。
+    const externalConfigById = this.cachedExternalConfigById ?? turn.externalConfigById;
+
+    // result message: turn 終了
+    const m = msg as unknown as { type?: string; subtype?: string };
+    if (m.type === 'result') {
+      // text blocks を assistant message の先頭に統合 (tool_use/result は intercept 経路で既に append 済み)
+      if (textBuffer.length > 0) {
+        const current = await chatStore.getChat(threadId);
+        const target = current?.messages.find((m2) => m2.id === assistantMsgId);
+        if (current && target) {
+          const textBlocks: ChatBlock[] = textBuffer.map((t) => ({ type: 'text', text: t }));
+          await chatStore.replaceMessageBlocks(threadId, assistantMsgId, [
+            ...textBlocks,
+            ...target.blocks,
+          ]);
+        }
+      } else {
+        // text 出力なし。complete_authentication 専用 turn 等で blocks が 0 件の
+        // まま残ると UI に空アシスタント bubble が蓄積するため、プレースホルダを置く。
+        const current = await chatStore.getChat(threadId);
+        const target = current?.messages.find((m2) => m2.id === assistantMsgId);
+        if (target && target.blocks.length === 0) {
+          await chatStore.replaceMessageBlocks(threadId, assistantMsgId, [
+            { type: 'text', text: '(認証処理を完了しました)' },
+          ]);
+        }
+      }
+      queue.push({ type: 'chat_assistant_message_completed', messageId: assistantMsgId });
+      queue.push({ type: 'chat_turn_ended' });
+      return;
     }
 
-    await sdkDone; // バックグラウンドタスクの未捕捉エラーを顕在化
+    const blocks = extractAssistantBlocks(msg);
+    for (const b of blocks) {
+      if (b.type === 'text') {
+        textBuffer.push(b.text);
+        queue.push({ type: 'chat_text_delta', messageId: assistantMsgId, text: b.text });
+      } else if (b.type === 'tool_use') {
+        const authMatch = parseAuthToolName(b.name);
+        if (authMatch) {
+          const label = externalConfigById.get(authMatch.mcpServerId) ?? authMatch.mcpServerId;
+          stashedAuthUses.set(b.toolUseId, { match: authMatch, mcpServerLabel: label });
+          continue;
+        }
+        // 外部 MCP の tool_use: source='external' で永続化、承認 UI なし (Task 12)。
+        turn.externalToolUseIds.add(b.toolUseId);
+        await chatStore.appendBlockToMessage(threadId, assistantMsgId, {
+          type: 'tool_use',
+          toolUseId: b.toolUseId,
+          name: b.name,
+          input: b.input,
+          source: 'external',
+        });
+        queue.push({
+          type: 'chat_tool_external_use',
+          messageId: assistantMsgId,
+          toolUseId: b.toolUseId,
+          name: b.name,
+          input: b.input,
+        });
+      } else if (b.type === 'tool_result') {
+        const stash = stashedAuthUses.get(b.toolUseId);
+        if (stash) {
+          stashedAuthUses.delete(b.toolUseId);
+          await this.handleAuthToolResult({
+            match: stash.match,
+            mcpServerLabel: stash.mcpServerLabel,
+            result: { ok: b.ok, output: b.output },
+            assistantMsgId,
+            emit: (e) => queue.push(e),
+          });
+          continue;
+        }
+        // 同 turn 中に観測した外部 tool_use の id のみ external として扱う (CR 指摘 #19 2 周目)。
+        if (!turn.externalToolUseIds.has(b.toolUseId)) continue;
+        // Task 13: 大規模 epic で tool_result が 500KB+ になり得るので、
+        // YAML 永続化は 4KB に切り詰める。event はフル (UI はメモリ内で全文展開可)。
+        await chatStore.appendBlockToMessage(threadId, assistantMsgId, {
+          type: 'tool_result',
+          toolUseId: b.toolUseId,
+          ok: b.ok,
+          output: truncateForPersistence(b.output),
+        });
+        queue.push({
+          type: 'chat_tool_external_result',
+          messageId: assistantMsgId,
+          toolUseId: b.toolUseId,
+          ok: b.ok,
+          output: b.output,
+        });
+      }
+    }
+  }
+
+  private tearDownQuery(): void {
+    try {
+      this.input?.close();
+    } catch {
+      /* swallow: close は idempotent */
+    }
+    try {
+      this.query?.close?.();
+    } catch {
+      /* swallow */
+    }
+    this.input = null;
+    this.query = null;
+    // outputLoopDone は close() 側が join で待つために退避してから tearDownQuery を
+    // 呼ぶので、ここで null 化しても安全 (codex 指摘 Minor: close() の順序問題対応)。
+    this.outputLoopDone = null;
+  }
+
+  // ChatRunner 終了時 (WS close 等) に SDK subprocess を片付ける。
+  // outputLoopDone は tearDownQuery で null 化されるため、先に退避してから join する
+  // (codex 指摘の致命 Minor: close() 順序問題)。
+  // 進行中の turn があれば打ち切られ、queue.finish() を経て runUserTurn 側の for-await が
+  // 自然に抜ける。再度 runUserTurn を呼べば ensureQuery が再起動する (= 再 auth が必要)。
+  async close(): Promise<void> {
+    const pendingLoop = this.outputLoopDone;
+    this.tearDownQuery();
+    if (pendingLoop) {
+      try {
+        await pendingLoop;
+      } catch {
+        /* swallow */
+      }
+    }
   }
 
   // 外部 MCP の OAuth コールバック URL を受け取り、対応 server の complete_authentication
@@ -374,9 +513,17 @@ export class ChatRunner {
   // SDK 制約上、complete_authentication tool 自体は agent loop 経由でしか呼べないため、
   // sdk.query は呼ぶが allowedTools = [対象 tool 1 件] で他を遮断する。
   async *runOAuthCallback(mcpServerId: string, callbackUrl: string): AsyncGenerator<ChatEvent> {
-    const { sdk, projectStore, projectDir } = this.deps;
+    // turn 並走禁止 (long-lived runUserTurn と同じガード)。
+    if (this.currentTurn) {
+      yield {
+        type: 'error',
+        code: 'turn_in_progress',
+        message: '前のターンがまだ完了していません',
+      };
+      return;
+    }
 
-    // 対象 server の設定のみ取得。Tally 内部 MCP は handler 構築上必要なので残す。
+    const { chatStore, projectStore, threadId } = this.deps;
     const projectMeta = await projectStore.getProjectMeta();
     const targetConfig = projectMeta?.mcpServers?.find((s) => s.id === mcpServerId);
     if (!targetConfig) {
@@ -388,20 +535,24 @@ export class ChatRunner {
       return;
     }
 
+    const assistantMsgId = newChatMessageId();
     const queue = new EventQueue<ChatEvent>();
-    const tools = this.buildToolRegistry();
-    const emit = (e: ChatEvent) => queue.push(e);
-    // ephemeral assistantMsgId: 永続化用の親としては使わない (この turn では
-    // chatStore.appendMessage を呼ばない)。handleAuthToolResult が pending 不在
-    // の orphan failed を append するときの fallback としてのみ参照される。
-    const ephemeralAssistantMsgId = newChatMessageId();
-    const mcp = this.buildMcpServer(tools, emit, ephemeralAssistantMsgId);
+    const turnState: TurnState = {
+      assistantMsgId,
+      queue,
+      textBuffer: [],
+      stashedAuthUses: new Map(),
+      externalConfigById:
+        this.cachedExternalConfigById ?? new Map([[mcpServerId, targetConfig.name]]),
+      externalToolUseIds: new Set(),
+    };
+    this.currentTurn = turnState;
 
-    let mcpServers: Record<string, unknown>;
+    // long-lived query 上で動かす (OAuth state を turn 跨ぎで保持するため)。
     try {
-      const built = buildMcpServers({ tallyMcp: mcp, configs: [targetConfig] });
-      mcpServers = built.mcpServers;
+      await this.ensureQuery();
     } catch (err) {
+      this.currentTurn = null;
       yield {
         type: 'error',
         code: 'mcp_config_invalid',
@@ -409,89 +560,54 @@ export class ChatRunner {
       };
       return;
     }
+    turnState.externalConfigById = this.cachedExternalConfigById ?? new Map();
 
-    // 単一 tool のみ allow。他の tool は SDK 側で拒否される。
-    const allowedTools = [`mcp__${mcpServerId}__complete_authentication`];
+    // ephemeral: user message は chatStore に append しない (callback URL の code/state
+    // を chat 履歴に残さない)。空 assistant message だけは tool_use/tool_result の親
+    // として必要なので append し、turn 末で「(認証処理を完了しました)」プレースホルダで
+    // 埋める (dispatchSdkMessage の result 処理が自動で実行する)。
+    await chatStore.appendMessage(threadId, {
+      id: assistantMsgId,
+      role: 'assistant',
+      blocks: [],
+      createdAt: new Date().toISOString(),
+    });
+    yield { type: 'chat_assistant_message_started', messageId: assistantMsgId };
 
-    const stashedAuthUses = new Map<string, { match: AuthToolNameMatch; mcpServerLabel: string }>();
+    if (!this.input) {
+      this.currentTurn = null;
+      throw new Error('invariant: ensureQuery succeeded but input is null');
+    }
 
-    // 構造化 prompt: AI は単一 tool しか持たないので、必ず指定 server の
-    // complete_authentication を呼ぶ。callback URL は prompt に乗るが、user message
-    // としての永続化はされない (chatStore.appendMessage を呼んでいない)。
+    // 構造化 prompt: AI に必ず指定 server の complete_authentication を呼ばせる。
+    // long-lived query では allowedTools が固定 (ensureQuery 起動時に決まる) なので
+    // 単一 tool への制約はかけられないが、prompt 指示で実用上はモデルが従う。
     const prompt = [
       'OAuth コールバック URL を受信しました。',
       `mcp__${mcpServerId}__complete_authentication ツールを呼び、`,
       '以下の callback URL で認証を完了してください:',
       callbackUrl,
+      '',
+      '他の MCP server の complete_authentication ツールや、',
+      '別の作業ツール (create_node 等) は呼ばないでください。',
     ].join('\n');
 
-    const sdkDone = (async () => {
-      try {
-        const iter = sdk.query({
-          prompt,
-          options: {
-            systemPrompt: buildChatSystemPrompt(),
-            mcpServers,
-            tools: [],
-            allowedTools,
-            permissionMode: 'dontAsk',
-            settingSources: [],
-            cwd: projectDir,
-            ...(process.env.CLAUDE_CODE_PATH
-              ? { pathToClaudeCodeExecutable: process.env.CLAUDE_CODE_PATH }
-              : {}),
-          },
-        });
+    this.input.push({
+      type: 'user',
+      message: { role: 'user', content: prompt },
+      parent_tool_use_id: null,
+    });
 
-        for await (const msg of iter) {
-          const blocks = extractAssistantBlocks(msg);
-          for (const b of blocks) {
-            if (b.type === 'tool_use') {
-              // complete_authentication の対象 server のみ stash (allowedTools で
-              // 他はそもそも来ないが、多重防御として name でも一致確認する)。
-              const authMatch = parseAuthToolName(b.name);
-              if (
-                authMatch &&
-                authMatch.kind === 'complete_authentication' &&
-                authMatch.mcpServerId === mcpServerId
-              ) {
-                stashedAuthUses.set(b.toolUseId, {
-                  match: authMatch,
-                  mcpServerLabel: targetConfig.name,
-                });
-              }
-              // それ以外の tool_use は ephemeral では完全無視 (chatStore に書かない)。
-            } else if (b.type === 'tool_result') {
-              const stash = stashedAuthUses.get(b.toolUseId);
-              if (stash) {
-                stashedAuthUses.delete(b.toolUseId);
-                await this.handleAuthToolResult({
-                  match: stash.match,
-                  mcpServerLabel: stash.mcpServerLabel,
-                  result: { ok: b.ok, output: b.output },
-                  assistantMsgId: ephemeralAssistantMsgId,
-                  emit: (e) => queue.push(e),
-                });
-              }
-              // 対応 stash の無い tool_result は無視。
-            }
-            // text block は ephemeral では emit しない / 永続化しない。
-          }
-        }
-      } catch (err) {
-        queue.push({ type: 'error', code: 'agent_failed', message: String(err) });
-      } finally {
-        queue.finish();
+    try {
+      while (true) {
+        const evt = await queue.next();
+        if (evt === null) break;
+        yield evt;
+        if (evt.type === 'chat_turn_ended') break;
       }
-    })();
-
-    while (true) {
-      const evt = await queue.next();
-      if (evt === null) break;
-      yield evt;
+    } finally {
+      this.currentTurn = null;
     }
-
-    await sdkDone;
   }
 
   // OAuth 認証系 tool_use/tool_result ペアを auth_request ブロックに変換する。
@@ -779,16 +895,32 @@ export class ChatRunner {
   // SDK 視点では通常の tool_use → tool_result の往復。
   // 間に挟まる pending / result の ChatEvent は emit callback で直接 queue に流す
   // (sideEvents buffer にすると SDK block 中に flush できず deadlock するため)。
-  private buildMcpServer(tools: ToolEntry[], emit: (e: ChatEvent) => void, assistantMsgId: string) {
+  private buildMcpServer(tools: ToolEntry[]) {
     const find = (name: string): ToolEntry => {
       const t = tools.find((x) => x.name === name);
       if (!t) throw new Error(`tool not registered: ${name}`);
       return t;
     };
 
+    // long-lived Query では SDK が tool を呼ぶタイミングが turn 中。currentTurn から
+    // assistantMsgId / emit を動的解決することで、1 度作った MCP サーバを turn 跨ぎで
+    // 使い回せる (codex 指摘対応: turn 中に currentTurn は不変なので race なし)。
     const makeHandler = (name: string) => async (input: unknown) => {
       const entry = find(name);
-      const { done } = this.invokeInterceptedTool({ entry, input, emit, assistantMsgId });
+      const turn = this.currentTurn;
+      if (!turn) {
+        return {
+          content: [{ type: 'text' as const, text: 'no active chat turn' }],
+          isError: true,
+        };
+      }
+      const emit = (e: ChatEvent) => turn.queue.push(e);
+      const { done } = this.invokeInterceptedTool({
+        entry,
+        input,
+        emit,
+        assistantMsgId: turn.assistantMsgId,
+      });
       const result = await done;
       return {
         content: [{ type: 'text' as const, text: result.output }],
