@@ -362,25 +362,136 @@ export class ChatRunner {
   }
 
   // 外部 MCP の OAuth コールバック URL を受け取り、対応 server の complete_authentication
-  // を AI に呼ばせる。UI から構造化送信された mcpServerId を prompt に固定することで、
-  // 自然文経由で AI に解釈させていた旧実装の「複数 server 同時運用時に別 server の
-  // complete_authentication を呼ぶ」リスクを排除する (PR-B CR Major)。
+  // のみを ephemeral に実行する。UI から構造化送信された mcpServerId を prompt と
+  // allowedTools の両方に固定することで、(1) callback URL の code/state を chat 履歴に
+  // 永続化しない、(2) 別 server の complete_authentication を呼ばせない、(3) 他の
+  // ツール実行 (create_node 等) を許さない、の 3 点を同時に満たす (PR-B CR Major)。
   //
-  // SDK 制約上、complete_authentication tool は agent loop 経由でしか呼べないため、
-  // runUserTurn のラッパーとして実装する。AI 介在は残るが prompt は決定論的に組み立てる。
-  // mcpServerId は server.ts の ChatOAuthCallbackSchema で charset 検証済みなので、
-  // ここでは追加バリデーションをしない。
+  // 通常 turn (runUserTurn) を再利用しないのは、user message の永続化と通常の
+  // assistant message ループ全体を回避するため。auth_request ブロックの更新は
+  // handleAuthToolResult が過去 message の最新 pending を探して書き換える経路で行う。
+  //
+  // SDK 制約上、complete_authentication tool 自体は agent loop 経由でしか呼べないため、
+  // sdk.query は呼ぶが allowedTools = [対象 tool 1 件] で他を遮断する。
   async *runOAuthCallback(mcpServerId: string, callbackUrl: string): AsyncGenerator<ChatEvent> {
-    const text = [
-      'OAuth コールバック URL を受信しました。以下の通り認証を完了してください:',
-      '',
-      `- mcpServerId: ${mcpServerId}`,
-      `- callback URL: ${callbackUrl}`,
-      '',
-      `必ず \`mcp__${mcpServerId}__complete_authentication\` ツールを呼び、`,
-      '他の MCP server の complete_authentication ツールは絶対に使わないでください。',
+    const { sdk, projectStore, projectDir } = this.deps;
+
+    // 対象 server の設定のみ取得。Tally 内部 MCP は handler 構築上必要なので残す。
+    const projectMeta = await projectStore.getProjectMeta();
+    const targetConfig = projectMeta?.mcpServers?.find((s) => s.id === mcpServerId);
+    if (!targetConfig) {
+      yield {
+        type: 'error',
+        code: 'mcp_server_not_found',
+        message: `MCP server "${mcpServerId}" not found in project config`,
+      };
+      return;
+    }
+
+    const queue = new EventQueue<ChatEvent>();
+    const tools = this.buildToolRegistry();
+    const emit = (e: ChatEvent) => queue.push(e);
+    // ephemeral assistantMsgId: 永続化用の親としては使わない (この turn では
+    // chatStore.appendMessage を呼ばない)。handleAuthToolResult が pending 不在
+    // の orphan failed を append するときの fallback としてのみ参照される。
+    const ephemeralAssistantMsgId = newChatMessageId();
+    const mcp = this.buildMcpServer(tools, emit, ephemeralAssistantMsgId);
+
+    let mcpServers: Record<string, unknown>;
+    try {
+      const built = buildMcpServers({ tallyMcp: mcp, configs: [targetConfig] });
+      mcpServers = built.mcpServers;
+    } catch (err) {
+      yield {
+        type: 'error',
+        code: 'mcp_config_invalid',
+        message: err instanceof Error ? err.message : String(err),
+      };
+      return;
+    }
+
+    // 単一 tool のみ allow。他の tool は SDK 側で拒否される。
+    const allowedTools = [`mcp__${mcpServerId}__complete_authentication`];
+
+    const stashedAuthUses = new Map<string, { match: AuthToolNameMatch; mcpServerLabel: string }>();
+
+    // 構造化 prompt: AI は単一 tool しか持たないので、必ず指定 server の
+    // complete_authentication を呼ぶ。callback URL は prompt に乗るが、user message
+    // としての永続化はされない (chatStore.appendMessage を呼んでいない)。
+    const prompt = [
+      'OAuth コールバック URL を受信しました。',
+      `mcp__${mcpServerId}__complete_authentication ツールを呼び、`,
+      '以下の callback URL で認証を完了してください:',
+      callbackUrl,
     ].join('\n');
-    yield* this.runUserTurn(text, []);
+
+    const sdkDone = (async () => {
+      try {
+        const iter = sdk.query({
+          prompt,
+          options: {
+            systemPrompt: buildChatSystemPrompt(),
+            mcpServers,
+            tools: [],
+            allowedTools,
+            permissionMode: 'dontAsk',
+            settingSources: [],
+            cwd: projectDir,
+            ...(process.env.CLAUDE_CODE_PATH
+              ? { pathToClaudeCodeExecutable: process.env.CLAUDE_CODE_PATH }
+              : {}),
+          },
+        });
+
+        for await (const msg of iter) {
+          const blocks = extractAssistantBlocks(msg);
+          for (const b of blocks) {
+            if (b.type === 'tool_use') {
+              // complete_authentication の対象 server のみ stash (allowedTools で
+              // 他はそもそも来ないが、多重防御として name でも一致確認する)。
+              const authMatch = parseAuthToolName(b.name);
+              if (
+                authMatch &&
+                authMatch.kind === 'complete_authentication' &&
+                authMatch.mcpServerId === mcpServerId
+              ) {
+                stashedAuthUses.set(b.toolUseId, {
+                  match: authMatch,
+                  mcpServerLabel: targetConfig.name,
+                });
+              }
+              // それ以外の tool_use は ephemeral では完全無視 (chatStore に書かない)。
+            } else if (b.type === 'tool_result') {
+              const stash = stashedAuthUses.get(b.toolUseId);
+              if (stash) {
+                stashedAuthUses.delete(b.toolUseId);
+                await this.handleAuthToolResult({
+                  match: stash.match,
+                  mcpServerLabel: stash.mcpServerLabel,
+                  result: { ok: b.ok, output: b.output },
+                  assistantMsgId: ephemeralAssistantMsgId,
+                  emit: (e) => queue.push(e),
+                });
+              }
+              // 対応 stash の無い tool_result は無視。
+            }
+            // text block は ephemeral では emit しない / 永続化しない。
+          }
+        }
+      } catch (err) {
+        queue.push({ type: 'error', code: 'agent_failed', message: String(err) });
+      } finally {
+        queue.finish();
+      }
+    })();
+
+    while (true) {
+      const evt = await queue.next();
+      if (evt === null) break;
+      yield evt;
+    }
+
+    await sdkDone;
   }
 
   // OAuth 認証系 tool_use/tool_result ペアを auth_request ブロックに変換する。

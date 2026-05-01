@@ -48,10 +48,32 @@ const ChatApproveToolSchema = z.object({
 // 別 server の complete_authentication を呼ぶリスクがあったため、UI からは mcpServerId
 // を構造化フィールドとして固定して送り、chat-runner 側で id 入りプロンプトを生成する。
 // mcpServerId は McpServerConfigSchema.id と同じ charset 制約 (英小文字 + 数字 + ハイフン)。
+//
+// callbackUrl は UI の isLikelyCallbackUrl と同じ条件で validate する。
+// WS には UI 経由でない外部クライアントからも到達しうるので、サーバ側でも
+// loopback / no-credentials / code+state 必須を確認する (CR Major)。
+const isValidCallbackUrl = (s: string): boolean => {
+  try {
+    const u = new URL(s);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+    if (u.username || u.password) return false;
+    const host = u.hostname;
+    if (host !== 'localhost' && host !== '127.0.0.1' && host !== '::1' && host !== '[::1]') {
+      return false;
+    }
+    return u.searchParams.has('code') && u.searchParams.has('state');
+  } catch {
+    return false;
+  }
+};
+
 const ChatOAuthCallbackSchema = z.object({
   type: z.literal('oauth_callback'),
   mcpServerId: z.string().regex(/^[a-z][a-z0-9-]{0,31}$/u),
-  callbackUrl: z.string().url(),
+  callbackUrl: z.string().url().refine(isValidCallbackUrl, {
+    message:
+      'callback URL は loopback (localhost / 127.0.0.1 / ::1) で credential なし、code と state クエリ必須',
+  }),
 });
 
 // registry からプロジェクト ID に対応するディレクトリパスを返す。
