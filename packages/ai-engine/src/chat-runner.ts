@@ -132,6 +132,11 @@ export class ChatRunner {
   // 孤立してリークするのを回避)。完了時に null 化して次回の再起動を許す。
   private ensureQueryInflight: Promise<void> | null = null;
 
+  // close() による明示シャットダウン中フラグ。runOutputLoop の正常 EOF を
+  // 「明示 shutdown」と「予期しない subprocess 終了」で区別するために使う
+  // (CR Major: 後者を chat_turn_ended で正常完了扱いせず agent_failed を出す)。
+  private isClosing = false;
+
   // 現在進行中の turn。runUserTurn の入口で set、出口で null。
   // MCP ハンドラと出力ループはここから assistantMsgId / queue を読む。
   private currentTurn: TurnState | null = null;
@@ -238,10 +243,21 @@ export class ChatRunner {
       await this.ensureQuery();
     } catch (err) {
       this.currentTurn = null;
+      // 空 assistant message を「先に append」している関係で、ensureQuery 失敗時に
+      // 空バブルが履歴に残ってしまう (CR Minor)。chatStore に message 単位の delete
+      // API は無いので、エラー内容で blocks を埋める形にロールバックする。
+      const message = err instanceof Error ? err.message : String(err);
+      try {
+        await chatStore.replaceMessageBlocks(threadId, assistantMsgId, [
+          { type: 'text', text: `(MCP 設定エラー: ${message})` },
+        ]);
+      } catch {
+        /* swallow: replace 自体が失敗しても error event は流すので致命的ではない */
+      }
       yield {
         type: 'error',
         code: 'mcp_config_invalid',
-        message: err instanceof Error ? err.message : String(err),
+        message,
       };
       return;
     }
@@ -353,9 +369,18 @@ export class ChatRunner {
     }
     // iter 正常終端 (close 等)。query が死んだ印として outputLoopFailed を立て、
     // 次回 ensureQuery で作り直させる。進行中 turn が残っていれば打ち切る。
+    // 明示 shutdown (close()) と予期しない subprocess 終了を区別する (CR Major):
+    // 前者は normal turn end、後者は agent_failed を emit してから turn を閉じる。
     this.outputLoopFailed = true;
     const turn = this.currentTurn;
     if (turn) {
+      if (!this.isClosing) {
+        turn.queue.push({
+          type: 'error',
+          code: 'agent_failed',
+          message: 'SDK output stream ended unexpectedly',
+        });
+      }
       turn.queue.push({ type: 'chat_turn_ended' });
       turn.queue.finish();
     }
@@ -486,9 +511,10 @@ export class ChatRunner {
   // ChatRunner 終了時 (WS close 等) に SDK subprocess を片付ける。
   // outputLoopDone は tearDownQuery で null 化されるため、先に退避してから join する
   // (codex 指摘の致命 Minor: close() 順序問題)。
-  // 進行中の turn があれば打ち切られ、queue.finish() を経て runUserTurn 側の for-await が
-  // 自然に抜ける。再度 runUserTurn を呼べば ensureQuery が再起動する (= 再 auth が必要)。
+  // isClosing フラグで runOutputLoop に「明示 shutdown」を伝え、EOF を agent_failed
+  // としては emit させない (CR Major)。
   async close(): Promise<void> {
+    this.isClosing = true;
     const pendingLoop = this.outputLoopDone;
     this.tearDownQuery();
     if (pendingLoop) {
