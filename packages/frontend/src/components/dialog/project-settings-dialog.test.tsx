@@ -182,6 +182,64 @@ describe('ProjectSettingsDialog', () => {
     expect(screen.getByText(/OAuth 2\.1 フローは Tally プロセス/)).toBeInTheDocument();
   });
 
+  it('PR-E4 retrograde: 保存済み + clientId 入力済の MCP server に Connect ボタンが描画される', async () => {
+    // CR Major 対応の検証: 旧実装は entry に UI ローカルの `_uid` が含まれているため
+    // JSON.stringify(saved) ≠ JSON.stringify(entry) で常に false → Connect ボタンが
+    // 一度も出ない。`_uid` を剥がして比較する修正後はこのテストが pass する。
+    useCanvasStore.setState({
+      projectMeta: {
+        ...meta,
+        mcpServers: [
+          {
+            id: 'atlassian',
+            name: 'My Atlassian',
+            kind: 'atlassian',
+            url: 'https://mcp.atlassian.example/v1/mcp',
+            oauth: { clientId: 'cid-xyz' },
+            options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
+          },
+        ],
+      },
+      patchProjectMeta,
+    } as Partial<ReturnType<typeof useCanvasStore.getState>>);
+
+    render(<ProjectSettingsDialog open onClose={() => {}} />);
+    // AuthRequestCard 内の認証ボタンが現れるはず (ヒント文ではなく)
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /My Atlassian で認証/ })).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/Connect ボタンは「設定を保存/)).toBeNull();
+  });
+
+  it('PR-E4 retrograde: name を編集すると Connect ボタンが消える', async () => {
+    useCanvasStore.setState({
+      projectMeta: {
+        ...meta,
+        mcpServers: [
+          {
+            id: 'atlassian',
+            name: 'My Atlassian',
+            kind: 'atlassian',
+            url: 'https://mcp.atlassian.example/v1/mcp',
+            oauth: { clientId: 'cid-xyz' },
+            options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
+          },
+        ],
+      },
+      patchProjectMeta,
+    } as Partial<ReturnType<typeof useCanvasStore.getState>>);
+
+    render(<ProjectSettingsDialog open onClose={() => {}} />);
+    await screen.findByRole('button', { name: /My Atlassian で認証/ });
+    const nameInput = screen.getByLabelText('mcp-0-name');
+    await userEvent.type(nameInput, 'X');
+    // Connect ボタンが消えてヒント文に切り替わる
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /My Atlassian で認証/ })).toBeNull(),
+    );
+    expect(screen.getByText(/Connect ボタンは「設定を保存/)).toBeInTheDocument();
+  });
+
   it('id 重複時は保存 disabled', async () => {
     render(<ProjectSettingsDialog open onClose={() => {}} />);
     // まず 2 件目を追加

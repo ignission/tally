@@ -43,7 +43,7 @@ function makeUid(): string {
 // clientId が空のときも当然 false。
 function isOAuthConnectable(
   meta: { mcpServers?: McpServerConfig[] } | null,
-  entry: McpServerConfig,
+  entry: McpServerEntry,
 ): boolean {
   if (!meta?.mcpServers) return false;
   if (!entry.oauth.clientId) return false;
@@ -51,7 +51,10 @@ function isOAuthConnectable(
   if (!saved) return false;
   // 完全一致比較: McpServerConfig のフィールドはプリミティブ + 配列 + 浅い object のみで
   // 順序も同じはずなので JSON.stringify で十分。将来 ネストが深くなったら deep-equal に置換。
-  return JSON.stringify(saved) === JSON.stringify(entry);
+  // CR Major 対応: McpServerEntry は UI ローカルの `_uid` を持つが saved 側には無いので、
+  // _uid を剥がしてから比較する (剥がさないと常に false)。
+  const { _uid: _ignored, ...normalizedEntry } = entry;
+  return JSON.stringify(saved) === JSON.stringify(normalizedEntry);
 }
 
 export function ProjectSettingsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
