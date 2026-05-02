@@ -16,3 +16,13 @@ export {
   refreshAccessToken,
   type TokenExchangeResult,
 } from './oauth-client';
+export {
+  __resetAllFlowsForTest,
+  awaitOAuthFlowSettled,
+  clearOAuthFlow,
+  getOAuthFlowStatus,
+  type OAuthFlowStatus,
+  type StartOAuthFlowInput,
+  type StartOAuthFlowResult,
+  startOAuthFlow,
+} from './oauth-flow-orchestrator';
