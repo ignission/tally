@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import type { UseCaseNode } from '@tally/core';
-import { FileSystemProjectStore, type ProjectStore } from '@tally/storage';
+import { FileSystemOAuthStore, FileSystemProjectStore, type ProjectStore } from '@tally/storage';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runAgent, type SdkLike } from './agent-runner';
@@ -75,6 +75,7 @@ describe('runAgent', () => {
     for await (const e of runAgent({
       sdk: mockSdk as never,
       store,
+      oauthStore: new FileSystemOAuthStore(root),
       projectDir: root,
       req: {
         type: 'start',
@@ -116,6 +117,7 @@ describe('runAgent', () => {
     for await (const e of runAgent({
       sdk: mockSdk as never,
       store,
+      oauthStore: new FileSystemOAuthStore(root),
       projectDir: root,
       req: {
         type: 'start',
@@ -148,6 +150,7 @@ describe('runAgent', () => {
     for await (const e of runAgent({
       sdk: mockSdk as never,
       store,
+      oauthStore: new FileSystemOAuthStore(root),
       projectDir: root,
       req: {
         type: 'start',
@@ -173,6 +176,7 @@ describe('runAgent', () => {
     for await (const e of runAgent({
       sdk: mockSdk as never,
       store,
+      oauthStore: new FileSystemOAuthStore(root),
       projectDir: root,
       req: {
         type: 'start',
@@ -202,6 +206,7 @@ describe('runAgent', () => {
     for await (const e of runAgent({
       sdk: mockSdk as never,
       store,
+      oauthStore: new FileSystemOAuthStore(root),
       projectDir: root,
       req: {
         type: 'start',
@@ -257,6 +262,7 @@ describe('runAgent', () => {
       for await (const e of runAgent({
         sdk: mockSdk as never,
         store,
+        oauthStore: new FileSystemOAuthStore(root),
         projectDir: root,
         req: {
           type: 'start',
@@ -317,6 +323,7 @@ describe('runAgent', () => {
     for await (const e of runAgent({
       sdk: mockSdk as never,
       store,
+      oauthStore: new FileSystemOAuthStore(root),
       projectDir: root,
       req: {
         type: 'start',
@@ -411,6 +418,7 @@ describe('runAgent', () => {
     for await (const e of runAgent({
       sdk,
       store,
+      oauthStore: new FileSystemOAuthStore(projectDir),
       projectDir,
       req: {
         type: 'start',
@@ -474,6 +482,7 @@ describe('runAgent', () => {
     for await (const e of runAgent({
       sdk,
       store,
+      oauthStore: new FileSystemOAuthStore('/ws'),
       projectDir: '/ws',
       req: {
         type: 'start',
@@ -546,6 +555,7 @@ describe('runAgent', () => {
       for await (const _ of runAgent({
         sdk,
         store,
+        oauthStore: new FileSystemOAuthStore('/ws'),
         projectDir: '/ws',
         req: {
           type: 'start',

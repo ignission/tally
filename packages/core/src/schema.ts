@@ -291,9 +291,10 @@ export const McpServerConfigSchema = z.object({
           'url は https で始まる必要があります (loopback の http は例外的に許容)。URL 内資格情報 (user:pass@) は禁止',
       },
     ),
-  // ADR-0011: Tally 側で OAuth 2.1 フローを管理する。MVP は段階導入のため optional
-  // で開始し、PR-E4 で旧 auth_request 経路を削除する際に required 化する。
-  oauth: McpOAuthConfigSchema.optional(),
+  // ADR-0011: Tally 側で OAuth 2.1 フローを管理する。PR-E1 で optional 導入、
+  // PR-E4 (旧 auth_request 経路の削除) で required 化。clientId が無いと
+  // POST /api/projects/<pid>/mcp/<id>/oauth が 400 で詰まるので必須。
+  oauth: McpOAuthConfigSchema,
   options: McpServerOptionsSchema,
 });
 
@@ -403,38 +404,9 @@ export const ChatBlockSchema = z.discriminatedUnion('type', [
     ok: z.boolean(),
     output: z.string(),
   }),
-  // 外部 MCP (Atlassian 等) の OAuth 2.1 認証フローを 1 等地で扱うブロック。
-  // SDK の `mcp__<id>__authenticate` tool_use を生のまま並べると UX が破綻する
-  // (URL がプレーンテキスト + redirect 先 localhost:XXXXX が即死) ため、検出して
-  // この auth_request に置き換える。status は同 thread 内の complete_authentication で更新。
-  // failureMessage は status='failed' のときだけ持つ。superRefine で永続化フォーマット
-  // としての不正状態 (failed なのに message 無し / pending・completed に message が付く)
-  // を弾く。
-  z
-    .object({
-      type: z.literal('auth_request'),
-      mcpServerId: z.string().min(1),
-      mcpServerLabel: z.string().min(1),
-      authUrl: z.string().url(),
-      status: z.enum(['pending', 'completed', 'failed']),
-      failureMessage: z.string().optional(),
-    })
-    .superRefine((b, ctx) => {
-      if (b.status === 'failed' && !b.failureMessage) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'failed auth_request には failureMessage が必要',
-          path: ['failureMessage'],
-        });
-      }
-      if (b.status !== 'failed' && b.failureMessage !== undefined) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'failureMessage は failed のときだけ設定できます',
-          path: ['failureMessage'],
-        });
-      }
-    }),
+  // ADR-0011 PR-E4: 旧 auth_request block は削除した。OAuth 認証フローは Tally
+  // プロセス内の OAuthFlowOrchestrator + Route Handler が完結させ、UI は project
+  // settings の AuthRequestCard (button) から起動する。chat 文脈には残らない。
 ]);
 
 export const ChatMessageSchema = z.object({

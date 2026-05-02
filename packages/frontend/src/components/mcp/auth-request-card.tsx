@@ -1,25 +1,20 @@
 'use client';
 
-import type { ChatBlock } from '@tally/core';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useCanvasStore } from '@/lib/store';
 
-type AuthRequestBlock = Extract<ChatBlock, { type: 'auth_request' }>;
-
-// ADR-0011 PR-E3b: 外部 MCP の OAuth 2.1 認証要求カード。
-// 旧実装は SDK の loopback URL (block.authUrl) を開いて、ユーザーが callback URL を
-// アドレスバーから paste する 2 ステップ UX だった。新実装では Tally プロセス内の
-// OAuthFlowOrchestrator が loopback callback を直接受けるため、ユーザー操作は
-// 「認証ボタンを押す → 別タブで承認 → 自動で完了」の 1 ステップに簡略化する。
+// ADR-0011 PR-E4: 外部 MCP の OAuth 2.1 認証要求カード。
+// PR-E3b で paste UX を廃して Route Handler 駆動の 1 ステップ化、PR-E4 で chat 文脈を
+// 完全に外して project settings の MCP server 行に再配置した。prop は
+// `{ mcpServerId, mcpServerLabel }` だけを受け取り、ChatBlock 型には依存しない。
 //
 // 状態は orchestrator の Route Handler (POST/GET/DELETE /api/projects/<pid>/mcp/<mid>/oauth)
-// から polling で取得する。block.status / block.authUrl は使わない (PR-E4 で chat-runner
-// 側の auth_request 発行が削除されると block 自体が消えるため、過渡期の表示は API 側に
-// 単一ソース化する)。
+// から polling で取得する。マウント時に GET で rehydrate するので、別の場所で start した
+// flow の続きを表示することもできる (codex Major 対応の rehydrate effect)。
 //
 // 状態遷移:
-//   idle      ボタン未押下。block 来訪直後の初期状態。
+//   idle      ボタン未押下。
 //   starting  POST 中 (短い)。
 //   pending   authorize URL を別タブで開いた後、polling 中。
 //   completed 成功。Atlassian tools が利用可能。
@@ -42,13 +37,18 @@ type CardState =
   | { kind: 'completed' }
   | { kind: 'failed'; message: string };
 
-export function AuthRequestCard({ block }: { block: AuthRequestBlock }) {
+export interface AuthRequestCardProps {
+  mcpServerId: string;
+  mcpServerLabel: string;
+}
+
+export function AuthRequestCard({ mcpServerId, mcpServerLabel }: AuthRequestCardProps) {
   const projectId = useCanvasStore((s) => s.projectId);
   const [cardState, setCardState] = useState<CardState>({ kind: 'idle' });
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const baseUrl = projectId
-    ? `/api/projects/${encodeURIComponent(projectId)}/mcp/${encodeURIComponent(block.mcpServerId)}/oauth`
+    ? `/api/projects/${encodeURIComponent(projectId)}/mcp/${encodeURIComponent(mcpServerId)}/oauth`
     : null;
 
   // codex Major 対応: マウント時に orchestrator の現状を取りに行き、cardState を
@@ -180,14 +180,14 @@ export function AuthRequestCard({ block }: { block: AuthRequestBlock }) {
   return (
     <div style={CARD_STYLE}>
       <div style={HEADER_STYLE}>
-        🔐 <span style={LABEL_STYLE}>{block.mcpServerLabel} 認証</span>
+        🔐 <span style={LABEL_STYLE}>{mcpServerLabel} 認証</span>
         <span style={badgeStyle(cardState)}>{statusLabel(cardState)}</span>
       </div>
 
       {showStartButton && (
         <>
           <div style={DESC_STYLE}>
-            下のボタンで {block.mcpServerLabel} の認証ページを別タブで開いて承認してください。
+            下のボタンで {mcpServerLabel} の認証ページを別タブで開いて承認してください。
             <br />
             承認が完了すると自動で連携が有効になります (paste 不要)。
           </div>
@@ -197,9 +197,7 @@ export function AuthRequestCard({ block }: { block: AuthRequestBlock }) {
             disabled={cardState.kind === 'starting' || !projectId}
             style={AUTH_BUTTON_STYLE}
           >
-            {cardState.kind === 'starting'
-              ? '開始中...'
-              : `🔓 ${block.mcpServerLabel} で認証 (新規タブ)`}
+            {cardState.kind === 'starting' ? '開始中...' : `🔓 ${mcpServerLabel} で認証 (新規タブ)`}
           </button>
           {!projectId && <div style={WARN_STYLE}>プロジェクトが開かれていません。</div>}
         </>
@@ -222,7 +220,7 @@ export function AuthRequestCard({ block }: { block: AuthRequestBlock }) {
 
       {isCompleted && (
         <div style={COMPLETED_DESC_STYLE}>
-          ✅ 認証完了。{block.mcpServerLabel} のツールが利用可能になりました。
+          ✅ 認証完了。{mcpServerLabel} のツールが利用可能になりました。
         </div>
       )}
 

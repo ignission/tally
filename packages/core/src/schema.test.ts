@@ -269,67 +269,15 @@ describe('ChatBlockSchema', () => {
       }).success,
     ).toBe(true);
   });
-  it('auth_request ブロック (pending)', () => {
+  // ADR-0011 PR-E4: 旧 auth_request ブロックは削除した (OAuth は Tally の Route Handler
+  // が完結させ、UI は project settings の AuthRequestCard に独立)。
+  it('auth_request type は schema から削除されたので reject される', () => {
     const r = ChatBlockSchema.safeParse({
       type: 'auth_request',
       mcpServerId: 'atlassian',
       mcpServerLabel: 'Atlassian',
-      authUrl: 'https://mcp.atlassian.com/v1/authorize?response_type=code&client_id=abc',
+      authUrl: 'https://x.example/auth',
       status: 'pending',
-    });
-    expect(r.success).toBe(true);
-  });
-  it('auth_request ブロック (failed + failureMessage)', () => {
-    const r = ChatBlockSchema.safeParse({
-      type: 'auth_request',
-      mcpServerId: 'atlassian',
-      mcpServerLabel: 'Atlassian',
-      authUrl: 'https://mcp.atlassian.com/v1/authorize?response_type=code&client_id=abc',
-      status: 'failed',
-      failureMessage: 'invalid_grant',
-    });
-    expect(r.success).toBe(true);
-  });
-  it('auth_request の authUrl が URL でないと reject', () => {
-    const r = ChatBlockSchema.safeParse({
-      type: 'auth_request',
-      mcpServerId: 'atlassian',
-      mcpServerLabel: 'Atlassian',
-      authUrl: 'not-a-url',
-      status: 'pending',
-    });
-    expect(r.success).toBe(false);
-  });
-  // status と failureMessage の整合を schema で固定。
-  it('auth_request: failed に failureMessage 無しは reject', () => {
-    const r = ChatBlockSchema.safeParse({
-      type: 'auth_request',
-      mcpServerId: 'atlassian',
-      mcpServerLabel: 'Atlassian',
-      authUrl: 'https://mcp.atlassian.com/v1/authorize?response_type=code&client_id=abc',
-      status: 'failed',
-    });
-    expect(r.success).toBe(false);
-  });
-  it('auth_request: pending に failureMessage 付きは reject', () => {
-    const r = ChatBlockSchema.safeParse({
-      type: 'auth_request',
-      mcpServerId: 'atlassian',
-      mcpServerLabel: 'Atlassian',
-      authUrl: 'https://mcp.atlassian.com/v1/authorize?response_type=code&client_id=abc',
-      status: 'pending',
-      failureMessage: 'should not be here',
-    });
-    expect(r.success).toBe(false);
-  });
-  it('auth_request: completed に failureMessage 付きは reject', () => {
-    const r = ChatBlockSchema.safeParse({
-      type: 'auth_request',
-      mcpServerId: 'atlassian',
-      mcpServerLabel: 'Atlassian',
-      authUrl: 'https://mcp.atlassian.com/v1/authorize?response_type=code&client_id=abc',
-      status: 'completed',
-      failureMessage: 'should not be here',
     });
     expect(r.success).toBe(false);
   });
@@ -386,14 +334,15 @@ describe('ChatThreadSchema / ChatThreadMetaSchema', () => {
 });
 
 describe('McpServerConfigSchema', () => {
-  // OAuth 2.1 採用後、Tally は url のみ持ち auth credentials は MCP/SDK に委譲する。
-  // よって round-trip の最小形は id/name/kind/url/options のみ。
-  it('atlassian round-trip (auth credentials は MCP/SDK 任せ、Tally は url のみ)', () => {
+  // ADR-0011 PR-E4: OAuth 2.1 を Tally プロセスが管理するため、oauth.clientId が required。
+  // 過渡期 (PR-E1〜E3b) は optional だったが PR-E4 で required 化。
+  it('atlassian round-trip (oauth.clientId 必須、url のみで MCP に到達)', () => {
     const raw = {
       id: 'atlassian-cloud',
       name: 'Atlassian Cloud',
       kind: 'atlassian' as const,
       url: 'https://mcp.atlassian.example/v1/mcp',
+      oauth: { clientId: 'cid-abc' },
       options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
     };
     const parsed = McpServerConfigSchema.parse(raw);
@@ -406,9 +355,21 @@ describe('McpServerConfigSchema', () => {
       name: 'A',
       kind: 'atlassian',
       url: 'https://x.test/mcp',
+      oauth: { clientId: 'cid' },
     });
     expect(parsed.options.maxChildIssues).toBe(30);
     expect(parsed.options.maxCommentsPerIssue).toBe(5);
+  });
+
+  it('oauth 未指定は fail (PR-E4 で required 化)', () => {
+    expect(() =>
+      McpServerConfigSchema.parse({
+        id: 'a',
+        name: 'A',
+        kind: 'atlassian',
+        url: 'https://x.test/mcp',
+      }),
+    ).toThrow();
   });
 
   it('url が URL でないと fail', () => {
@@ -418,11 +379,12 @@ describe('McpServerConfigSchema', () => {
         name: 'A',
         kind: 'atlassian',
         url: 'not a url',
+        oauth: { clientId: 'cid' },
       }),
     ).toThrow();
   });
 
-  it('oauth 設定 (clientId + scopes) を持って parse できる (ADR-0011 で導入、PR-E1 では optional)', () => {
+  it('oauth 設定 (clientId + scopes) を持って parse できる', () => {
     const raw = {
       id: 'atlassian',
       name: 'Atlassian',
@@ -445,28 +407,17 @@ describe('McpServerConfigSchema', () => {
       }),
     ).toThrow();
   });
-
-  it('auth フィールドが付いていても strict ではないので無視される (passthrough)', () => {
-    // schema 上は auth キーを持たない。zod は default で strict ではないため余計なキーは drop。
-    // OAuth 移行前の YAML が混入しても parse 自体は通すが、auth 情報は使われない。
-    const parsed = McpServerConfigSchema.parse({
-      id: 'a',
-      name: 'A',
-      kind: 'atlassian',
-      url: 'https://x.test/mcp',
-      auth: { type: 'pat', scheme: 'bearer', tokenEnvVar: 'JIRA_PAT' }, // 余計なキー
-    } as Record<string, unknown>);
-    expect((parsed as unknown as { auth?: unknown }).auth).toBeUndefined();
-  });
 });
 
 describe('McpServerConfigSchema hardening', () => {
   // hardening test の共通 valid base。テスト対象のフィールドだけを上書きする。
+  // PR-E4 で oauth が required 化されたので base に含める。
   const validBase = {
     id: 'atlassian',
     name: 'Atlassian',
     kind: 'atlassian' as const,
     url: 'https://mcp.atlassian.example/v1/mcp',
+    oauth: { clientId: 'cid' },
   };
 
   describe('url: https 強制 + loopback 例外', () => {
@@ -567,6 +518,7 @@ describe('ProjectSchema.mcpServers', () => {
           name: 'A',
           kind: 'atlassian' as const,
           url: 'https://x.test/mcp',
+          oauth: { clientId: 'cid' },
         },
       ],
     };
@@ -591,6 +543,7 @@ describe('ProjectMetaSchema.mcpServers', () => {
           name: 'A',
           kind: 'atlassian' as const,
           url: 'https://x.test/mcp',
+          oauth: { clientId: 'cid' },
         },
       ],
     });

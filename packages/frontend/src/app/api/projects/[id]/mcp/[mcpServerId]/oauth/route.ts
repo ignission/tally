@@ -54,13 +54,9 @@ async function resolveTarget(
       error: `mcp server not found: ${mcpServerId}`,
     };
   }
-  if (!server.oauth) {
-    return {
-      ok: false,
-      status: 400,
-      error: `mcp server "${mcpServerId}" has no oauth config (set oauth.clientId in project.yaml)`,
-    };
-  }
+  // ADR-0011 PR-E4: oauth は schema 上 required なので server.oauth は必ず存在する。
+  // YAML 不整合 (手動編集等) は getProjectMeta() の zod parse が落として meta=null になり、
+  // この経路に到達する前に上の 404 で弾かれる。
   // kind は schema 上 'atlassian' literal だが registry lookup は将来の kind 追加に備えて
   // 共通の経路を残す。registry に無ければ 400。
   const kind = server.kind as OAuthKind;

@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import type { ChatMessage, Node } from '@tally/core';
 import { newChatMessageId } from '@tally/core';
-import { FileSystemChatStore, FileSystemProjectStore } from '@tally/storage';
+import { FileSystemChatStore, FileSystemOAuthStore, FileSystemProjectStore } from '@tally/storage';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { SdkLike } from './agent-runner';
@@ -73,6 +73,7 @@ describe('ChatRunner', () => {
       sdk,
       chatStore,
       projectStore,
+      oauthStore: new FileSystemOAuthStore(root),
       projectDir: root,
       threadId: thread.id,
     });
@@ -119,6 +120,7 @@ describe('ChatRunner', () => {
       sdk,
       chatStore,
       projectStore,
+      oauthStore: new FileSystemOAuthStore(root),
       projectDir: root,
       threadId: thread.id,
     });
@@ -169,6 +171,7 @@ describe('ChatRunner', () => {
       sdk,
       chatStore,
       projectStore,
+      oauthStore: new FileSystemOAuthStore(root),
       projectDir: root,
       threadId: thread.id,
     });
@@ -233,6 +236,7 @@ describe('ChatRunner', () => {
       sdk,
       chatStore,
       projectStore,
+      oauthStore: new FileSystemOAuthStore(root),
       projectDir: root,
       threadId: thread.id,
     });
@@ -308,6 +312,7 @@ describe('ChatRunner', () => {
       sdk,
       chatStore,
       projectStore,
+      oauthStore: new FileSystemOAuthStore(root),
       projectDir: root,
       threadId: thread.id,
     });
@@ -361,6 +366,7 @@ describe('ChatRunner', () => {
       sdk,
       chatStore,
       projectStore,
+      oauthStore: new FileSystemOAuthStore(root),
       projectDir: root,
       threadId: thread.id,
     });
@@ -393,6 +399,7 @@ describe('ChatRunner', () => {
       sdk,
       chatStore,
       projectStore,
+      oauthStore: new FileSystemOAuthStore(root),
       projectDir: root,
       threadId: thread.id,
     });
@@ -520,6 +527,7 @@ describe('ChatRunner — buildMcpServers 統合 (Task 11)', () => {
           name: 'T',
           kind: 'atlassian',
           url: 'https://t.test/mcp',
+          oauth: { clientId: 'cid' },
           options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
         },
       ],
@@ -540,6 +548,7 @@ describe('ChatRunner — buildMcpServers 統合 (Task 11)', () => {
       sdk,
       chatStore,
       projectStore,
+      oauthStore: new FileSystemOAuthStore(root),
       projectDir: root,
       threadId: thread.id,
     });
@@ -590,6 +599,7 @@ describe('ChatRunner — buildMcpServers 統合 (Task 11)', () => {
       sdk,
       chatStore,
       projectStore,
+      oauthStore: new FileSystemOAuthStore(root),
       projectDir: root,
       threadId: thread.id,
     });
@@ -606,7 +616,7 @@ describe('ChatRunner — buildMcpServers 統合 (Task 11)', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  it('OAuth 採用後: SDK 設定に Authorization header は付かない (auth は MCP/SDK 任せ)', async () => {
+  it('PR-E4: token store に保存された access_token を Authorization header に注入する', async () => {
     const root = mkdtempSync(path.join(tmpdir(), 'tally-task11c-'));
     const ps = new FileSystemProjectStore(root);
     await ps.saveProjectMeta({
@@ -619,12 +629,22 @@ describe('ChatRunner — buildMcpServers 統合 (Task 11)', () => {
           name: 'A',
           kind: 'atlassian',
           url: 'https://api.atlassian.test/mcp',
+          oauth: { clientId: 'cid' },
           options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
         },
       ],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
+    // 事前に oauth store にトークンを書く (= 認証済み状態)。
+    const oauthStore = new FileSystemOAuthStore(root);
+    await oauthStore.write({
+      mcpServerId: 'atlassian',
+      accessToken: 'a-tok',
+      acquiredAt: new Date().toISOString(),
+      tokenType: 'Bearer',
+    });
+
     const chatStore = new FileSystemChatStore(root);
     const projectStore = new FileSystemProjectStore(root);
     const thread = await chatStore.createChat({ projectId: 'proj-1', title: 't' });
@@ -638,6 +658,7 @@ describe('ChatRunner — buildMcpServers 統合 (Task 11)', () => {
       sdk,
       chatStore,
       projectStore,
+      oauthStore,
       projectDir: root,
       threadId: thread.id,
     });
@@ -650,8 +671,7 @@ describe('ChatRunner — buildMcpServers 統合 (Task 11)', () => {
     };
     const atlassian = callArg.options?.mcpServers?.atlassian;
     expect(atlassian?.url).toBe('https://api.atlassian.test/mcp');
-    // OAuth 2.1 採用: Tally は Authorization header を組み立てない
-    expect(atlassian?.headers).toBeUndefined();
+    expect(atlassian?.headers).toEqual({ Authorization: 'Bearer a-tok' });
 
     rmSync(root, { recursive: true, force: true });
   });
@@ -676,6 +696,7 @@ describe('ChatRunner — 外部 MCP tool_use/tool_result 永続化 (Task 12)', (
           name: 'A',
           kind: 'atlassian',
           url: 'https://t.test/mcp',
+          oauth: { clientId: 'cid' },
           options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
         },
       ],
@@ -722,6 +743,7 @@ describe('ChatRunner — 外部 MCP tool_use/tool_result 永続化 (Task 12)', (
       sdk,
       chatStore,
       projectStore,
+      oauthStore: new FileSystemOAuthStore(root),
       projectDir: root,
       threadId: thread.id,
     });
@@ -734,6 +756,11 @@ describe('ChatRunner — 外部 MCP tool_use/tool_result 永続化 (Task 12)', (
       expect(useEvent.toolUseId).toBe('atlassian-tu-1');
       expect(useEvent.name).toBe('mcp__atlassian__jira_get_issue');
     }
+
+    // PR-E4 retrograde guard: 旧 chat_auth_request 経路 (mcp__*__authenticate /
+    // complete_authentication 検出 → auth_request block 変換 + chat_auth_request emit) は
+    // 削除した。外部 MCP 呼び出し時に誤って再導入されたら、ここで CI が落ちる。
+    expect(events.some((e) => (e.type as string) === 'chat_auth_request')).toBe(false);
     const resultEvent = events.find((e) => e.type === 'chat_tool_external_result');
     expect(resultEvent).toBeDefined();
     if (resultEvent && resultEvent.type === 'chat_tool_external_result') {
@@ -799,6 +826,7 @@ describe('ChatRunner — 外部 MCP tool_use/tool_result 永続化 (Task 12)', (
       sdk,
       chatStore,
       projectStore,
+      oauthStore: new FileSystemOAuthStore(root),
       projectDir: root,
       threadId: thread.id,
     });
@@ -823,6 +851,7 @@ describe('ChatRunner — 外部 MCP tool_use/tool_result 永続化 (Task 12)', (
           name: 'A',
           kind: 'atlassian',
           url: 'https://t.test/mcp',
+          oauth: { clientId: 'cid' },
           options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
         },
       ],
@@ -869,6 +898,7 @@ describe('ChatRunner — 外部 MCP tool_use/tool_result 永続化 (Task 12)', (
       sdk,
       chatStore,
       projectStore,
+      oauthStore: new FileSystemOAuthStore(root),
       projectDir: root,
       threadId: thread.id,
     });
@@ -908,6 +938,7 @@ describe('ChatRunner — 外部 MCP tool_use/tool_result 永続化 (Task 12)', (
           name: 'A',
           kind: 'atlassian',
           url: 'https://t.test/mcp',
+          oauth: { clientId: 'cid' },
           options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
         },
       ],
@@ -954,6 +985,7 @@ describe('ChatRunner — 外部 MCP tool_use/tool_result 永続化 (Task 12)', (
       sdk,
       chatStore,
       projectStore,
+      oauthStore: new FileSystemOAuthStore(root),
       projectDir: root,
       threadId: thread.id,
     });
@@ -984,6 +1016,7 @@ describe('ChatRunner — 外部 MCP tool_use/tool_result 永続化 (Task 12)', (
           name: 'A',
           kind: 'atlassian',
           url: 'https://t.test/mcp',
+          oauth: { clientId: 'cid' },
           options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
         },
       ],
@@ -1029,6 +1062,7 @@ describe('ChatRunner — 外部 MCP tool_use/tool_result 永続化 (Task 12)', (
       sdk,
       chatStore,
       projectStore,
+      oauthStore: new FileSystemOAuthStore(root),
       projectDir: root,
       threadId: thread.id,
     });
@@ -1174,273 +1208,5 @@ describe('buildChatPrompt — tool_use/tool_result replay (Task 14, T4 fix)', ()
     expect(prompt).not.toContain('<conversation_history>');
     expect(prompt).toContain('<current_user_message>');
     expect(prompt).toContain('初回');
-  });
-});
-
-// 外部 MCP の OAuth 2.1 フロー: authenticate / complete_authentication tool_use を
-// 検出して auth_request ブロックに変換する経路の検証。
-describe('ChatRunner — auth_request 変換 (OAuth 2.1)', () => {
-  async function setup() {
-    const root = mkdtempSync(path.join(tmpdir(), 'tally-chat-auth-'));
-    const ps = new FileSystemProjectStore(root);
-    await ps.saveProjectMeta({
-      id: 'proj-1',
-      name: 'P',
-      codebases: [],
-      mcpServers: [
-        {
-          id: 'atlassian',
-          name: 'My Atlassian',
-          kind: 'atlassian',
-          url: 'https://t.test/mcp',
-          options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
-        },
-      ],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
-    const chatStore = new FileSystemChatStore(root);
-    const projectStore = new FileSystemProjectStore(root);
-    const thread = await chatStore.createChat({ projectId: 'proj-1', title: 't' });
-    return { root, chatStore, projectStore, thread };
-  }
-
-  function makeAuthSdk(authUrl: string): SdkLike {
-    return {
-      query: () =>
-        (async function* () {
-          yield {
-            type: 'assistant',
-            message: {
-              content: [
-                { type: 'text', text: '認証フローを開始します' },
-                {
-                  type: 'tool_use',
-                  id: 'auth-tu-1',
-                  name: 'mcp__atlassian__authenticate',
-                  input: {},
-                },
-              ],
-            },
-          } as unknown as SdkMessageLike;
-          yield {
-            type: 'user',
-            message: {
-              content: [
-                {
-                  type: 'tool_result',
-                  tool_use_id: 'auth-tu-1',
-                  content: [{ type: 'text', text: `Open: ${authUrl}` }],
-                },
-              ],
-            },
-          } as unknown as SdkMessageLike;
-          yield { type: 'result', subtype: 'success', result: 'ok' } as unknown as SdkMessageLike;
-        })(),
-    };
-  }
-
-  it('authenticate: tool_use/tool_result を消化し、auth_request{pending} + chat_auth_request event を出す', async () => {
-    const { root, chatStore, projectStore, thread } = await setup();
-    try {
-      const authUrl =
-        'https://mcp.atlassian.com/v1/authorize?response_type=code&client_id=abc&state=xyz';
-      const runner = new ChatRunner({
-        sdk: makeAuthSdk(authUrl),
-        chatStore,
-        projectStore,
-        projectDir: root,
-        threadId: thread.id,
-      });
-      const events: ChatEvent[] = [];
-      for await (const e of runner.runUserTurn('jira を読んで')) events.push(e);
-
-      expect(events.find((e) => e.type === 'chat_tool_external_use')).toBeUndefined();
-      expect(events.find((e) => e.type === 'chat_tool_external_result')).toBeUndefined();
-
-      const authEvt = events.find((e) => e.type === 'chat_auth_request');
-      expect(authEvt).toBeDefined();
-      if (authEvt && authEvt.type === 'chat_auth_request') {
-        expect(authEvt.mcpServerId).toBe('atlassian');
-        expect(authEvt.mcpServerLabel).toBe('My Atlassian');
-        expect(authEvt.authUrl).toBe(authUrl);
-        expect(authEvt.status).toBe('pending');
-      }
-
-      const reloaded = await chatStore.getChat(thread.id);
-      const assistant = reloaded?.messages.find((m) => m.role === 'assistant');
-      const blocks = assistant?.blocks ?? [];
-      const hasRawToolUse = blocks.some(
-        (b) => b.type === 'tool_use' && b.name.includes('authenticate'),
-      );
-      expect(hasRawToolUse).toBe(false);
-      const authBlock = blocks.find((b) => b.type === 'auth_request');
-      expect(authBlock).toBeDefined();
-      if (authBlock && authBlock.type === 'auth_request') {
-        expect(authBlock.status).toBe('pending');
-        expect(authBlock.authUrl).toBe(authUrl);
-      }
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  it('complete_authentication 成功: 同 thread の最新 pending が completed に更新される', async () => {
-    const { root, chatStore, projectStore, thread } = await setup();
-    try {
-      const authUrl =
-        'https://mcp.atlassian.com/v1/authorize?response_type=code&client_id=abc&state=xyz';
-      const runner1 = new ChatRunner({
-        sdk: makeAuthSdk(authUrl),
-        chatStore,
-        projectStore,
-        projectDir: root,
-        threadId: thread.id,
-      });
-      for await (const _ of runner1.runUserTurn('jira を読んで')) {
-        void _;
-      }
-
-      const sdk2: SdkLike = {
-        query: () =>
-          (async function* () {
-            yield {
-              type: 'assistant',
-              message: {
-                content: [
-                  {
-                    type: 'tool_use',
-                    id: 'auth-tu-2',
-                    name: 'mcp__atlassian__complete_authentication',
-                    input: { url: 'http://localhost:54801/callback?code=xxx&state=xyz' },
-                  },
-                ],
-              },
-            } as unknown as SdkMessageLike;
-            yield {
-              type: 'user',
-              message: {
-                content: [
-                  {
-                    type: 'tool_result',
-                    tool_use_id: 'auth-tu-2',
-                    content: [{ type: 'text', text: 'authenticated' }],
-                  },
-                ],
-              },
-            } as unknown as SdkMessageLike;
-            yield {
-              type: 'result',
-              subtype: 'success',
-              result: 'done',
-            } as unknown as SdkMessageLike;
-          })(),
-      };
-      const runner2 = new ChatRunner({
-        sdk: sdk2,
-        chatStore,
-        projectStore,
-        projectDir: root,
-        threadId: thread.id,
-      });
-      const events: ChatEvent[] = [];
-      for await (const e of runner2.runUserTurn(
-        '[OAuth callback] http://localhost:54801/callback?code=xxx&state=xyz',
-      ))
-        events.push(e);
-
-      const authEvt = events.find((e) => e.type === 'chat_auth_request');
-      expect(authEvt).toBeDefined();
-      if (authEvt && authEvt.type === 'chat_auth_request') {
-        expect(authEvt.status).toBe('completed');
-      }
-
-      const reloaded = await chatStore.getChat(thread.id);
-      const allAuthBlocks = (reloaded?.messages ?? []).flatMap((m) =>
-        m.blocks.filter((b) => b.type === 'auth_request'),
-      );
-      expect(allAuthBlocks).toHaveLength(1);
-      const ab = allAuthBlocks[0];
-      if (ab && ab.type === 'auth_request') {
-        expect(ab.status).toBe('completed');
-        expect(ab.authUrl).toBe(authUrl);
-      }
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  it('complete_authentication 失敗 (ok=false): 最新 pending が failed + failureMessage 付きで更新', async () => {
-    const { root, chatStore, projectStore, thread } = await setup();
-    try {
-      const authUrl =
-        'https://mcp.atlassian.com/v1/authorize?response_type=code&client_id=abc&state=xyz';
-      const runner1 = new ChatRunner({
-        sdk: makeAuthSdk(authUrl),
-        chatStore,
-        projectStore,
-        projectDir: root,
-        threadId: thread.id,
-      });
-      for await (const _ of runner1.runUserTurn('jira を読んで')) {
-        void _;
-      }
-
-      const sdk2: SdkLike = {
-        query: () =>
-          (async function* () {
-            yield {
-              type: 'assistant',
-              message: {
-                content: [
-                  {
-                    type: 'tool_use',
-                    id: 'auth-tu-2',
-                    name: 'mcp__atlassian__complete_authentication',
-                    input: { url: 'http://localhost:54801/callback?code=bad' },
-                  },
-                ],
-              },
-            } as unknown as SdkMessageLike;
-            yield {
-              type: 'user',
-              message: {
-                content: [
-                  {
-                    type: 'tool_result',
-                    tool_use_id: 'auth-tu-2',
-                    content: [{ type: 'text', text: 'invalid_grant: state mismatch' }],
-                    is_error: true,
-                  },
-                ],
-              },
-            } as unknown as SdkMessageLike;
-            yield {
-              type: 'result',
-              subtype: 'success',
-              result: 'done',
-            } as unknown as SdkMessageLike;
-          })(),
-      };
-      const runner2 = new ChatRunner({
-        sdk: sdk2,
-        chatStore,
-        projectStore,
-        projectDir: root,
-        threadId: thread.id,
-      });
-      const events: ChatEvent[] = [];
-      for await (const e of runner2.runUserTurn('callback URL: ...')) events.push(e);
-
-      const authEvt = events.find((e) => e.type === 'chat_auth_request');
-      expect(authEvt).toBeDefined();
-      if (authEvt?.type === 'chat_auth_request' && authEvt.status === 'failed') {
-        expect(authEvt.failureMessage).toContain('invalid_grant');
-      } else {
-        throw new Error('expected failed auth_request event');
-      }
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
   });
 });

@@ -164,11 +164,13 @@ describe('ProjectSettingsDialog', () => {
     expect(ids).toContain('atlassian-2');
   });
 
-  it('auth / secret 関連の入力欄は無い (OAuth 2.1 で MCP/SDK 任せ)', async () => {
+  it('PR-E4: oauth.clientId 入力欄を持ち、PAT / API key 等の secret 入力欄は無い', async () => {
     render(<ProjectSettingsDialog open onClose={() => {}} />);
     // 実 MCP 行に対する検証にするため先に行を 1 つ追加する (空 list だと退行検知が効かない)。
     await userEvent.click(screen.getByRole('button', { name: /MCP サーバーを追加/ }));
-    // auth scheme dropdown / envVar 入力欄 / secret 値入力欄、いずれも無い
+    // OAuth Client ID は表示される (PR-E4 で UI 追加)
+    expect(screen.getByLabelText('mcp-0-clientId')).toBeInTheDocument();
+    // 旧 PAT / シークレット系 入力欄は存在しない
     expect(screen.queryByLabelText('mcp-0-scheme')).toBeNull();
     expect(screen.queryByLabelText('mcp-0-emailEnvVar')).toBeNull();
     expect(screen.queryByLabelText('mcp-0-tokenEnvVar')).toBeNull();
@@ -176,8 +178,8 @@ describe('ProjectSettingsDialog', () => {
     expect(screen.queryByLabelText(/シークレット/i)).toBeNull();
     expect(screen.queryByLabelText(/api_token$/i)).toBeNull();
     expect(screen.queryByLabelText(/password/i)).toBeNull();
-    // OAuth/MCP 任せの説明文言
-    expect(screen.getByText(/MCP プロトコル/)).toBeInTheDocument();
+    // PR-E4 の説明文言: Tally プロセスが OAuth を直接管理する
+    expect(screen.getByText(/OAuth 2\.1 フローは Tally プロセス/)).toBeInTheDocument();
   });
 
   it('id 重複時は保存 disabled', async () => {

@@ -3,17 +3,20 @@
 import type { Codebase, McpServerConfig } from '@tally/core';
 import { useEffect, useMemo, useState } from 'react';
 
+import { AuthRequestCard } from '@/components/mcp/auth-request-card';
 import { TextInput } from '@/components/ui/text-input';
 import { useCanvasStore } from '@/lib/store';
 import { FolderBrowserDialog } from './folder-browser-dialog';
 
-// MCP サーバー新規追加時のデフォルト config (url 空、認証は MCP/SDK 任せ)。
+// MCP サーバー新規追加時のデフォルト config。oauth.clientId は PR-E4 で required 化
+// されたので空文字でも作るが、OAuth 認証は clientId 確定後でないと走れない。
 function makeDefaultMcpServer(seq: number): McpServerConfig {
   return {
     id: `atlassian-${seq}`,
     name: 'Atlassian',
     kind: 'atlassian',
     url: '',
+    oauth: { clientId: '' },
     options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
   };
 }
@@ -30,6 +33,25 @@ function makeUid(): string {
   }
   // crypto.randomUUID 非対応環境向け fallback (jsdom の古い setup 等)。
   return `mcp-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
+}
+
+// AuthRequestCard を描画してよいかの判定。Route Handler は YAML 上の保存済み設定を
+// 読むので、未保存の編集 (id / url / clientId / options など全フィールド) を含む状態で
+// Connect させると、UI とサーバーの設定が乖離する。判定は「永続化済み projectMeta の
+// 同 id の server と、入力中の row が完全一致するか」を JSON.stringify で全フィールド
+// 比較する (codex Major 対応: 個別フィールドだけ比較すると options 編集を素通しする)。
+// clientId が空のときも当然 false。
+function isOAuthConnectable(
+  meta: { mcpServers?: McpServerConfig[] } | null,
+  entry: McpServerConfig,
+): boolean {
+  if (!meta?.mcpServers) return false;
+  if (!entry.oauth.clientId) return false;
+  const saved = meta.mcpServers.find((s) => s.id === entry.id);
+  if (!saved) return false;
+  // 完全一致比較: McpServerConfig のフィールドはプリミティブ + 配列 + 浅い object のみで
+  // 順序も同じはずなので JSON.stringify で十分。将来 ネストが深くなったら deep-equal に置換。
+  return JSON.stringify(saved) === JSON.stringify(entry);
 }
 
 export function ProjectSettingsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -192,8 +214,9 @@ export function ProjectSettingsDialog({ open, onClose }: { open: boolean; onClos
             </button>
           </div>
           <div style={MUTED}>
-            認証 (OAuth 2.1 / API token 等) は MCP プロトコルに任せます。Tally では URL
-            の登録のみ行い、 初回利用時に MCP サーバーから案内される認証フローに従ってください。
+            ADR-0011: OAuth 2.1 フローは Tally プロセスが直接管理します。各 server の 「OAuth Client
+            ID」を入力して保存した後、下の「認証する」ボタンで認証フローを 起動してください
+            (別タブの認可画面 → 自動で完了)。
           </div>
           {mcpServers.length === 0 && <div style={MUTED}>MCP サーバー未設定</div>}
           <ul style={CB_LIST}>
@@ -241,6 +264,36 @@ export function ProjectSettingsDialog({ open, onClose }: { open: boolean; onClos
                     placeholder="https://mcp.atlassian.example/v1/mcp"
                   />
                 </div>
+                <div style={MCP_ROW}>
+                  <span style={INPUT_LABEL}>OAuth Client ID</span>
+                  <TextInput
+                    type="text"
+                    value={s.oauth.clientId}
+                    onChange={(e) =>
+                      updateMcpServer(i, {
+                        ...s,
+                        oauth: { ...s.oauth, clientId: e.target.value },
+                      })
+                    }
+                    disabled={busy}
+                    aria-label={`mcp-${i}-clientId`}
+                    style={{ ...INPUT, flex: 1 }}
+                    placeholder="OAuth client ID (provider 側で発行)"
+                  />
+                </div>
+                {/* Connect ボタン: Atlassian の認証フローを起動する。
+                    オリジナル設定 (= 保存済み + 編集なし) かつ clientId 入力済みのときだけ
+                    描画する。未保存の編集を含む状態で Connect すると、Route Handler が
+                    YAML 上の古い設定で動いてしまうため。 */}
+                {isOAuthConnectable(projectMeta, s) ? (
+                  <div style={MCP_AUTH_ROW}>
+                    <AuthRequestCard mcpServerId={s.id} mcpServerLabel={s.name} />
+                  </div>
+                ) : (
+                  <div style={MCP_AUTH_HINT}>
+                    Connect ボタンは「設定を保存 + Client ID を入力」後に表示されます。
+                  </div>
+                )}
               </li>
             ))}
           </ul>
@@ -357,6 +410,9 @@ const MCP_ROW = {
   gap: 6,
   flexWrap: 'wrap' as const,
 };
+const MCP_AUTH_ROW = { marginTop: 4 };
+const MCP_AUTH_HINT = { fontSize: 11, color: '#8b949e', marginTop: 4 };
+const INPUT_LABEL = { fontSize: 11, color: '#8b949e', minWidth: 100 };
 const CB_PATH = {
   flex: 1,
   fontSize: 11,
