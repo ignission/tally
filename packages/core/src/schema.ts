@@ -240,7 +240,9 @@ const McpServerOptionsSchema = z
 
 // MCP サーバー id は SDK の wildcard `mcp__<id>__*` の id 部分に embed されるため、
 // tool 名 matching が壊れないよう CodebaseSchema.id と同じ charset 制約を採用。
-const McpServerIdRegex = /^[a-z][a-z0-9-]{0,31}$/u;
+// storage 層 (oauth-store.ts) でファイル名として使う際の path traversal 検査にも
+// 流用するため export している。
+export const McpServerIdRegex = /^[a-z][a-z0-9-]{0,31}$/u;
 
 // ADR-0011: Tally 側で OAuth 2.1 フローを管理するための client 設定。
 // PR-E1 では optional で導入し、PR-E4 (旧 auth_request 経路の削除) と同時に required 化する。
@@ -309,7 +311,8 @@ export const McpOAuthTokenSchema = z.object({
   // 認可コード交換で得た access token。MCP の HTTP transport の Authorization ヘッダで使う。
   accessToken: z.string().min(1),
   // refresh token。受信していない provider もあるため optional。
-  refreshToken: z.string().optional(),
+  // provider が誤って空文字を返すとサイレント障害になるので min(1) を付けて検出する。
+  refreshToken: z.string().min(1).optional(),
   // ISO 8601 datetime。expiresAt と比較して期限間近なら refresh する。
   // 文字列のまま z.string() にしておくと "not-a-date" 等が通り、PR-E2 の expiry 判定が
   // 文字列比較で境界バグを起こす (codex P2 指摘)。.datetime() で形式を強制する。

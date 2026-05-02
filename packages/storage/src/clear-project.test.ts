@@ -69,6 +69,29 @@ describe('clearProject', () => {
     }
   });
 
+  it('oauth/ の tmp 残骸 (ext 不問) も clearProject で削除される', async () => {
+    const projectDir = makeProjectDir();
+    try {
+      await initProject({ projectDir, name: 'P', codebases: [] });
+      const oauthDir = path.join(projectDir, 'oauth');
+      await fs.mkdir(oauthDir, { recursive: true });
+      // 正規 token + 中断 write の残骸 (.tmp.<pid>.<uuid>)
+      await fs.writeFile(path.join(oauthDir, 'atlassian.yaml'), 'mcpServerId: atlassian\n');
+      await fs.writeFile(
+        path.join(oauthDir, 'atlassian.yaml.tmp.12345.abcd-efgh'),
+        'partial-token',
+      );
+
+      const result = await clearProject(projectDir);
+      // removedOAuthTokens は YAML の数だけ (tmp は count 対象外、ただし削除はされる)
+      expect(result.removedOAuthTokens).toBe(1);
+      const remaining = await fs.readdir(oauthDir).catch(() => [] as string[]);
+      expect(remaining).toEqual([]);
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
   it('project.yaml が無くてもディレクトリがあれば動く', async () => {
     const projectDir = makeProjectDir();
     await fs.mkdir(path.join(projectDir, 'nodes'), { recursive: true });

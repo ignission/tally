@@ -20,7 +20,7 @@ export async function clearProject(projectDir: string): Promise<ClearProjectResu
   const paths = resolveProjectPaths(projectDir);
   const removedNodes = await clearDir(paths.nodesDir);
   const removedChats = await clearDir(paths.chatsDir);
-  const removedOAuthTokens = await clearDir(paths.oauthDir);
+  const removedOAuthTokens = await clearOAuthDir(paths.oauthDir);
   // edges.yaml を空配列で書き直す (無ければ作成)。
   await fs.mkdir(paths.edgesDir, { recursive: true });
   await fs.writeFile(paths.edgesFile, 'edges: []\n', 'utf8');
@@ -44,4 +44,22 @@ async function clearDir(dir: string): Promise<number> {
     count++;
   }
   return count;
+}
+
+// oauth/ 専用クリーナ。token YAML だけでなく `*.tmp.<pid>.<uuid>` 等の中間ファイル
+// (oauth-store.ts の write 中断で残骸化しうる) も拡張子問わず削除する (CR Major)。
+// 戻り値は token YAML の件数 (= ユーザーが意識する「削除された token 数」)。
+async function clearOAuthDir(dir: string): Promise<number> {
+  let entries: string[];
+  try {
+    entries = await fs.readdir(dir);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return 0;
+    throw err;
+  }
+  const tokenCount = entries.filter((f) => f.endsWith('.yaml') || f.endsWith('.yml')).length;
+  for (const name of entries) {
+    await fs.unlink(path.join(dir, name));
+  }
+  return tokenCount;
 }

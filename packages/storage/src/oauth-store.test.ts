@@ -112,15 +112,36 @@ describe('FileSystemOAuthStore', () => {
     }
   });
 
-  it('write は default tokenType を Bearer として保存する', async () => {
+  it('tokenType を持たない YAML を read すると schema default の Bearer が入る', async () => {
+    const projectDir = makeProjectDir();
+    try {
+      const dir = path.join(projectDir, 'oauth');
+      await fs.mkdir(dir, { recursive: true });
+      // tokenType を欠いた最小 YAML を直接書き込み、schema の default 経路 (回帰守り)。
+      await fs.writeFile(
+        path.join(dir, 'atlassian.yaml'),
+        'mcpServerId: atlassian\naccessToken: a\nacquiredAt: 2026-05-02T10:00:00Z\n',
+      );
+      const store = new FileSystemOAuthStore(projectDir);
+      const got = await store.read('atlassian');
+      expect(got?.tokenType).toBe('Bearer');
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('mcpServerId が McpServerIdRegex 違反 (path traversal 含む) なら read/write/delete が throw', async () => {
     const projectDir = makeProjectDir();
     try {
       const store = new FileSystemOAuthStore(projectDir);
-      // input として tokenType が undefined でも McpOAuthTokenSchema の default で Bearer
-      // が入る。store はそれを書き込む想定なので、明示的に Bearer を assert。
-      await store.write(makeToken({ tokenType: 'Bearer' }));
-      const got = await store.read('atlassian');
-      expect(got?.tokenType).toBe('Bearer');
+      const bad = '../etc/passwd';
+      await expect(store.read(bad)).rejects.toThrow(/invalid mcpServerId/);
+      await expect(store.delete(bad)).rejects.toThrow(/invalid mcpServerId/);
+      await expect(store.write(makeToken({ mcpServerId: bad as never }))).rejects.toThrow(
+        /invalid mcpServerId/,
+      );
+      // 大文字も regex 違反
+      await expect(store.read('Atlassian')).rejects.toThrow(/invalid mcpServerId/);
     } finally {
       rmSync(projectDir, { recursive: true, force: true });
     }

@@ -1,7 +1,8 @@
+import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-import { type McpOAuthToken, McpOAuthTokenSchema } from '@tally/core';
+import { type McpOAuthToken, McpOAuthTokenSchema, McpServerIdRegex } from '@tally/core';
 import { stringify } from 'yaml';
 
 import { resolveProjectPaths } from './project-dir';
@@ -39,6 +40,11 @@ export class FileSystemOAuthStore implements OAuthStore {
   }
 
   private filePath(mcpServerId: string): string {
+    // ストレージ境界での path traversal 防御 (CR Major)。上流で McpServerConfigSchema
+    // が同じ regex で検証している前提だが、それに依存せず自己防衛する。
+    if (!McpServerIdRegex.test(mcpServerId)) {
+      throw new Error(`invalid mcpServerId for oauth store: ${mcpServerId}`);
+    }
     return path.join(this.oauthDir, `${mcpServerId}.yaml`);
   }
 
@@ -64,7 +70,9 @@ export class FileSystemOAuthStore implements OAuthStore {
     // accessToken を読める瞬間がある (codex P1 指摘)。fs.open(mode) で初期パーミッションを
     // owner-only に固定し、rename で perms を保つ。
     // Windows は POSIX permission を持たないが、open mode 引数は ignored で問題なし。
-    const tmpPath = `${filePath}.tmp.${process.pid}`;
+    // tmp suffix は 1 書き込みごとに一意。同 mcpServerId への並行 write が
+    // 同一プロセス内で起きても互いの tmp を上書きしない (CR Major)。
+    const tmpPath = `${filePath}.tmp.${process.pid}.${randomUUID()}`;
     const fd = await fs.open(tmpPath, 'w', 0o600);
     try {
       await fd.writeFile(yaml, 'utf8');

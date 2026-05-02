@@ -30,6 +30,7 @@ export {
   McpOAuthConfigSchema,
   McpOAuthTokenSchema,
   McpServerConfigSchema,
+  McpServerIdRegex,
   NODE_TYPES,
   NodeSchema,
   ProjectMetaPatchSchema,
