@@ -17,6 +17,10 @@ function makeProjectDir(): string {
   return mkdtempSync(path.join(tmpdir(), 'tally-oauth-orch-'));
 }
 
+// codex Major 対応: orchestrator の flow key は projectId + mcpServerId の composite
+// key になった。テストはほぼ単一 project で書くので定数で揃える。
+const TEST_PID = 'p1';
+
 describe('startOAuthFlow / getOAuthFlowStatus', () => {
   beforeEach(async () => {
     await __resetAllFlowsForTest();
@@ -31,6 +35,7 @@ describe('startOAuthFlow / getOAuthFlowStatus', () => {
     try {
       // fetch を呼ぶのは callback 受領後 (token 交換) なので start 単独では呼ばれない。
       const { authorizationUrl } = await startOAuthFlow({
+        projectId: TEST_PID,
         mcpServerId: 'atlassian',
         provider: ATLASSIAN_CLOUD_OAUTH,
         clientId: 'cid',
@@ -40,7 +45,7 @@ describe('startOAuthFlow / getOAuthFlowStatus', () => {
       expect(authorizationUrl).toContain('client_id=cid');
       expect(authorizationUrl).toContain('code_challenge_method=S256');
 
-      const status = getOAuthFlowStatus('atlassian');
+      const status = getOAuthFlowStatus(TEST_PID, 'atlassian');
       expect(status?.status).toBe('pending');
     } finally {
       rmSync(projectDir, { recursive: true, force: true });
@@ -67,6 +72,7 @@ describe('startOAuthFlow / getOAuthFlowStatus', () => {
       vi.stubGlobal('fetch', fetchMock);
 
       const { authorizationUrl } = await startOAuthFlow({
+        projectId: TEST_PID,
         mcpServerId: 'atlassian',
         provider: ATLASSIAN_CLOUD_OAUTH,
         clientId: 'cid',
@@ -108,9 +114,9 @@ describe('startOAuthFlow / getOAuthFlowStatus', () => {
       expect(cbRes.status).toBe(200);
 
       // bg promise の settle を待つ
-      await awaitOAuthFlowSettled('atlassian');
+      await awaitOAuthFlowSettled(TEST_PID, 'atlassian');
 
-      const status = getOAuthFlowStatus('atlassian');
+      const status = getOAuthFlowStatus(TEST_PID, 'atlassian');
       expect(status?.status).toBe('completed');
 
       // token store に書かれていることを確認
@@ -134,6 +140,7 @@ describe('startOAuthFlow / getOAuthFlowStatus', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       const { authorizationUrl } = await startOAuthFlow({
+        projectId: TEST_PID,
         mcpServerId: 'atlassian',
         provider: ATLASSIAN_CLOUD_OAUTH,
         clientId: 'cid',
@@ -144,9 +151,9 @@ describe('startOAuthFlow / getOAuthFlowStatus', () => {
 
       // 不正な state で callback を叩く
       await fetch(`${redirectUri}?code=AAA&state=wrong-state`);
-      await awaitOAuthFlowSettled('atlassian');
+      await awaitOAuthFlowSettled(TEST_PID, 'atlassian');
 
-      const status = getOAuthFlowStatus('atlassian');
+      const status = getOAuthFlowStatus(TEST_PID, 'atlassian');
       expect(status?.status).toBe('failed');
       if (status?.status === 'failed') {
         // ユーザー向けの failureMessage は固定 (raw 例外メッセージは漏らさない)
@@ -170,6 +177,7 @@ describe('startOAuthFlow / getOAuthFlowStatus', () => {
     const projectDir = makeProjectDir();
     try {
       await startOAuthFlow({
+        projectId: TEST_PID,
         mcpServerId: 'atlassian',
         provider: ATLASSIAN_CLOUD_OAUTH,
         clientId: 'cid',
@@ -177,6 +185,7 @@ describe('startOAuthFlow / getOAuthFlowStatus', () => {
       });
       await expect(
         startOAuthFlow({
+          projectId: TEST_PID,
           mcpServerId: 'atlassian',
           provider: ATLASSIAN_CLOUD_OAUTH,
           clientId: 'cid',
@@ -195,12 +204,14 @@ describe('startOAuthFlow / getOAuthFlowStatus', () => {
       // 両方が `existing?.status === 'pending'` チェックを通過してフローが二重に走る。
       const results = await Promise.allSettled([
         startOAuthFlow({
+          projectId: TEST_PID,
           mcpServerId: 'atlassian',
           provider: ATLASSIAN_CLOUD_OAUTH,
           clientId: 'cid',
           projectDir,
         }),
         startOAuthFlow({
+          projectId: TEST_PID,
           mcpServerId: 'atlassian',
           provider: ATLASSIAN_CLOUD_OAUTH,
           clientId: 'cid',
@@ -220,6 +231,7 @@ describe('startOAuthFlow / getOAuthFlowStatus', () => {
     const projectDir = makeProjectDir();
     try {
       await startOAuthFlow({
+        projectId: TEST_PID,
         mcpServerId: 'atlassian',
         provider: ATLASSIAN_CLOUD_OAUTH,
         clientId: 'cid',
@@ -228,10 +240,11 @@ describe('startOAuthFlow / getOAuthFlowStatus', () => {
       // 直接 clearOAuthFlow → bg IIFE が awaitCallback を reject されて catch に行く
       // が、entry は既に消えているので状態遷移は起きない (warn が出る)。
       const { clearOAuthFlow } = await import('./oauth-flow-orchestrator');
-      clearOAuthFlow('atlassian');
+      clearOAuthFlow(TEST_PID, 'atlassian');
       // bg promise が settle するまで待つ helper はもう entry が無いので no-op。
       // ここでは「再 start が即可能」であることを確認する。
       const { authorizationUrl } = await startOAuthFlow({
+        projectId: TEST_PID,
         mcpServerId: 'atlassian',
         provider: ATLASSIAN_CLOUD_OAUTH,
         clientId: 'cid',
@@ -244,7 +257,47 @@ describe('startOAuthFlow / getOAuthFlowStatus', () => {
   });
 
   it('未開始の mcpServerId は getOAuthFlowStatus が null を返す', () => {
-    expect(getOAuthFlowStatus('never-started')).toBeNull();
+    expect(getOAuthFlowStatus(TEST_PID, 'never-started')).toBeNull();
+  });
+
+  it('別 project の同名 mcpServerId は flow が独立 (codex Major 対応)', async () => {
+    // codex 指摘: 旧実装は flow key が mcpServerId のみだったため、project A と
+    // project B が両方 'atlassian' を持つと A の flow を B が観測 / clear できた。
+    // 修正後は composite key (projectId + mcpServerId) なので、片方を start しても
+    // もう片方には漏れない。
+    const dirA = makeProjectDir();
+    const dirB = makeProjectDir();
+    try {
+      await startOAuthFlow({
+        projectId: 'pA',
+        mcpServerId: 'atlassian',
+        provider: ATLASSIAN_CLOUD_OAUTH,
+        clientId: 'cid',
+        projectDir: dirA,
+      });
+      // pA で pending 中、pB はまだ未開始 (= null)
+      expect(getOAuthFlowStatus('pA', 'atlassian')?.status).toBe('pending');
+      expect(getOAuthFlowStatus('pB', 'atlassian')).toBeNull();
+
+      // pB の clear は pA の flow に影響しない
+      const { clearOAuthFlow } = await import('./oauth-flow-orchestrator');
+      clearOAuthFlow('pB', 'atlassian');
+      expect(getOAuthFlowStatus('pA', 'atlassian')?.status).toBe('pending');
+
+      // pB の独立 start も成功する (pA の "already in progress" が漏れない)
+      await startOAuthFlow({
+        projectId: 'pB',
+        mcpServerId: 'atlassian',
+        provider: ATLASSIAN_CLOUD_OAUTH,
+        clientId: 'cid',
+        projectDir: dirB,
+      });
+      expect(getOAuthFlowStatus('pA', 'atlassian')?.status).toBe('pending');
+      expect(getOAuthFlowStatus('pB', 'atlassian')?.status).toBe('pending');
+    } finally {
+      rmSync(dirA, { recursive: true, force: true });
+      rmSync(dirB, { recursive: true, force: true });
+    }
   });
 
   it('store.write 直前に preempt されたら旧 run はトークンを書き込まない (codex Major 対応)', async () => {
@@ -275,14 +328,16 @@ describe('startOAuthFlow / getOAuthFlowStatus', () => {
     try {
       const { clearOAuthFlow } = await import('./oauth-flow-orchestrator');
       const { authorizationUrl } = await startOAuthFlow({
+        projectId: TEST_PID,
         mcpServerId: 'atlassian',
         provider: ATLASSIAN_CLOUD_OAUTH,
         clientId: 'cid',
         projectDir,
       });
       // 旧 run を clear してすぐ新 run を始める (旧 bg はまだ awaitCallback 中)
-      clearOAuthFlow('atlassian');
+      clearOAuthFlow(TEST_PID, 'atlassian');
       await startOAuthFlow({
+        projectId: TEST_PID,
         mcpServerId: 'atlassian',
         provider: ATLASSIAN_CLOUD_OAUTH,
         clientId: 'cid',
@@ -296,7 +351,7 @@ describe('startOAuthFlow / getOAuthFlowStatus', () => {
 
       expect(tokenEndpointHits).toBe(0);
       // 新 run は依然 pending、旧 run のトークンが書かれていないこと
-      const status = getOAuthFlowStatus('atlassian');
+      const status = getOAuthFlowStatus(TEST_PID, 'atlassian');
       expect(status?.status).toBe('pending');
       const store = new FileSystemOAuthStore(projectDir);
       expect(await store.read('atlassian')).toBeNull();
@@ -317,17 +372,19 @@ describe('startOAuthFlow / getOAuthFlowStatus', () => {
       const { clearOAuthFlow } = await import('./oauth-flow-orchestrator');
 
       await startOAuthFlow({
+        projectId: TEST_PID,
         mcpServerId: 'atlassian',
         provider: ATLASSIAN_CLOUD_OAUTH,
         clientId: 'cid',
         projectDir,
       });
       // 旧 run を clear → bg はまだ awaitCallback に居るが close() で reject される
-      clearOAuthFlow('atlassian');
+      clearOAuthFlow(TEST_PID, 'atlassian');
       // 旧 bg の catch ブランチが flows.get する前に新 run を開始したい。
       // clearOAuthFlow は同期で flows.delete + bg の close() を非同期 fire-and-forget
       // するので、この時点で flows は空。新 run を始める。
       await startOAuthFlow({
+        projectId: TEST_PID,
         mcpServerId: 'atlassian',
         provider: ATLASSIAN_CLOUD_OAUTH,
         clientId: 'cid',
@@ -336,7 +393,7 @@ describe('startOAuthFlow / getOAuthFlowStatus', () => {
       // 旧 bg の catch が走り終えるまで microtask を回す。
       await new Promise((r) => setTimeout(r, 20));
       // 新 run は依然として pending (旧 bg に踏まれていない)
-      const status = getOAuthFlowStatus('atlassian');
+      const status = getOAuthFlowStatus(TEST_PID, 'atlassian');
       expect(status?.status).toBe('pending');
       // 旧 bg の preempted ログが出ている (failure / completion 両方ありうるが、
       // close() が awaitCallback を reject するので failure 経由)。

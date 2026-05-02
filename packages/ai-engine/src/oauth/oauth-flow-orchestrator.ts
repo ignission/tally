@@ -64,9 +64,22 @@ type FlowEntry = OAuthFlowStatus & {
 };
 
 // プロセスローカルの flow 状態。Next の Route Handler が共有する。
+// key: makeFlowKey(projectId, mcpServerId) で生成する composite key。
+// projectId のみ / mcpServerId のみだと、複数プロジェクトが同名 mcpServerId を持つ
+// ケース (例: project A と project B が両方 'atlassian' を使う) で flow がクロス汚染される
+// (codex Major 対応)。
 const flows = new Map<string, FlowEntry>();
 
+// project と mcpServerId から flows Map のキーを生成する。両者は core schema の
+// id 制約 (`[a-z][a-z0-9-]{0,31}`) で区切り文字 ':' を含まないため、衝突しない。
+function makeFlowKey(projectId: string, mcpServerId: string): string {
+  return `${projectId}:${mcpServerId}`;
+}
+
 export interface StartOAuthFlowInput {
+  // codex Major 対応: 同名 mcpServerId を持つプロジェクト間の取り違えを防ぐため、
+  // flow key には projectId を含める。Route Handler が path param から渡す。
+  projectId: string;
   mcpServerId: string;
   provider: OAuthProviderConfig;
   clientId: string;
@@ -86,19 +99,20 @@ export interface StartOAuthFlowResult {
 // 戻り値の `authorizationUrl` を UI 側がブラウザで開く。`getOAuthFlowStatus` で
 // 完了を polling する。
 export async function startOAuthFlow(input: StartOAuthFlowInput): Promise<StartOAuthFlowResult> {
+  const flowKey = makeFlowKey(input.projectId, input.mcpServerId);
   // CR HIGH 対応: スロット予約を await より前に同期で確保する。これをしないと
   // `await startLoopbackCallbackServer()` 中に並走 start が来た場合、両方が
   // `existing?.status === 'pending'` を通過してフローが二重に走る。
   // sentinel として一旦 authorizationUrl='' で予約し、本物が決まったら上書きする。
-  const existing = flows.get(input.mcpServerId);
+  const existing = flows.get(flowKey);
   if (existing?.status === 'pending') {
-    throw new Error(`OAuth flow already in progress for "${input.mcpServerId}"`);
+    throw new Error(`OAuth flow already in progress for "${flowKey}"`);
   }
   // CR Major 対応: この呼び出し固有の runId を発行する。bg IIFE は状態遷移する前に
   // 自分が flows に登録された当時の runId を保持しているか確認する。clearOAuthFlow
   // → 別 start で entry が置き換わったケースでは、古い run の bg は何もしない。
   const runId = randomUUID();
-  flows.set(input.mcpServerId, {
+  flows.set(flowKey, {
     status: 'pending',
     authorizationUrl: '',
     promise: Promise.resolve(),
@@ -112,21 +126,21 @@ export async function startOAuthFlow(input: StartOAuthFlowInput): Promise<StartO
     callbackHandle = await startLoopbackCallbackServer();
   } catch (err) {
     // 起動失敗で sentinel が残らないよう片付ける (この run が登録した sentinel 限定)。
-    const cur = flows.get(input.mcpServerId);
+    const cur = flows.get(flowKey);
     if (cur?.runId === runId) {
-      flows.delete(input.mcpServerId);
+      flows.delete(flowKey);
     }
     throw err;
   }
   // ownership 確認: startLoopbackCallbackServer の await 中に clearOAuthFlow か
   // 別 start が割り込んで entry が置き換わっていたら、起動した callback server
   // を片付けて本 run は abort する (新 run を踏みつぶさない)。
-  const afterListen = flows.get(input.mcpServerId);
+  const afterListen = flows.get(flowKey);
   if (afterListen?.runId !== runId) {
     await callbackHandle.close().catch((closeErr) => {
       console.warn(`[oauth-flow] callback server close failed (abort path): ${String(closeErr)}`);
     });
-    throw new Error(`OAuth flow was preempted for "${input.mcpServerId}"`);
+    throw new Error(`OAuth flow was preempted for "${flowKey}"`);
   }
   const scopes = input.scopes ?? input.provider.defaultScopes;
 
@@ -180,17 +194,17 @@ export async function startOAuthFlow(input: StartOAuthFlowInput): Promise<StartO
       // この run が clearOAuthFlow → 別 start に置き換えられた後でも旧 run のトークンが
       // ストレージに書き込まれ、UI 上の新 run の pending と保存済みトークンの不整合が起きる。
       // 不一致なら throw して catch 側に流す (catch 側でも runId guard が掛かるので状態は遷移しない)。
-      const ownerBeforeWrite = flows.get(input.mcpServerId);
+      const ownerBeforeWrite = flows.get(flowKey);
       if (ownerBeforeWrite?.runId !== runId) {
-        throw new Error(`OAuth flow was preempted before token write for "${input.mcpServerId}"`);
+        throw new Error(`OAuth flow was preempted before token write for "${flowKey}"`);
       }
 
       const store = new FileSystemOAuthStore(input.projectDir);
       await store.write(token);
 
-      const cur = flows.get(input.mcpServerId);
+      const cur = flows.get(flowKey);
       if (cur && cur.runId === runId) {
-        flows.set(input.mcpServerId, {
+        flows.set(flowKey, {
           status: 'completed',
           authorizationUrl,
           promise: cur.promise,
@@ -203,7 +217,7 @@ export async function startOAuthFlow(input: StartOAuthFlowInput): Promise<StartO
         //  「現在の run の成果」として正しく書かれている。後で新 run が同 mcpServerId で
         //  完了すれば上書きされる。)
         console.warn(
-          `[oauth-flow] flow entry was preempted between write and completion: ${input.mcpServerId}`,
+          `[oauth-flow] flow entry was preempted between write and completion: ${flowKey}`,
         );
       }
     } catch (err) {
@@ -211,11 +225,11 @@ export async function startOAuthFlow(input: StartOAuthFlowInput): Promise<StartO
       // 内部メッセージが UI 経由でユーザーに返ってしまうので、固定メッセージに正規化する。
       // 詳細は console.warn で server-side ログに残す。
       console.warn(
-        `[oauth-flow] flow failed (mcpServerId=${input.mcpServerId}): ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,
+        `[oauth-flow] flow failed (flowKey=${flowKey}): ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,
       );
-      const cur = flows.get(input.mcpServerId);
+      const cur = flows.get(flowKey);
       if (cur && cur.runId === runId) {
-        flows.set(input.mcpServerId, {
+        flows.set(flowKey, {
           status: 'failed',
           authorizationUrl,
           failureMessage: 'OAuth flow failed (see server logs for details)',
@@ -223,7 +237,7 @@ export async function startOAuthFlow(input: StartOAuthFlowInput): Promise<StartO
           runId,
         });
       } else {
-        console.warn(`[oauth-flow] flow entry was preempted before failure: ${input.mcpServerId}`);
+        console.warn(`[oauth-flow] flow entry was preempted before failure: ${flowKey}`);
       }
     } finally {
       await callbackHandle.close().catch((closeErr) => {
@@ -236,15 +250,15 @@ export async function startOAuthFlow(input: StartOAuthFlowInput): Promise<StartO
   // ここでも ownership 再確認: 上の `afterListen` チェック以降は同期のみだが、
   // bg IIFE の生成中にも microtask は走らないので置き換えは起きない想定。
   // 念のため runId 一致を確認してから本物の entry に上書きする。
-  const beforePublish = flows.get(input.mcpServerId);
+  const beforePublish = flows.get(flowKey);
   if (beforePublish?.runId !== runId) {
     // この run は abort された後。bg promise はもう動いているが、awaitCallback で
     // close() による reject を受けて catch に行き、preempted ログを出して終わる。
     // ここで認可 URL を return しても呼び出し元には混乱を招くだけなので throw する。
     await callbackHandle.close().catch(() => {});
-    throw new Error(`OAuth flow was preempted for "${input.mcpServerId}"`);
+    throw new Error(`OAuth flow was preempted for "${flowKey}"`);
   }
-  flows.set(input.mcpServerId, {
+  flows.set(flowKey, {
     status: 'pending',
     authorizationUrl,
     promise,
@@ -256,8 +270,8 @@ export async function startOAuthFlow(input: StartOAuthFlowInput): Promise<StartO
 }
 
 // 現在の flow 状態を取得。未開始なら null。
-export function getOAuthFlowStatus(mcpServerId: string): OAuthFlowStatus | null {
-  const f = flows.get(mcpServerId);
+export function getOAuthFlowStatus(projectId: string, mcpServerId: string): OAuthFlowStatus | null {
+  const f = flows.get(makeFlowKey(projectId, mcpServerId));
   if (!f) return null;
   // promise を返さないために再構築する (ユーザーには内部 promise を見せない)。
   if (f.status === 'pending') return { status: 'pending', authorizationUrl: f.authorizationUrl };
@@ -273,8 +287,8 @@ export function getOAuthFlowStatus(mcpServerId: string): OAuthFlowStatus | null 
 
 // 進行中の bg promise が完了するのを待つ helper (主に test 用)。Route Handler は
 // status を polling するので呼ばない。
-export async function awaitOAuthFlowSettled(mcpServerId: string): Promise<void> {
-  const f = flows.get(mcpServerId);
+export async function awaitOAuthFlowSettled(projectId: string, mcpServerId: string): Promise<void> {
+  const f = flows.get(makeFlowKey(projectId, mcpServerId));
   if (!f) return;
   await f.promise;
 }
@@ -283,14 +297,15 @@ export async function awaitOAuthFlowSettled(mcpServerId: string): Promise<void> 
 // callbackHandle.close() を呼んで bg IIFE を中断する。close 後に awaitCallback が
 // reject され IIFE は catch ブランチに行くが、その時点で flows entry は無いので
 // console.warn が出るのは想定動作。
-export function clearOAuthFlow(mcpServerId: string): void {
-  const f = flows.get(mcpServerId);
+export function clearOAuthFlow(projectId: string, mcpServerId: string): void {
+  const flowKey = makeFlowKey(projectId, mcpServerId);
+  const f = flows.get(flowKey);
   if (f?.status === 'pending' && f.callbackHandle) {
     f.callbackHandle.close().catch(() => {
       /* swallow: close 失敗は cleanup の妨げにしない */
     });
   }
-  flows.delete(mcpServerId);
+  flows.delete(flowKey);
 }
 
 /**

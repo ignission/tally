@@ -8,6 +8,16 @@ export const PACKAGE_NAME = '@tally/ai-engine';
 export type { ChatRunnerDeps } from './chat-runner';
 export { ChatRunner } from './chat-runner';
 export { loadConfig } from './config';
+export {
+  __resetAllFlowsForTest,
+  awaitOAuthFlowSettled,
+  clearOAuthFlow,
+  getOAuthFlowStatus,
+  type OAuthFlowStatus,
+  type StartOAuthFlowInput,
+  type StartOAuthFlowResult,
+  startOAuthFlow,
+} from './oauth';
 export { startServer } from './server';
 export type { AgentEvent, ChatEvent } from './stream';
 
