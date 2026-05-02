@@ -15,7 +15,8 @@ export type { StoryProgress } from './logic/story';
 export { computeStoryProgress, isStoryComplete } from './logic/story';
 export type { EdgeMeta, NodeMeta } from './meta';
 export { EDGE_META, NODE_META } from './meta';
-export type { Codebase } from './schema';
+export { ATLASSIAN_CLOUD_OAUTH, OAUTH_REGISTRY, type OAuthKind } from './oauth';
+export type { Codebase, McpOAuthConfig, McpOAuthToken, McpServerConfig } from './schema';
 export {
   ChatBlockSchema,
   ChatMessageSchema,
@@ -26,6 +27,10 @@ export {
   EDGE_TYPES,
   EdgeSchema,
   IssueNodeSchema,
+  McpOAuthConfigSchema,
+  McpOAuthTokenSchema,
+  McpServerConfigSchema,
+  McpServerIdRegex,
   NODE_TYPES,
   NodeSchema,
   ProjectMetaPatchSchema,

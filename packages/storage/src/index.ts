@@ -6,6 +6,8 @@ export type { ClearProjectResult } from './clear-project';
 export { clearProject } from './clear-project';
 export type { InitProjectInput, InitProjectResult } from './init-project';
 export { initProject } from './init-project';
+export type { OAuthStore } from './oauth-store';
+export { FileSystemOAuthStore } from './oauth-store';
 export type { ProjectPaths } from './project-dir';
 export {
   chatFileName,

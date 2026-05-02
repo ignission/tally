@@ -8,6 +8,8 @@ export interface ProjectPaths {
   edgesDir: string;
   edgesFile: string;
   chatsDir: string;
+  // ADR-0011: 外部 MCP server の OAuth token を 1 server 1 ファイルで永続化。
+  oauthDir: string;
 }
 
 export function resolveProjectPaths(projectDir: string): ProjectPaths {
@@ -19,6 +21,7 @@ export function resolveProjectPaths(projectDir: string): ProjectPaths {
     edgesDir: path.join(root, 'edges'),
     edgesFile: path.join(root, 'edges', 'edges.yaml'),
     chatsDir: path.join(root, 'chats'),
+    oauthDir: path.join(root, 'oauth'),
   };
 }
 

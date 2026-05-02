@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { FileSystemChatStore } from './chat-store';
 import { clearProject } from './clear-project';
 import { initProject } from './init-project';
+import { FileSystemOAuthStore } from './oauth-store';
 import { FileSystemProjectStore } from './project-store';
 
 function makeProjectDir(): string {
@@ -14,28 +15,39 @@ function makeProjectDir(): string {
 }
 
 describe('clearProject', () => {
-  it('nodes / chats を全削除し edges を空配列に、project.yaml は維持', async () => {
+  it('nodes / chats / oauth tokens を全削除し edges を空配列に、project.yaml は維持', async () => {
     const projectDir = makeProjectDir();
     try {
       await initProject({ projectDir, name: 'P', codebases: [] });
       const ps = new FileSystemProjectStore(projectDir);
       const cs = new FileSystemChatStore(projectDir);
+      const os = new FileSystemOAuthStore(projectDir);
 
       await ps.addNode({ type: 'requirement', x: 0, y: 0, title: 'R1', body: '' });
       await ps.addNode({ type: 'usecase', x: 0, y: 0, title: 'UC1', body: '' });
       await cs.createChat({ projectId: 'p', title: 'T1' });
       await cs.createChat({ projectId: 'p', title: 'T2' });
+      // ADR-0011: oauth token はプロジェクトリセット時に確実に消す。
+      await os.write({
+        mcpServerId: 'atlassian',
+        accessToken: 'a',
+        acquiredAt: '2026-05-02T10:00:00Z',
+        tokenType: 'Bearer',
+      });
 
       expect((await ps.listNodes()).length).toBe(2);
       expect((await cs.listChats()).length).toBe(2);
+      expect((await os.list()).length).toBe(1);
 
       const metaBefore = await ps.getProjectMeta();
       const result = await clearProject(projectDir);
 
       expect(result.removedNodes).toBe(2);
       expect(result.removedChats).toBe(2);
+      expect(result.removedOAuthTokens).toBe(1);
       expect((await ps.listNodes()).length).toBe(0);
       expect((await cs.listChats()).length).toBe(0);
+      expect((await os.list()).length).toBe(0);
       expect((await ps.listEdges()).length).toBe(0);
       expect(await ps.getProjectMeta()).toEqual(metaBefore);
     } finally {
@@ -50,7 +62,31 @@ describe('clearProject', () => {
       const result = await clearProject(projectDir);
       expect(result.removedNodes).toBe(0);
       expect(result.removedChats).toBe(0);
+      expect(result.removedOAuthTokens).toBe(0);
       expect(result.keptEdgesFile).toBe(true);
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('oauth/ の tmp 残骸 (ext 不問) も clearProject で削除される', async () => {
+    const projectDir = makeProjectDir();
+    try {
+      await initProject({ projectDir, name: 'P', codebases: [] });
+      const oauthDir = path.join(projectDir, 'oauth');
+      await fs.mkdir(oauthDir, { recursive: true });
+      // 正規 token + 中断 write の残骸 (.tmp.<pid>.<uuid>)
+      await fs.writeFile(path.join(oauthDir, 'atlassian.yaml'), 'mcpServerId: atlassian\n');
+      await fs.writeFile(
+        path.join(oauthDir, 'atlassian.yaml.tmp.12345.abcd-efgh'),
+        'partial-token',
+      );
+
+      const result = await clearProject(projectDir);
+      // removedOAuthTokens は YAML の数だけ (tmp は count 対象外、ただし削除はされる)
+      expect(result.removedOAuthTokens).toBe(1);
+      const remaining = await fs.readdir(oauthDir).catch(() => [] as string[]);
+      expect(remaining).toEqual([]);
     } finally {
       rmSync(projectDir, { recursive: true, force: true });
     }
