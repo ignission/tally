@@ -113,10 +113,22 @@ export async function startLoopbackCallbackServer(
   const redirectUri = `http://127.0.0.1:${addr.port}${callbackPath}`;
 
   let closed = false;
+  // 1 ハンドル 1 回だけ awaitCallback を許す。多重呼び出しは先行 Promise が
+  // 未解決のまま resolveCallback/rejectCallback を上書きされてリークするため
+  // 明示的に弾く (CR Major)。close 後の呼び出しも server が閉じている以上
+  // callback は届かないので即時失敗にする。
+  let awaitStarted = false;
 
   return {
     redirectUri,
     async awaitCallback(timeoutMs = 5 * 60 * 1000): Promise<LoopbackCallback> {
+      if (closed) {
+        throw new Error('OAuth callback server is already closed');
+      }
+      if (awaitStarted) {
+        throw new Error('awaitCallback can only be called once per handle');
+      }
+      awaitStarted = true;
       return new Promise<LoopbackCallback>((resolve, reject) => {
         resolveCallback = resolve;
         rejectCallback = reject;

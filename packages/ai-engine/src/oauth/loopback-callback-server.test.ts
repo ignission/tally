@@ -92,6 +92,23 @@ describe('startLoopbackCallbackServer', () => {
     await expect(promise).rejects.toThrow(/server closed/);
   });
 
+  it('awaitCallback の多重呼び出しは throw (Promise 上書きでリーク防止)', async () => {
+    const handle = await startLoopbackCallbackServer();
+    try {
+      const first = handle.awaitCallback();
+      first.catch(() => {});
+      await expect(handle.awaitCallback()).rejects.toThrow(/can only be called once/);
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('close 後の awaitCallback は throw (callback は永遠に届かないため即時失敗)', async () => {
+    const handle = await startLoopbackCallbackServer();
+    await handle.close();
+    await expect(handle.awaitCallback()).rejects.toThrow(/already closed/);
+  });
+
   it('preferredPort 指定時はその port で listen (port=0 は OS 採番)', async () => {
     // 0 を指定したときと省略時は同じ挙動 (OS 採番)。
     const a = await startLoopbackCallbackServer({ preferredPort: 0 });
