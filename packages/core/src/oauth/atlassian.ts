@@ -19,6 +19,10 @@ export interface OAuthProviderConfig {
   // requested scopes 未指定時の default。refresh_token に必要な scope (例: offline_access)
   // はここに含める想定。
   defaultScopes: readonly string[];
+  // authorization request に付ける prompt パラメータ (Atlassian / Auth0 で 'consent' を
+  // 指定すると refresh_token を確実に得られる)。provider が prompt を受け付けない場合は
+  // undefined にして送らない。`buildAuthorizationUrl` ではここに値があるときだけ url に乗せる。
+  prompt?: string;
 }
 
 export const ATLASSIAN_CLOUD_OAUTH: OAuthProviderConfig = {
@@ -32,11 +36,14 @@ export const ATLASSIAN_CLOUD_OAUTH: OAuthProviderConfig = {
   // でユーザーが追加指定する。
   // refresh_token を得るには `offline_access` が必須。
   defaultScopes: ['read:jira-work', 'read:jira-user', 'offline_access'],
+  // Atlassian は再ログイン時 (=既存 grant あり) に refresh_token が返らないことがあるため、
+  // 毎回 consent を要求して確実に refresh_token を得る。
+  prompt: 'consent',
 };
 
 // kind ごとの OAuth endpoint registry。kind が増えたらここにエントリを追加する。
-export const OAUTH_REGISTRY: Readonly<Record<string, OAuthProviderConfig>> = {
+export const OAUTH_REGISTRY = {
   atlassian: ATLASSIAN_CLOUD_OAUTH,
-};
+} as const satisfies Readonly<Record<string, OAuthProviderConfig>>;
 
 export type OAuthKind = keyof typeof OAUTH_REGISTRY;
