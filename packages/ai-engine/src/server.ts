@@ -1,6 +1,11 @@
 import type { AgentName } from '@tally/core';
 import { AGENT_NAMES } from '@tally/core';
-import { FileSystemChatStore, FileSystemProjectStore, listProjects } from '@tally/storage';
+import {
+  FileSystemChatStore,
+  FileSystemOAuthStore,
+  FileSystemProjectStore,
+  listProjects,
+} from '@tally/storage';
 import { type WebSocket, WebSocketServer } from 'ws';
 import { z } from 'zod';
 import type { SdkLike } from './agent-runner';
@@ -43,38 +48,9 @@ const ChatApproveToolSchema = z.object({
   approved: z.boolean(),
 });
 
-// 外部 MCP の OAuth コールバック URL を構造化されたメッセージで送る (PR-B CR Major)。
-// 自然文 user_message でモデルに mcpServerId を解釈させると、複数 server があるときに
-// 別 server の complete_authentication を呼ぶリスクがあったため、UI からは mcpServerId
-// を構造化フィールドとして固定して送り、chat-runner 側で id 入りプロンプトを生成する。
-// mcpServerId は McpServerConfigSchema.id と同じ charset 制約 (英小文字 + 数字 + ハイフン)。
-//
-// callbackUrl は UI の isLikelyCallbackUrl と同じ条件で validate する。
-// WS には UI 経由でない外部クライアントからも到達しうるので、サーバ側でも
-// loopback / no-credentials / code+state 必須を確認する (CR Major)。
-const isValidCallbackUrl = (s: string): boolean => {
-  try {
-    const u = new URL(s);
-    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
-    if (u.username || u.password) return false;
-    const host = u.hostname;
-    if (host !== 'localhost' && host !== '127.0.0.1' && host !== '::1' && host !== '[::1]') {
-      return false;
-    }
-    return u.searchParams.has('code') && u.searchParams.has('state');
-  } catch {
-    return false;
-  }
-};
-
-const ChatOAuthCallbackSchema = z.object({
-  type: z.literal('oauth_callback'),
-  mcpServerId: z.string().regex(/^[a-z][a-z0-9-]{0,31}$/u),
-  callbackUrl: z.string().url().refine(isValidCallbackUrl, {
-    message:
-      'callback URL は loopback (localhost / 127.0.0.1 / ::1) で credential なし、code と state クエリ必須',
-  }),
-});
+// ADR-0011 PR-E4: 旧 ChatOAuthCallbackSchema / isValidCallbackUrl は削除した。
+// OAuth フローは Tally の Route Handler が完結させるため WS 経由で callback URL を
+// 受け取る必要が無くなった。
 
 // registry からプロジェクト ID に対応するディレクトリパスを返す。
 // 見つからなければ null。
@@ -146,6 +122,7 @@ function handleAgentConnection(ws: WebSocket, sdk: SdkLike): void {
       return;
     }
     const store = new FileSystemProjectStore(dir);
+    const oauthStore = new FileSystemOAuthStore(dir);
     try {
       // z.unknown() は undefined を許容するため parsed.input は unknown | undefined。
       // StartRequest.input は unknown (必須) なので ?? {} で埋める。agent-runner 内で
@@ -153,6 +130,7 @@ function handleAgentConnection(ws: WebSocket, sdk: SdkLike): void {
       for await (const evt of runAgent({
         sdk,
         store,
+        oauthStore,
         projectDir: dir,
         req: {
           type: parsed.type,
@@ -220,10 +198,12 @@ function handleChatConnection(ws: WebSocket, sdk: SdkLike): void {
         return;
       }
       const projectStore = new FileSystemProjectStore(dir);
+      const oauthStore = new FileSystemOAuthStore(dir);
       runner = new ChatRunner({
         sdk,
         chatStore,
         projectStore,
+        oauthStore,
         projectDir: dir,
         threadId: result.data.threadId,
       });
@@ -275,28 +255,9 @@ function handleChatConnection(ws: WebSocket, sdk: SdkLike): void {
       return;
     }
 
-    if (obj.type === 'oauth_callback') {
-      const result = ChatOAuthCallbackSchema.safeParse(parsed);
-      if (!result.success) {
-        send({
-          type: 'error',
-          code: 'bad_request',
-          message: `invalid oauth_callback: ${result.error.message}`,
-        });
-        return;
-      }
-      try {
-        for await (const evt of runner.runOAuthCallback(
-          result.data.mcpServerId,
-          result.data.callbackUrl,
-        )) {
-          send(evt);
-        }
-      } catch (err) {
-        send({ type: 'error', code: 'agent_failed', message: String(err) });
-      }
-      return;
-    }
+    // ADR-0011 PR-E4: 旧 'oauth_callback' message type は削除した。OAuth フローは
+    // Tally の Route Handler (POST/GET/DELETE /api/projects/<pid>/mcp/<mid>/oauth)
+    // が完結させるため、WS 経由で callback URL を受け取る経路は不要。
 
     send({
       type: 'error',

@@ -132,11 +132,6 @@ interface CanvasState {
   closeChatThread: () => void;
   sendChatMessage: (text: string) => Promise<void>;
   approveChatTool: (toolUseId: string, approved: boolean) => void;
-  // 外部 MCP の OAuth コールバック URL を構造化送信する (PR-B CR Major)。
-  // 自然文の user_message に mcpServerId を埋め込んで AI に解釈させると、複数 server
-  // 同時運用時に別 server の complete_authentication を呼ぶ事故が起きうる。UI が知って
-  // いる server id を構造化フィールドで渡し、サーバ側で確定的に prompt 化する。
-  sendOAuthCallback: (mcpServerId: string, callbackUrl: string) => void;
 
   // issue #11: チャットに「@メンション」のように添付するノード ID 群。
   // 順序保持 + 重複排除のため配列で持つ。スレッド切替・close で自動クリア
@@ -387,94 +382,9 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
       });
       return;
     }
-    // OAuth 2.1 認証要求/状態更新。pending は新規 auth_request ブロックを append、
-    // completed/failed は同 mcpServerId の最新 pending ブロックを in-place で更新する。
-    // これは chat-runner が永続化側で行う処理と整合させるための鏡映ロジック。
-    if (evt.type === 'chat_auth_request') {
-      const messages = get().chatThreadMessages;
-
-      // pending: 該当 messageId に新規 append
-      if (evt.status === 'pending') {
-        set({
-          chatThreadMessages: messages.map((m) => {
-            if (m.id !== evt.messageId) return m;
-            return {
-              ...m,
-              blocks: [
-                ...m.blocks,
-                {
-                  type: 'auth_request',
-                  mcpServerId: evt.mcpServerId,
-                  mcpServerLabel: evt.mcpServerLabel,
-                  authUrl: evt.authUrl,
-                  status: 'pending',
-                },
-              ],
-            };
-          }),
-        });
-        return;
-      }
-
-      // completed/failed: 同 mcpServerId の最新 pending ブロックを更新 (どのメッセージに属していても)。
-      // 再認証で複数 pending が並ぶ可能性があるため、末尾から走査して直近 1 件のみ書き換える
-      // (先頭から走査すると古いカードを更新してしまい、新しい pending カードが残る問題)。
-      let updated = false;
-      const updatedMessages = [...messages];
-      for (let mi = updatedMessages.length - 1; mi >= 0 && !updated; mi -= 1) {
-        const message = updatedMessages[mi];
-        if (!message) continue;
-        const blocks = [...message.blocks];
-        for (let bi = blocks.length - 1; bi >= 0; bi -= 1) {
-          const block = blocks[bi];
-          if (
-            block?.type === 'auth_request' &&
-            block.mcpServerId === evt.mcpServerId &&
-            block.status === 'pending'
-          ) {
-            blocks[bi] = {
-              ...block,
-              status: evt.status,
-              ...(evt.status === 'failed' ? { failureMessage: evt.failureMessage } : {}),
-            };
-            updatedMessages[mi] = { ...message, blocks };
-            updated = true;
-            break;
-          }
-        }
-      }
-
-      if (updated) {
-        set({ chatThreadMessages: updatedMessages });
-        return;
-      }
-
-      // pending 不在: failed なら 該当 messageId に新規 append (URL 抽出失敗等で
-      // 認証 UI 表示前に failed が確定するケースを取り逃さない)。
-      // completed で pending 不在は異常系なので無視。
-      if (evt.status === 'failed') {
-        set({
-          chatThreadMessages: messages.map((m) => {
-            if (m.id !== evt.messageId) return m;
-            return {
-              ...m,
-              blocks: [
-                ...m.blocks,
-                {
-                  type: 'auth_request',
-                  mcpServerId: evt.mcpServerId,
-                  mcpServerLabel: evt.mcpServerLabel,
-                  authUrl: evt.authUrl,
-                  status: 'failed',
-                  ...(evt.failureMessage ? { failureMessage: evt.failureMessage } : {}),
-                },
-              ],
-            };
-          }),
-        });
-      }
-      return;
-    }
+    // ADR-0011 PR-E4: 旧 chat_auth_request event handler は削除した。
+    // OAuth 認証は project settings の AuthRequestCard が Route Handler 経由で完結させる。
+    // chat 側に auth_request block を append する経路は完全に消えた。
     if (evt.type === 'chat_assistant_message_completed') {
       return;
     }
@@ -960,15 +870,6 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
     approveChatTool: (toolUseId, approved) => {
       if (!chatHandle) return;
       chatHandle.approveTool(toolUseId, approved);
-    },
-
-    sendOAuthCallback: (mcpServerId, callbackUrl) => {
-      if (!chatHandle) throw new Error('chat thread is not opened');
-      // user message としては積まない (UI 上は AuthRequestCard の状態遷移で表現する)。
-      // streaming フラグだけ立てて、サーバから流れてくる chat_auth_request / 完了通知を
-      // 通常の chat イベント経路で受ける。
-      set({ chatThreadStreaming: true });
-      chatHandle.sendOAuthCallback(mcpServerId, callbackUrl);
     },
 
     deleteChatThread: async (threadId) => {

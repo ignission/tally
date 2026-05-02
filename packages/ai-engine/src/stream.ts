@@ -57,28 +57,9 @@ export type ChatEvent =
       ok: boolean;
       output: string;
     }
-  // 外部 MCP の OAuth 2.1 認証要求。SDK の authenticate tool_use を検出して
-  // tool_use/tool_result の代わりに UI に流す。pending → completed/failed の遷移は
-  // 同 thread 内の complete_authentication tool_use 検出時に追って emit する。
-  // status='failed' のときのみ failureMessage を持つ discriminated union 化により、
-  // schema.ts (AuthRequestBlockSchema) の superRefine と型レベルで整合させる。
-  | {
-      type: 'chat_auth_request';
-      messageId: string;
-      mcpServerId: string;
-      mcpServerLabel: string;
-      authUrl: string;
-      status: 'pending' | 'completed';
-    }
-  | {
-      type: 'chat_auth_request';
-      messageId: string;
-      mcpServerId: string;
-      mcpServerLabel: string;
-      authUrl: string;
-      status: 'failed';
-      failureMessage: string;
-    }
+  // ADR-0011 PR-E4: 旧 chat_auth_request event は削除した。OAuth 認証は Tally の
+  // OAuthFlowOrchestrator + Route Handler が完結させ、UI は Route Handler を polling
+  // するため WS 経由の event 通知は不要になった。
   | { type: 'error'; code: string; message: string };
 
 // SDK の厳密な型に依存せず、実行時に触る最小限のプロパティだけで型付けする。

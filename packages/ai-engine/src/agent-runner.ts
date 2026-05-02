@@ -1,5 +1,5 @@
 import type { AgentName } from '@tally/core';
-import type { ProjectStore } from '@tally/storage';
+import type { OAuthStore, ProjectStore } from '@tally/storage';
 
 import { AGENT_REGISTRY } from './agents/registry';
 import { buildMcpServers } from './mcp/build-mcp-servers';
@@ -67,6 +67,9 @@ export interface SdkLike {
 export interface RunAgentDeps {
   sdk: SdkLike;
   store: ProjectStore;
+  // ADR-0011 PR-E4: 外部 MCP の Authorization header 注入用に、buildMcpServers が
+  // FileSystemOAuthStore.read を叩く。agent-runner は per-request に store を渡される。
+  oauthStore: OAuthStore;
   projectDir: string;
   req: StartRequest;
 }
@@ -77,7 +80,7 @@ export interface RunAgentDeps {
 // SDK 呼び出し中に MCP ツールハンドラが emit した side events (node_created など) は
 // 次の SDK メッセージを受け取るタイミングで合流して flush する。
 export async function* runAgent(deps: RunAgentDeps): AsyncGenerator<AgentEvent> {
-  const { sdk, store, projectDir, req } = deps;
+  const { sdk, store, oauthStore, projectDir, req } = deps;
   yield { type: 'start', agent: req.agent, input: req.input };
 
   const def = AGENT_REGISTRY[req.agent];
@@ -128,9 +131,10 @@ export async function* runAgent(deps: RunAgentDeps): AsyncGenerator<AgentEvent> 
     // env 未設定時は throw → catch で error event に流す。
     const projectMeta = await store.getProjectMeta();
     const externalConfigs = projectMeta?.mcpServers ?? [];
-    const { mcpServers, allowedTools: externalAllowed } = buildMcpServers({
+    const { mcpServers, allowedTools: externalAllowed } = await buildMcpServers({
       tallyMcp: mcp,
       configs: externalConfigs,
+      oauthStore,
     });
 
     // built-in ツールは mcp__ プレフィックスを持たないもの (Read / Glob / Grep など)。

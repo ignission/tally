@@ -5,19 +5,10 @@ import { useCanvasStore } from '@/lib/store';
 
 import { AuthRequestCard } from './auth-request-card';
 
-// ADR-0011 PR-E3b: AuthRequestCard は Tally Route Handler 駆動になり、UI は内部
-// cardState でドライブされる。block.status / block.authUrl は使わない (PR-E4 まで残る
-// 過渡期の field なので prop として渡るが見ない)。block.mcpServerId / mcpServerLabel
-// だけが意味を持つ。
+// ADR-0011 PR-E4: AuthRequestCard は project settings から呼ばれるスタンドアロン
+// component。prop は `{ mcpServerId, mcpServerLabel }` のみ。
 
-const pendingBlock = {
-  type: 'auth_request' as const,
-  mcpServerId: 'atlassian',
-  mcpServerLabel: 'My Atlassian',
-  // 旧 SDK 由来 URL。新カードは見ないが prop の shape を満たすため渡す。
-  authUrl: 'https://legacy/sdk-loopback',
-  status: 'pending' as const,
-};
+const cardProps = { mcpServerId: 'atlassian', mcpServerLabel: 'My Atlassian' };
 
 const PROJECT_ID = 'proj-1';
 const EXPECTED_BASE_URL = `/api/projects/${PROJECT_ID}/mcp/atlassian/oauth`;
@@ -34,7 +25,7 @@ describe('AuthRequestCard (PR-E3b 新 API 駆動)', () => {
   });
 
   it('idle: 認証ボタンを表示し、paste 入力欄は出ない', () => {
-    render(<AuthRequestCard block={pendingBlock} />);
+    render(<AuthRequestCard {...cardProps} />);
     expect(screen.getByText(/My Atlassian 認証/)).toBeInTheDocument();
     expect(screen.getByText('未認証')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /My Atlassian で認証/ })).toBeInTheDocument();
@@ -55,7 +46,7 @@ describe('AuthRequestCard (PR-E3b 新 API 駆動)', () => {
     vi.stubGlobal('fetch', fetchMock);
     const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
 
-    render(<AuthRequestCard block={pendingBlock} />);
+    render(<AuthRequestCard {...cardProps} />);
     fireEvent.click(screen.getByRole('button', { name: /My Atlassian で認証/ }));
 
     await waitFor(() =>
@@ -80,7 +71,7 @@ describe('AuthRequestCard (PR-E3b 新 API 駆動)', () => {
           }),
       ),
     );
-    render(<AuthRequestCard block={pendingBlock} />);
+    render(<AuthRequestCard {...cardProps} />);
     fireEvent.click(screen.getByRole('button', { name: /My Atlassian で認証/ }));
     await waitFor(() => expect(screen.getByText('失敗')).toBeInTheDocument());
     expect(screen.getByText(/oauth flow already in progress/)).toBeInTheDocument();
@@ -101,7 +92,7 @@ describe('AuthRequestCard (PR-E3b 新 API 駆動)', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    render(<AuthRequestCard block={pendingBlock} />);
+    render(<AuthRequestCard {...cardProps} />);
     fireEvent.click(screen.getByRole('button', { name: /My Atlassian で認証/ }));
     await waitFor(() => expect(screen.getByText('失敗')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: 'やり直す' }));
@@ -128,7 +119,7 @@ describe('AuthRequestCard (PR-E3b 新 API 駆動)', () => {
         throw new Error(`unexpected: ${init?.method ?? 'GET'} ${url}`);
       }),
     );
-    render(<AuthRequestCard block={pendingBlock} />);
+    render(<AuthRequestCard {...cardProps} />);
     await waitFor(() => expect(screen.getByText('認証済')).toBeInTheDocument());
   });
 
@@ -137,14 +128,14 @@ describe('AuthRequestCard (PR-E3b 新 API 駆動)', () => {
       'fetch',
       vi.fn(async () => new Response(JSON.stringify({ error: 'not started' }), { status: 404 })),
     );
-    render(<AuthRequestCard block={pendingBlock} />);
+    render(<AuthRequestCard {...cardProps} />);
     // 認証ボタンが残っている (idle 状態)
     expect(screen.getByRole('button', { name: /My Atlassian で認証/ })).toBeInTheDocument();
   });
 
   it('projectId 未設定なら認証ボタンが disabled (誤発火を防ぐ)', () => {
     useCanvasStore.setState({ projectId: null } as never);
-    render(<AuthRequestCard block={pendingBlock} />);
+    render(<AuthRequestCard {...cardProps} />);
     const btn = screen.getByRole('button', { name: /My Atlassian で認証/ }) as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
     expect(screen.getByText(/プロジェクトが開かれていません/)).toBeInTheDocument();

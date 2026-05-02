@@ -2,7 +2,6 @@
 
 import type { ChatBlock, ChatMessage as ChatMessageType } from '@tally/core';
 
-import { AuthRequestCard } from './auth-request-card';
 import { ToolApprovalCard } from './tool-approval-card';
 
 interface Props {
@@ -55,9 +54,6 @@ function renderBlock(block: ChatBlock, idx: number) {
         {block.output.length > 120 ? `${block.output.slice(0, 120)}…` : block.output}
       </div>
     );
-  }
-  if (block.type === 'auth_request') {
-    return <AuthRequestCard key={idx} block={block} />;
   }
   return null;
 }

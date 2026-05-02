@@ -34,7 +34,8 @@ afterEach(async () => {
 });
 
 // project meta に Atlassian の mcpServer (oauth 設定付き) を 1 件追加する helper。
-async function addAtlassianServer(opts: { withOAuth: boolean }): Promise<void> {
+// ADR-0011 PR-E4: oauth は schema 上 required になったので、テストは常に clientId 込みで投入する。
+async function addAtlassianServer(): Promise<void> {
   const store = new FileSystemProjectStore(projectDir);
   const meta = await store.getProjectMeta();
   if (!meta) throw new Error('meta missing');
@@ -46,7 +47,7 @@ async function addAtlassianServer(opts: { withOAuth: boolean }): Promise<void> {
         name: 'Atlassian',
         kind: 'atlassian',
         url: 'https://api.atlassian.com/mcp',
-        ...(opts.withOAuth ? { oauth: { clientId: 'cid-xyz' } } : {}),
+        oauth: { clientId: 'cid-xyz' },
         options: { maxChildIssues: 30, maxCommentsPerIssue: 5 },
       },
     ],
@@ -56,7 +57,7 @@ async function addAtlassianServer(opts: { withOAuth: boolean }): Promise<void> {
 
 describe('POST /api/projects/:id/mcp/:mcpServerId/oauth', () => {
   it('start で authorizationUrl を返し、orchestrator が pending になる', async () => {
-    await addAtlassianServer({ withOAuth: true });
+    await addAtlassianServer();
     const res = await POST(new Request('http://localhost', { method: 'POST' }), {
       params: Promise.resolve({ id: projectId, mcpServerId: 'atlassian' }),
     });
@@ -76,25 +77,20 @@ describe('POST /api/projects/:id/mcp/:mcpServerId/oauth', () => {
   });
 
   it('未知 mcpServerId は 404', async () => {
-    await addAtlassianServer({ withOAuth: true });
+    await addAtlassianServer();
     const res = await POST(new Request('http://localhost', { method: 'POST' }), {
       params: Promise.resolve({ id: projectId, mcpServerId: 'no-such' }),
     });
     expect(res.status).toBe(404);
   });
 
-  it('oauth 未設定 mcpServer は 400 (clientId が無いと start できない)', async () => {
-    await addAtlassianServer({ withOAuth: false });
-    const res = await POST(new Request('http://localhost', { method: 'POST' }), {
-      params: Promise.resolve({ id: projectId, mcpServerId: 'atlassian' }),
-    });
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toMatch(/no oauth config/);
-  });
+  // ADR-0011 PR-E4: oauth は schema 上 required になったため、`oauth 未設定` の case は
+  // YAML の手動編集等で起きうる「壊れた状態」だが、route.ts の事前チェックは保ったまま
+  // (server.oauth が undefined になるパス) で残す。type 上は到達不能だがコンパイル制約の
+  // 緩和で fall-through するので、test では再現しない。
 
   it('既に pending の状態で再 start すると 409 Conflict (UI 漏洩しない固定文言)', async () => {
-    await addAtlassianServer({ withOAuth: true });
+    await addAtlassianServer();
     // 1 回目 start
     const r1 = await POST(new Request('http://localhost', { method: 'POST' }), {
       params: Promise.resolve({ id: projectId, mcpServerId: 'atlassian' }),
@@ -120,7 +116,7 @@ describe('GET /api/projects/:id/mcp/:mcpServerId/oauth', () => {
   });
 
   it('start 後は pending 状態を返す', async () => {
-    await addAtlassianServer({ withOAuth: true });
+    await addAtlassianServer();
     await POST(new Request('http://localhost', { method: 'POST' }), {
       params: Promise.resolve({ id: projectId, mcpServerId: 'atlassian' }),
     });
@@ -136,7 +132,7 @@ describe('GET /api/projects/:id/mcp/:mcpServerId/oauth', () => {
 
 describe('DELETE /api/projects/:id/mcp/:mcpServerId/oauth', () => {
   it('進行中フローを clear し、再 start が可能になる', async () => {
-    await addAtlassianServer({ withOAuth: true });
+    await addAtlassianServer();
     await POST(new Request('http://localhost', { method: 'POST' }), {
       params: Promise.resolve({ id: projectId, mcpServerId: 'atlassian' }),
     });
