@@ -18,12 +18,12 @@ function makeProjectDir(): string {
 }
 
 describe('startOAuthFlow / getOAuthFlowStatus', () => {
-  beforeEach(() => {
-    __resetAllFlowsForTest();
+  beforeEach(async () => {
+    await __resetAllFlowsForTest();
   });
-  afterEach(() => {
+  afterEach(async () => {
     vi.unstubAllGlobals();
-    __resetAllFlowsForTest();
+    await __resetAllFlowsForTest();
   });
 
   it('start すると authorizationUrl を返し、状態は pending', async () => {
@@ -129,6 +129,9 @@ describe('startOAuthFlow / getOAuthFlowStatus', () => {
 
   it('state mismatch で failed 状態 (CSRF 検出)', async () => {
     const projectDir = makeProjectDir();
+    // CR Major 対応で failureMessage は固定メッセージに正規化された。詳細は server log
+    // (console.warn) に出るので、warn の内容で「state mismatch を検出した」ことを確認する。
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       const { authorizationUrl } = await startOAuthFlow({
         mcpServerId: 'atlassian',
@@ -146,13 +149,19 @@ describe('startOAuthFlow / getOAuthFlowStatus', () => {
       const status = getOAuthFlowStatus('atlassian');
       expect(status?.status).toBe('failed');
       if (status?.status === 'failed') {
-        expect(status.failureMessage).toMatch(/state mismatch/);
+        // ユーザー向けの failureMessage は固定 (raw 例外メッセージは漏らさない)
+        expect(status.failureMessage).toBe('OAuth flow failed (see server logs for details)');
       }
+
+      // server log には実際の失敗理由 (state mismatch) が出ている
+      const warnCalls = warnSpy.mock.calls.map((c) => c.join(' '));
+      expect(warnCalls.some((m) => /state mismatch/.test(m))).toBe(true);
 
       // token store には何も書かれていない
       const store = new FileSystemOAuthStore(projectDir);
       expect(await store.read('atlassian')).toBeNull();
     } finally {
+      warnSpy.mockRestore();
       rmSync(projectDir, { recursive: true, force: true });
     }
   });
@@ -236,5 +245,106 @@ describe('startOAuthFlow / getOAuthFlowStatus', () => {
 
   it('未開始の mcpServerId は getOAuthFlowStatus が null を返す', () => {
     expect(getOAuthFlowStatus('never-started')).toBeNull();
+  });
+
+  it('store.write 直前に preempt されたら旧 run はトークンを書き込まない (codex Major 対応)', async () => {
+    // codex 指摘: 旧 implementation では store.write より後に runId guard があったため、
+    // clearOAuthFlow → 即 start で旧 run が callback 受領まで進んだ場合、storage には
+    // 旧 run のトークンが書き込まれ UI と整合が取れなかった。本テストはその retrograde
+    // を防ぐ guard を踏み台にする。
+    const projectDir = makeProjectDir();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // token endpoint を mock (実際には呼ばれない想定)
+    let tokenEndpointHits = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL) => {
+        const u = typeof input === 'string' ? input : input.toString();
+        if (u === ATLASSIAN_CLOUD_OAUTH.tokenEndpoint) {
+          tokenEndpointHits++;
+          return new Response(JSON.stringify({ access_token: 'old-tok', token_type: 'Bearer' }), {
+            status: 200,
+          });
+        }
+        // それ以外 (loopback callback) は real fetch に流す
+        return await (globalThis as unknown as { fetch: typeof fetch }).fetch(input);
+      }),
+    );
+
+    try {
+      const { clearOAuthFlow } = await import('./oauth-flow-orchestrator');
+      const { authorizationUrl } = await startOAuthFlow({
+        mcpServerId: 'atlassian',
+        provider: ATLASSIAN_CLOUD_OAUTH,
+        clientId: 'cid',
+        projectDir,
+      });
+      // 旧 run を clear してすぐ新 run を始める (旧 bg はまだ awaitCallback 中)
+      clearOAuthFlow('atlassian');
+      await startOAuthFlow({
+        mcpServerId: 'atlassian',
+        provider: ATLASSIAN_CLOUD_OAUTH,
+        clientId: 'cid',
+        projectDir,
+      });
+
+      // 旧 bg は close() で reject されて catch に入るので token endpoint は呼ばれない。
+      // (= 旧 run は code を取得できないため store.write も発生しない)
+      // 念のため microtask drain
+      await new Promise((r) => setTimeout(r, 30));
+
+      expect(tokenEndpointHits).toBe(0);
+      // 新 run は依然 pending、旧 run のトークンが書かれていないこと
+      const status = getOAuthFlowStatus('atlassian');
+      expect(status?.status).toBe('pending');
+      const store = new FileSystemOAuthStore(projectDir);
+      expect(await store.read('atlassian')).toBeNull();
+      void authorizationUrl;
+    } finally {
+      warnSpy.mockRestore();
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('clearOAuthFlow → 即 start の race で旧 bg が新 pending を踏まない (runId guard)', async () => {
+    // CR Major 対応の検証: 旧 run の bg IIFE は close() で reject され catch に入るが、
+    // 新 run が同じ mcpServerId で pending 状態を持っている。runId guard が無いと旧 bg は
+    // 新 run の entry を 'failed' で踏みつぶす。
+    const projectDir = makeProjectDir();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { clearOAuthFlow } = await import('./oauth-flow-orchestrator');
+
+      await startOAuthFlow({
+        mcpServerId: 'atlassian',
+        provider: ATLASSIAN_CLOUD_OAUTH,
+        clientId: 'cid',
+        projectDir,
+      });
+      // 旧 run を clear → bg はまだ awaitCallback に居るが close() で reject される
+      clearOAuthFlow('atlassian');
+      // 旧 bg の catch ブランチが flows.get する前に新 run を開始したい。
+      // clearOAuthFlow は同期で flows.delete + bg の close() を非同期 fire-and-forget
+      // するので、この時点で flows は空。新 run を始める。
+      await startOAuthFlow({
+        mcpServerId: 'atlassian',
+        provider: ATLASSIAN_CLOUD_OAUTH,
+        clientId: 'cid',
+        projectDir,
+      });
+      // 旧 bg の catch が走り終えるまで microtask を回す。
+      await new Promise((r) => setTimeout(r, 20));
+      // 新 run は依然として pending (旧 bg に踏まれていない)
+      const status = getOAuthFlowStatus('atlassian');
+      expect(status?.status).toBe('pending');
+      // 旧 bg の preempted ログが出ている (failure / completion 両方ありうるが、
+      // close() が awaitCallback を reject するので failure 経由)。
+      const warnCalls = warnSpy.mock.calls.map((c) => c.join(' '));
+      expect(warnCalls.some((m) => /preempted/.test(m))).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
+      rmSync(projectDir, { recursive: true, force: true });
+    }
   });
 });
