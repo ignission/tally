@@ -5,7 +5,7 @@
   "description": "既存システムの機能追加を、視覚的に要件定義するためのAIネイティブな思考環境",
   "author": "西立野 (Ignission)",
   "license": "MIT",
-  "packageManager": "pnpm@10.33.1",
+  "packageManager": "pnpm@10.33.2",
   "scripts": {
     "dev": "pnpm -r --parallel dev",
     "build": "pnpm -r build",
