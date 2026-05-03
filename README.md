@@ -81,6 +81,18 @@ pnpm dev
 
 または `examples/sample-project` をプロジェクトディレクトリとして読み込むとデモが確認できる。
 
+### 外部 MCP (Atlassian) の OAuth セットアップ
+
+ADR-0011 で Tally は OAuth 2.1 フローをプロセス内で完結させる設計に統一した。Atlassian MCP を使う場合は以下の手順:
+
+1. **OAuth client を Atlassian で発行**: developer.atlassian.com → OAuth 2.0 (3LO) アプリを新規作成。redirect URI は loopback (`http://127.0.0.1:<port>/callback`) を登録する。Atlassian の developer console は redirect URI を完全一致で検証するため、Tally を一度起動して認証ボタンを押すと表示される **実際のポート番号** をコピーして登録する必要がある (例: `http://127.0.0.1:54801/callback`)。今後 Atlassian が「loopback を port 任意で許可」する仕様改定 (RFC 8252) に追従するまでの暫定運用。詳細は [Atlassian OAuth 2.1 docs](https://developer.atlassian.com/cloud/jira/platform/oauth-2-3lo-apps/) を参照
+2. **Tally の Project Settings を開く** (歯車アイコン) → 「MCP サーバーを追加」
+3. **id / name / url / OAuth Client ID** を入力して **保存** (id は `atlassian` を推奨。`mcp__<id>__*` の wildcard が AI tool 名に展開されるため)
+4. 保存後に同じ行に表示される **「🔓 認証 (新規タブ)」ボタン** をクリック → 別タブで Atlassian の認可画面が開く → 承認すると自動でカードが「認証済」に切り替わる
+5. Chat で `@JIRA EPIC-1` のように外部 MCP ツールを呼べるようになる
+
+トークン期限は `buildMcpServers` が透過的に refresh する (5 分以内に切れる場合 `refresh_token` を使って自動更新)。refresh が失敗した場合 (token revoked 等) は再度 Settings から認証する必要がある。token は `<projectDir>/oauth/<mcpServerId>.yaml` に file mode 600 で保存される (ADR-0011)。
+
 ## ドキュメント
 
 実装に着手する前に、最低でも以下を読んでください。
