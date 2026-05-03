@@ -21,14 +21,14 @@
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.117",
+    "@anthropic-ai/claude-agent-sdk": "^0.2.126",
     "@tally/core": "workspace:*",
     "@tally/storage": "workspace:*",
-    "ws": "^8.18.0",
-    "zod": "^4.3.6"
+    "ws": "^8.20.0",
+    "zod": "^4.4.2"
   },
   "devDependencies": {
-    "@types/ws": "^8.5.12",
+    "@types/ws": "^8.18.1",
     "tsx": "^4.21.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.5"
